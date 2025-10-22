@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, MAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #define DEFINE_OGRSQLiteSQLFunctionsSetCaseSensitiveLike
@@ -109,13 +93,18 @@ CPL_C_END
 
 void OGR2SQLITE_Register()
 {
-#if !defined(SQLITE_HAS_NON_DEPRECATED_AUTO_EXTENSION) && defined(__GNUC__)
+#if defined(__GNUC__)
 #pragma GCC diagnostic push
+#if !defined(SQLITE_HAS_NON_DEPRECATED_AUTO_EXTENSION)
 #pragma GCC diagnostic ignored "-Wdeprecated"
+#endif
+#ifdef HAVE_WFLAG_CAST_FUNCTION_TYPE
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 #endif
     sqlite3_auto_extension(
         reinterpret_cast<void (*)(void)>(OGR2SQLITE_static_register));
-#if !defined(SQLITE_HAS_NON_DEPRECATED_AUTO_EXTENSION) && defined(__GNUC__)
+#if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
 }
@@ -663,26 +652,32 @@ static int OGR2SQLITE_ConnectCreate(sqlite3 *hDB, void *pAux, int argc,
 
     bool bAddComma = false;
 
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+
     const char *pszFIDColumn = poLayer->GetFIDColumn();
+    std::set<std::string> oSetNamesUC;
     if (pszFIDColumn[0])
     {
         osSQL += "\"";
         osSQL += SQLEscapeName(pszFIDColumn);
-        osSQL += "\" INTEGER HIDDEN PRIMARY KEY NOT NULL";
+        oSetNamesUC.insert(CPLString(pszFIDColumn).toupper());
+        if (poFDefn->GetFieldIndex(pszFIDColumn) >= 0)
+            osSQL += "\" INTEGER PRIMARY KEY NOT NULL";
+        else
+            osSQL += "\" INTEGER HIDDEN PRIMARY KEY NOT NULL";
         bAddComma = true;
         vtab->bHasFIDColumn = true;
     }
 
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
     bool bHasOGR_STYLEField = false;
-    std::set<std::string> oSetNamesUC;
     for (int i = 0; i < poFDefn->GetFieldCount(); i++)
     {
+        const OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn(i);
+
         if (bAddComma)
             osSQL += ",";
         bAddComma = true;
 
-        OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn(i);
         if (EQUAL(poFieldDefn->GetNameRef(), "OGR_STYLE"))
             bHasOGR_STYLEField = true;
 
@@ -725,6 +720,9 @@ static int OGR2SQLITE_ConnectCreate(sqlite3 *hDB, void *pAux, int argc,
             }
         }
         osSQL += osType;
+
+        if (EQUAL(poFieldDefn->GetNameRef(), pszFIDColumn))
+            osSQL += " HIDDEN";
     }
 
     if (bAddComma)
@@ -745,7 +743,7 @@ static int OGR2SQLITE_ConnectCreate(sqlite3 *hDB, void *pAux, int argc,
     {
         osSQL += ",";
 
-        OGRGeomFieldDefn *poFieldDefn = poFDefn->GetGeomFieldDefn(i);
+        const OGRGeomFieldDefn *poFieldDefn = poFDefn->GetGeomFieldDefn(i);
 
         osSQL += "\"";
         if (i == 0)

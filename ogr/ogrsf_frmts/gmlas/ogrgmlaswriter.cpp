@@ -9,28 +9,12 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_gmlas.h"
 #include "ogr_p.h"
-#include "ogrgeojsonreader.h"
+#include "ogrlibjsonutils.h"
 #include "cpl_time.h"
 
 #include <algorithm>
@@ -250,12 +234,10 @@ bool GMLASWriter::Write(GDALProgressFunc pfnProgress, void *pProgressData)
     // Load configuration file
     CPLString osConfigFile =
         m_aosOptions.FetchNameValueDef(szCONFIG_FILE_OPTION, "");
+    bool bUnlinkAfterUse = false;
     if (osConfigFile.empty())
     {
-        const char *pszConfigFile =
-            CPLFindFile("gdal", szDEFAULT_CONF_FILENAME);
-        if (pszConfigFile)
-            osConfigFile = pszConfigFile;
+        osConfigFile = GMLASConfiguration::GetDefaultConfFile(bUnlinkAfterUse);
     }
     if (osConfigFile.empty())
     {
@@ -265,7 +247,10 @@ bool GMLASWriter::Write(GDALProgressFunc pfnProgress, void *pProgressData)
     }
     else
     {
-        if (!m_oConf.Load(osConfigFile))
+        const bool bOK = m_oConf.Load(osConfigFile);
+        if (bUnlinkAfterUse)
+            VSIUnlink(osConfigFile.c_str());
+        if (!bOK)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Loading of configuration failed");
@@ -510,7 +495,7 @@ bool GMLASWriter::Write(GDALProgressFunc pfnProgress, void *pProgressData)
 
     // Write .xsd
     if (bWFS2FeatureCollection)
-        VSIUnlink(CPLResetExtension(m_osFilename, "xsd"));
+        VSIUnlink(CPLResetExtensionSafe(m_osFilename, "xsd").c_str());
     else if (bGenerateXSD && !WriteXSD(osOutXSDFilename, aoXSDs))
         return false;
 
@@ -594,7 +579,7 @@ bool GMLASWriter::WriteXSD(const CPLString &osXSDFilenameIn,
     const CPLString osXSDFilename(
         !osXSDFilenameIn.empty()
             ? osXSDFilenameIn
-            : CPLString(CPLResetExtension(m_osFilename, "xsd")));
+            : CPLString(CPLResetExtensionSafe(m_osFilename, "xsd")));
     VSILFILE *fpXSD = VSIFOpenL(osXSDFilename, "wb");
     if (fpXSD == nullptr)
     {
@@ -681,7 +666,7 @@ bool GMLASWriter::WriteXMLHeader(
     }
 
     // Delete potentially existing .gfs file
-    VSIUnlink(CPLResetExtension(m_osFilename, "gfs"));
+    VSIUnlink(CPLResetExtensionSafe(m_osFilename, "gfs").c_str());
 
     std::map<CPLString, CPLString> aoWrittenPrefixes;
     aoWrittenPrefixes[szXSI_PREFIX] = szXSI_URI;
@@ -738,8 +723,8 @@ bool GMLASWriter::WriteXMLHeader(
         const CPLString osXSDFilename(
             !osXSDFilenameIn.empty()
                 ? osXSDFilenameIn
-                : CPLString(
-                      CPLGetFilename(CPLResetExtension(m_osFilename, "xsd"))));
+                : CPLString(CPLGetFilename(
+                      CPLResetExtensionSafe(m_osFilename, "xsd").c_str())));
         osSchemaURI += m_osTargetNameSpace;
         osSchemaURI += " ";
         osSchemaURI += osXSDFilename;
@@ -1784,7 +1769,7 @@ bool GMLASWriter::WriteFieldRegular(
     {
         // Particular case for <a foo="bar" xsi:nil="true"/>
         VSIFPrintfL(m_fpXML.get(), " xsi:nil=\"true\">");
-        aoCurComponents = aoFieldComponents;
+        aoCurComponents = std::move(aoFieldComponents);
         bCurIsRegularField = true;
         return true;
     }
@@ -2420,7 +2405,10 @@ bool GMLASWriter::WriteFieldNoLink(
                 </xs:complexType>
             </xs:element>
             */
-            aoNewInitialContext = std::move(aoLayerComponents);
+            aoNewInitialContext = aoLayerComponents;
+            // so that Coverity doesn't ask to move it, which it won't like
+            // as this is an input argument
+            CPL_IGNORE_RET_VAL(aoLayerComponents);
         }
 
         WriteClosingAndStartingTags(aoCurComponents, aoNewInitialContext,
@@ -2819,10 +2807,11 @@ void GMLASWriter::PrintLine(VSILFILE *fp, const char *fmt, ...)
 class GMLASFakeDataset final : public GDALDataset
 {
   public:
-    GMLASFakeDataset()
-    {
-    }
+    GMLASFakeDataset() = default;
+    ~GMLASFakeDataset() override;
 };
+
+GMLASFakeDataset::~GMLASFakeDataset() = default;
 
 /************************************************************************/
 /*                        OGRGMLASDriverCreateCopy()                    */
@@ -2834,7 +2823,7 @@ GDALDataset *OGRGMLASDriverCreateCopy(const char *pszFilename,
                                       GDALProgressFunc pfnProgress,
                                       void *pProgressData)
 {
-    if (strcmp(CPLGetExtension(pszFilename), "xsd") == 0)
+    if (strcmp(CPLGetExtensionSafe(pszFilename).c_str(), "xsd") == 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined, ".xsd extension is not valid");
         return nullptr;

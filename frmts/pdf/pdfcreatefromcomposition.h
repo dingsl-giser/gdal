@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  PDF driver
  * Purpose:  GDALDataset driver for PDF dataset.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef PDFCREATEFROMCOMPOSITION_H_INCLUDED
@@ -76,19 +59,19 @@ class GDALPDFComposerWriter final : public GDALPDFBaseWriter
         double m_bboxY1{};
         double m_bboxX2{};
         double m_bboxY2{};
-        double m_adfGT[6]{0, 1, 0, 0, 0, 1};
+        GDALGeoTransform m_gt{};
     };
 
-    std::vector<GDALPDFObjectNum> m_anParentElements;
-    std::vector<GDALPDFObjectNum> m_anFeatureLayerId;
-    std::map<CPLString, GDALPDFObjectNum> m_oMapPageIdToObjectNum;
+    std::vector<GDALPDFObjectNum> m_anParentElements{};
+    std::vector<GDALPDFObjectNum> m_anFeatureLayerId{};
+    std::map<CPLString, GDALPDFObjectNum> m_oMapPageIdToObjectNum{};
 
     struct PageContext
     {
         double m_dfWidthInUserUnit = 0;
         double m_dfHeightInUserUnit = 0;
         CPLString m_osDrawingStream{};
-        std::vector<GDALPDFObjectNum> m_anFeatureUserProperties;
+        std::vector<GDALPDFObjectNum> m_anFeatureUserProperties{};
         int m_nMCID = 0;
         PDFCompressMethod m_eStreamCompressMethod = COMPRESS_DEFLATE;
         std::map<CPLString, GDALPDFObjectNum> m_oXObjects{};
@@ -101,13 +84,15 @@ class GDALPDFComposerWriter final : public GDALPDFBaseWriter
     bool CreateLayerTree(const CPLXMLNode *psNode,
                          const GDALPDFObjectNum &nParentId, TreeOfOCG *parent);
 
-    struct Action
+    struct Action /* non final */
     {
-        virtual ~Action() = default;
+        virtual ~Action();
     };
 
     struct GotoPageAction final : public Action
     {
+        ~GotoPageAction() override;
+
         GDALPDFObjectNum m_nPageDestId{};
         double m_dfX1 = 0;
         double m_dfX2 = 0;
@@ -117,12 +102,16 @@ class GDALPDFComposerWriter final : public GDALPDFBaseWriter
 
     struct SetLayerStateAction final : public Action
     {
+        ~SetLayerStateAction() override;
+
         std::set<GDALPDFObjectNum> m_anONLayers{};
         std::set<GDALPDFObjectNum> m_anOFFLayers{};
     };
 
     struct JavascriptAction final : public Action
     {
+        ~JavascriptAction() override;
+
         CPLString m_osScript{};
     };
 
@@ -160,19 +149,12 @@ class GDALPDFComposerWriter final : public GDALPDFBaseWriter
                                 double dfWidthInUserUnit,
                                 double dfHeightInUserUnit,
                                 GDALPDFObjectNum &nViewportId,
-                                GDALPDFObjectNum &nLGIDictId,
                                 Georeferencing &georeferencing);
 
     GDALPDFObjectNum GenerateISO32000_Georeferencing(
         OGRSpatialReferenceH hSRS, double bboxX1, double bboxY1, double bboxX2,
         double bboxY2, const std::vector<gdal::GCP> &aGCPs,
         const std::vector<xyPair> &aBoundingPolygon);
-
-    GDALPDFObjectNum
-    GenerateOGC_BP_Georeferencing(OGRSpatialReferenceH hSRS, double bboxX1,
-                                  double bboxY1, double bboxX2, double bboxY2,
-                                  const std::vector<gdal::GCP> &aGCPs,
-                                  const std::vector<xyPair> &aBoundingPolygon);
 
     bool ExploreContent(const CPLXMLNode *psNode, PageContext &oPageContext);
     bool WriteRaster(const CPLXMLNode *psNode, PageContext &oPageContext);

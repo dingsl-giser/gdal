@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test OGRFieldDomain
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import pytest
@@ -69,6 +52,22 @@ def test_ogr_fielddomain_range():
     assert domain.GetMergePolicy() == ogr.OFDMP_SUM
 
     domain = ogr.CreateRangeFieldDomain(
+        "name", "desc", ogr.OFTInteger, ogr.OFSTNone, None, False, 2, True
+    )
+    assert domain.GetDomainType() == ogr.OFDT_RANGE
+    assert domain.GetFieldType() == ogr.OFTInteger
+    assert domain.GetMinAsDouble() == float("-inf")
+    assert domain.GetMaxAsDouble() == 2.0
+
+    domain = ogr.CreateRangeFieldDomain(
+        "name", "desc", ogr.OFTInteger, ogr.OFSTNone, 1, True, None, False
+    )
+    assert domain.GetDomainType() == ogr.OFDT_RANGE
+    assert domain.GetFieldType() == ogr.OFTInteger
+    assert domain.GetMinAsDouble() == 1
+    assert domain.GetMaxAsDouble() == float("inf")
+
+    domain = ogr.CreateRangeFieldDomain(
         "name",
         None,
         ogr.OFTInteger64,
@@ -102,7 +101,7 @@ def test_ogr_fielddomain_range():
     assert domain.GetFieldSubType() == ogr.OFSTNone
     assert domain.GetMinAsString() == "2023-07-03T12:13:14"
     assert domain.GetMaxAsString() == "2023-07-03T12:13:15"
-    ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     ds.AddFieldDomain(domain)
     ret = gdal.VectorInfo(ds, format="json")
     assert ret["domains"] == {
@@ -132,6 +131,28 @@ def test_ogr_fielddomain_range():
 
     with pytest.raises(Exception, match="should be called with a glob field domain"):
         domain.GetGlob()
+
+    domain = ogr.CreateRangeFieldDomainDateTime(
+        "datetime_range",
+        "datetime_range_desc",
+        None,
+        False,
+        "2023-07-03T12:13:15",
+        True,
+    )
+    assert domain.GetMinAsString() is None
+    assert domain.GetMaxAsString() == "2023-07-03T12:13:15"
+
+    domain = ogr.CreateRangeFieldDomainDateTime(
+        "datetime_range",
+        "datetime_range_desc",
+        "2023-07-03T12:13:14",
+        True,
+        None,
+        False,
+    )
+    assert domain.GetMinAsString() == "2023-07-03T12:13:14"
+    assert domain.GetMaxAsString() is None
 
 
 def test_ogr_fielddomain_coded():
@@ -182,7 +203,7 @@ def test_ogr_fielddomain_glob():
 
 def test_ogr_fielddomain_mem_driver():
 
-    ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
 
     assert ds.GetFieldDomainNames() is None
 
@@ -203,9 +224,10 @@ def test_ogr_fielddomain_mem_driver():
         ds.AddFieldDomain(None)
 
     # Duplicate domain
-    assert not ds.AddFieldDomain(
-        ogr.CreateGlobFieldDomain("name", "desc", ogr.OFTString, ogr.OFSTNone, "*")
-    )
+    with pytest.raises(Exception, match="A domain of identical name already exists"):
+        ds.AddFieldDomain(
+            ogr.CreateGlobFieldDomain("name", "desc", ogr.OFTString, ogr.OFSTNone, "*")
+        )
 
     assert ds.GetFieldDomainNames() == ["name"]
 
@@ -239,7 +261,7 @@ def test_ogr_fielddomain_get_set_domain_name():
 
 
 def test_delete_domain_assigned_to_field():
-    ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     assert ds.AddFieldDomain(
         ogr.CreateGlobFieldDomain("name", "desc", ogr.OFTString, ogr.OFSTNone, "*")
     )
@@ -300,7 +322,7 @@ def test_delete_domain_assigned_to_field():
 
 
 def test_update_field_domain():
-    ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     assert ds.AddFieldDomain(
         ogr.CreateGlobFieldDomain("name", "desc", ogr.OFTString, ogr.OFSTNone, "*")
     )

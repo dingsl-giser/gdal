@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_feather.h"
@@ -44,10 +28,42 @@ OGRFeatherWriterDataset::OGRFeatherWriterDataset(
 }
 
 /************************************************************************/
+/*                     ~OGRFeatherWriterDataset()                       */
+/************************************************************************/
+
+OGRFeatherWriterDataset::~OGRFeatherWriterDataset()
+{
+    OGRFeatherWriterDataset::Close();
+}
+
+/************************************************************************/
+/*                                Close()                               */
+/************************************************************************/
+
+CPLErr OGRFeatherWriterDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (m_poLayer && !m_poLayer->Close())
+        {
+            eErr = CE_Failure;
+        }
+
+        if (GDALPamDataset::Close() != CE_None)
+        {
+            eErr = CE_Failure;
+        }
+    }
+
+    return eErr;
+}
+
+/************************************************************************/
 /*                           GetLayerCount()                            */
 /************************************************************************/
 
-int OGRFeatherWriterDataset::GetLayerCount()
+int OGRFeatherWriterDataset::GetLayerCount() const
 {
     return m_poLayer ? 1 : 0;
 }
@@ -56,7 +72,7 @@ int OGRFeatherWriterDataset::GetLayerCount()
 /*                             GetLayer()                               */
 /************************************************************************/
 
-OGRLayer *OGRFeatherWriterDataset::GetLayer(int idx)
+const OGRLayer *OGRFeatherWriterDataset::GetLayer(int idx) const
 {
     return idx == 0 ? m_poLayer.get() : nullptr;
 }
@@ -65,7 +81,7 @@ OGRLayer *OGRFeatherWriterDataset::GetLayer(int idx)
 /*                         TestCapability()                             */
 /************************************************************************/
 
-int OGRFeatherWriterDataset::TestCapability(const char *pszCap)
+int OGRFeatherWriterDataset::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
         return m_poLayer == nullptr;

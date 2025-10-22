@@ -10,23 +10,7 @@
  * Copyright (c) 2021, CLS
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -90,10 +74,15 @@ static double UnshiftGeoX(const GDALGeoLocTransformInfo *psTransform,
 {
     if (!psTransform->bGeographicSRSWithMinus180Plus180LongRange)
         return dfX;
-    if (dfX > 180)
-        return dfX - 360;
-    if (dfX < -180)
-        return dfX + 360;
+    if (dfX > 180 || dfX < -180)
+    {
+        dfX = fmod(dfX + 180.0, 360.0);
+        if (dfX < 0)
+            dfX += 180.0;
+        else
+            dfX -= 180.0;
+        return dfX;
+    }
     return dfX;
 }
 
@@ -194,9 +183,10 @@ void GDALGeoLoc<Accessors>::LoadGeolocFinish(
         {
             for (int iX = iXStart; iX < iXEnd; ++iX)
             {
-                const auto dfX = pAccessors->geolocXAccessor.Get(iX, iY);
+                double dfX = pAccessors->geolocXAccessor.Get(iX, iY);
                 if (!psTransform->bHasNoData || dfX != psTransform->dfNoDataX)
                 {
+                    dfX = UnshiftGeoX(psTransform, dfX);
                     UpdateMinMax(psTransform, dfX,
                                  pAccessors->geolocYAccessor.Get(iX, iY));
                 }
@@ -207,10 +197,10 @@ void GDALGeoLoc<Accessors>::LoadGeolocFinish(
 
     // Check if the SRS is geographic and the geoloc longitudes are in
     // [-180,180]
-    psTransform->bGeographicSRSWithMinus180Plus180LongRange = false;
     const char *pszSRS = CSLFetchNameValue(papszGeolocationInfo, "SRS");
-    if (pszSRS && psTransform->dfMinX >= -180.0 &&
-        psTransform->dfMaxX <= 180.0 && !psTransform->bSwapXY)
+    if (!psTransform->bGeographicSRSWithMinus180Plus180LongRange && pszSRS &&
+        psTransform->dfMinX >= -180.0 && psTransform->dfMaxX <= 180.0 &&
+        !psTransform->bSwapXY)
     {
         OGRSpatialReference oSRS;
         psTransform->bGeographicSRSWithMinus180Plus180LongRange =
@@ -527,7 +517,7 @@ bool GDALGeoLoc<Accessors>::PixelLineToXY(
         }
         else
         {
-            dfX = dfGLX_0_0;
+            dfX = UnshiftGeoX(psTransform, dfGLX_0_0);
             dfY = dfGLY_0_0;
         }
         break;
@@ -552,7 +542,7 @@ bool GDALGeoLoc<Accessors>::PixelLineToXY(
         {
             return false;
         }
-        dfX = dfGLX;
+        dfX = UnshiftGeoX(psTransform, dfGLX);
         dfY = dfGLY;
         return true;
     }
@@ -605,6 +595,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
                                      double *padfY, double * /* padfZ */,
                                      int *panSuccess)
 {
+    int bSuccess = TRUE;
     GDALGeoLocTransformInfo *psTransform =
         static_cast<GDALGeoLocTransformInfo *>(pTransformArg);
 
@@ -623,6 +614,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
         {
             if (padfX[i] == HUGE_VAL || padfY[i] == HUGE_VAL)
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 continue;
             }
@@ -639,6 +631,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
             if (!PixelLineToXY(psTransform, dfGeoLocPixel, dfGeoLocLine,
                                padfX[i], padfY[i]))
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 padfX[i] = HUGE_VAL;
                 padfY[i] = HUGE_VAL;
@@ -669,7 +662,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
         const bool bGeolocMaxAccuracy = CPLTestBool(
             CPLGetConfigOption("GDAL_GEOLOC_USE_MAX_ACCURACY", "YES"));
 
-        // Keep those objects in this outer scope, so they are re-used, to
+        // Keep those objects in this outer scope, so they are reused, to
         // save memory allocations.
         OGRPoint oPoint;
         OGRLinearRing oRing;
@@ -681,6 +674,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
         {
             if (padfX[i] == HUGE_VAL || padfY[i] == HUGE_VAL)
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 continue;
             }
@@ -704,6 +698,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
                   dfBMX + 1 < psTransform->nBackMapWidth &&
                   dfBMY + 1 < psTransform->nBackMapHeight))
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 padfX[i] = HUGE_VAL;
                 padfY[i] = HUGE_VAL;
@@ -717,6 +712,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
             const auto fBMY_0_0 = pAccessors->backMapYAccessor.Get(iBMX, iBMY);
             if (fBMX_0_0 == INVALID_BMXY)
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 padfX[i] = HUGE_VAL;
                 padfY[i] = HUGE_VAL;
@@ -738,31 +734,37 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
             if (fBMX_1_0 != INVALID_BMXY && fBMX_0_1 != INVALID_BMXY &&
                 fBMX_1_1 != INVALID_BMXY)
             {
-                padfX[i] =
-                    (1 - (dfBMY - iBMY)) *
-                        (fBMX_0_0 + (dfBMX - iBMX) * (fBMX_1_0 - fBMX_0_0)) +
-                    (dfBMY - iBMY) *
-                        (fBMX_0_1 + (dfBMX - iBMX) * (fBMX_1_1 - fBMX_0_1));
-                padfY[i] =
-                    (1 - (dfBMY - iBMY)) *
-                        (fBMY_0_0 + (dfBMX - iBMX) * (fBMY_1_0 - fBMY_0_0)) +
-                    (dfBMY - iBMY) *
-                        (fBMY_0_1 + (dfBMX - iBMX) * (fBMY_1_1 - fBMY_0_1));
+                padfX[i] = (1 - (dfBMY - iBMY)) *
+                               (double(fBMX_0_0) +
+                                (dfBMX - iBMX) * double(fBMX_1_0 - fBMX_0_0)) +
+                           (dfBMY - iBMY) *
+                               (double(fBMX_0_1) +
+                                (dfBMX - iBMX) * double(fBMX_1_1 - fBMX_0_1));
+                padfY[i] = (1 - (dfBMY - iBMY)) *
+                               (double(fBMY_0_0) +
+                                (dfBMX - iBMX) * double(fBMY_1_0 - fBMY_0_0)) +
+                           (dfBMY - iBMY) *
+                               (double(fBMY_0_1) +
+                                (dfBMX - iBMX) * double(fBMY_1_1 - fBMY_0_1));
             }
             else if (fBMX_1_0 != INVALID_BMXY)
             {
-                padfX[i] = fBMX_0_0 + (dfBMX - iBMX) * (fBMX_1_0 - fBMX_0_0);
-                padfY[i] = fBMY_0_0 + (dfBMX - iBMX) * (fBMY_1_0 - fBMY_0_0);
+                padfX[i] = double(fBMX_0_0) +
+                           (dfBMX - iBMX) * double(fBMX_1_0 - fBMX_0_0);
+                padfY[i] = double(fBMY_0_0) +
+                           (dfBMX - iBMX) * double(fBMY_1_0 - fBMY_0_0);
             }
             else if (fBMX_0_1 != INVALID_BMXY)
             {
-                padfX[i] = fBMX_0_0 + (dfBMY - iBMY) * (fBMX_0_1 - fBMX_0_0);
-                padfY[i] = fBMY_0_0 + (dfBMY - iBMY) * (fBMY_0_1 - fBMY_0_0);
+                padfX[i] = double(fBMX_0_0) +
+                           (dfBMY - iBMY) * double(fBMX_0_1 - fBMX_0_0);
+                padfY[i] = double(fBMY_0_0) +
+                           (dfBMY - iBMY) * double(fBMY_0_1 - fBMY_0_0);
             }
             else
             {
-                padfX[i] = fBMX_0_0;
-                padfY[i] = fBMY_0_0;
+                padfX[i] = double(fBMX_0_0);
+                padfY[i] = double(fBMY_0_0);
             }
 
             const double dfGeoLocPixel =
@@ -930,6 +932,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
             }
             if (!bDone)
             {
+                bSuccess = FALSE;
                 panSuccess[i] = FALSE;
                 padfX[i] = HUGE_VAL;
                 padfY[i] = HUGE_VAL;
@@ -940,7 +943,7 @@ int GDALGeoLoc<Accessors>::Transform(void *pTransformArg, int bDstToSrc,
         }
     }
 
-    return TRUE;
+    return bSuccess;
 }
 
 /*! @endcond */
@@ -1121,10 +1124,12 @@ bool GDALGeoLoc<Accessors>::GenerateBackMap(
             const float fX = fUpdatedBMX / fUpdatedWeight;
             const float fY = fUpdatedBMY / fUpdatedWeight;
             const double dfGeoLocPixel =
-                (fX - psTransform->dfPIXEL_OFFSET) / psTransform->dfPIXEL_STEP -
+                (double(fX) - psTransform->dfPIXEL_OFFSET) /
+                    psTransform->dfPIXEL_STEP -
                 dfGeorefConventionOffset;
             const double dfGeoLocLine =
-                (fY - psTransform->dfLINE_OFFSET) / psTransform->dfLINE_STEP -
+                (double(fY) - psTransform->dfLINE_OFFSET) /
+                    psTransform->dfLINE_STEP -
                 dfGeorefConventionOffset;
             int iXAvg = static_cast<int>(std::max(0.0, dfGeoLocPixel));
             iXAvg = std::min(iXAvg, psTransform->nGeoLocXSize - 1);
@@ -1151,7 +1156,7 @@ bool GDALGeoLoc<Accessors>::GenerateBackMap(
         }
     };
 
-    // Keep those objects in this outer scope, so they are re-used, to
+    // Keep those objects in this outer scope, so they are reused, to
     // save memory allocations.
     OGRPoint oPoint;
     OGRLinearRing oRing;
@@ -1636,7 +1641,7 @@ static void *GDALCreateSimilarGeoLocTransformer(void *hTransformArg,
 /*                  GDALCreateGeolocationMetadata()                     */
 /************************************************************************/
 
-/** Synthetize the content of a GEOLOCATION metadata domain from a
+/** Synthesize the content of a GEOLOCATION metadata domain from a
  *  geolocation dataset.
  *
  *  This is used when doing gdalwarp -to GEOLOC_ARRAY=some.tif
@@ -1740,7 +1745,7 @@ CPLStringList GDALCreateGeolocationMetadata(GDALDatasetH hBaseDS,
     }
 
     std::string osDebugMsg;
-    osDebugMsg = "Synthetized GEOLOCATION metadata for ";
+    osDebugMsg = "Synthesized GEOLOCATION metadata for ";
     osDebugMsg += bIsSource ? "source" : "target";
     osDebugMsg += ":\n";
     for (int i = 0; i < aosMD.size(); ++i)
@@ -1804,6 +1809,11 @@ void *GDALCreateGeoLocTransformerEx(GDALDatasetH hBaseDS,
 
     psTransform->papszGeolocationInfo = CSLDuplicate(papszGeolocationInfo);
 
+    psTransform->bGeographicSRSWithMinus180Plus180LongRange =
+        CPLTestBool(CSLFetchNameValueDef(
+            papszTransformOptions,
+            "GEOLOC_NORMALIZE_LONGITUDE_MINUS_180_PLUS_180", "NO"));
+
     /* -------------------------------------------------------------------- */
     /*      Pull geolocation info from the options/metadata.                */
     /* -------------------------------------------------------------------- */
@@ -1833,9 +1843,11 @@ void *GDALCreateGeoLocTransformerEx(GDALDatasetH hBaseDS,
                 papszGeolocationInfo, "X_DATASET_RELATIVE_TO_SOURCE", "NO")) &&
             (hBaseDS != nullptr || pszSourceDataset))
         {
-            CPLString osFilename = CPLProjectRelativeFilename(
-                CPLGetDirname(pszSourceDataset ? pszSourceDataset
-                                               : GDALGetDescription(hBaseDS)),
+            const CPLString osFilename = CPLProjectRelativeFilenameSafe(
+                CPLGetDirnameSafe(pszSourceDataset
+                                      ? pszSourceDataset
+                                      : GDALGetDescription(hBaseDS))
+                    .c_str(),
                 pszDSName);
             psTransform->hDS_X =
                 GDALOpenShared(osFilename.c_str(), GA_ReadOnly);
@@ -1865,9 +1877,11 @@ void *GDALCreateGeoLocTransformerEx(GDALDatasetH hBaseDS,
                 papszGeolocationInfo, "Y_DATASET_RELATIVE_TO_SOURCE", "NO")) &&
             (hBaseDS != nullptr || pszSourceDataset))
         {
-            CPLString osFilename = CPLProjectRelativeFilename(
-                CPLGetDirname(pszSourceDataset ? pszSourceDataset
-                                               : GDALGetDescription(hBaseDS)),
+            const CPLString osFilename = CPLProjectRelativeFilenameSafe(
+                CPLGetDirnameSafe(pszSourceDataset
+                                      ? pszSourceDataset
+                                      : GDALGetDescription(hBaseDS))
+                    .c_str(),
                 pszDSName);
             psTransform->hDS_Y =
                 GDALOpenShared(osFilename.c_str(), GA_ReadOnly);
@@ -2006,14 +2020,20 @@ void *GDALCreateGeoLocTransformerEx(GDALDatasetH hBaseDS,
         psTransform->bUseArray = !CPLTestBool(pszUseTempDatasets);
     else
     {
-        psTransform->bUseArray = nXSize < 16 * 1000 * 1000 / nYSize;
-        if (psTransform->bUseArray)
+        constexpr int MEGAPIXEL_LIMIT = 24;
+        psTransform->bUseArray =
+            nXSize < MEGAPIXEL_LIMIT * 1000 * 1000 / nYSize;
+        if (!psTransform->bUseArray)
         {
             CPLDebug("GEOLOC",
                      "Using temporary GTiff backing to store backmap, because "
-                     "geoloc arrays exceed 16 megapixels. You can set the "
+                     "geoloc arrays require %d megapixels, exceeding the %d "
+                     "megapixels limit. You can set the "
                      "GDAL_GEOLOC_USE_TEMP_DATASETS configuration option to "
-                     "NO to force RAM storage of backmap");
+                     "NO to force RAM storage of backmap",
+                     static_cast<int>(static_cast<int64_t>(nXSize) * nYSize /
+                                      (1000 * 1000)),
+                     MEGAPIXEL_LIMIT);
         }
     }
 

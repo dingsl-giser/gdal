@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Arc/Info ASCII Grid support.
@@ -12,23 +11,7 @@
 # Copyright (c) 2008-2010, Even Rouault <even dot rouault at spatialys.com>
 # Copyright (c) 2014, Kyle Shannon <kyle at pobox dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -236,11 +219,16 @@ def test_aaigrid_6bis():
 # Verify writing files with non-square pixels.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_aaigrid_7():
 
-    tst = gdaltest.GDALTest("AAIGRID", "aaigrid/nonsquare.vrt", 1, 12481)
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ALL"):
+        tst = gdaltest.GDALTest("AAIGRID", "aaigrid/nonsquare.vrt", 1, 12481)
 
-    tst.testCreateCopy(check_gt=1)
+        tst.testCreateCopy(check_gt=1)
 
 
 ###############################################################################
@@ -535,3 +523,27 @@ def test_aaigrid_nodata_nan():
     ds = gdal.Open("data/aaigrid/nodata_nan.asc")
     assert ds.GetRasterBand(1).DataType == gdal.GDT_Float32
     assert math.isnan(ds.GetRasterBand(1).GetNoDataValue())
+
+
+###############################################################################
+# Test opening a file with very large advertized size, but which is small
+# (cf https://github.com/OSGeo/gdal/issues/12648)
+
+
+def test_aaigrid_open_file_with_large_dimension_but_small(tmp_vsimem):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "test.asc",
+        """ncols        10000001
+nrows        1
+xllcorner    0
+yllcorner    -1
+cellsize     1
+0 0
+""",
+    )
+
+    with pytest.raises(
+        Exception, match="Too large raster dimension 10000001 x 1 compared to file size"
+    ):
+        gdal.Open(tmp_vsimem / "test.asc")

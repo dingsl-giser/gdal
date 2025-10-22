@@ -7,26 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault, <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "hdf5drivercore.h"
+
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
+#include "gdalsubdatasetinfo.h"
 
 #include <algorithm>
 #include <cctype>
@@ -50,7 +38,7 @@ int HDF5DatasetIdentify(GDALOpenInfo *poOpenInfo)
     if (!poOpenInfo->pabyHeader)
         return FALSE;
 
-    const CPLString osExt(CPLGetExtension(poOpenInfo->pszFilename));
+    const CPLString osExt(poOpenInfo->osExtension);
 
     const auto IsRecognizedByNetCDFDriver = [&osExt, poOpenInfo]()
     {
@@ -164,7 +152,7 @@ int HDF5ImageDatasetIdentify(GDALOpenInfo *poOpenInfo)
 /*                    HDF5DriverGetSubdatasetInfo()                     */
 /************************************************************************/
 
-struct HDF5DriverSubdatasetInfo : public GDALSubdatasetInfo
+struct HDF5DriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit HDF5DriverSubdatasetInfo(const std::string &fileName)
@@ -174,64 +162,66 @@ struct HDF5DriverSubdatasetInfo : public GDALSubdatasetInfo
 
     // GDALSubdatasetInfo interface
   private:
-    void parseFileName() override
+    void parseFileName() override;
+};
+
+void HDF5DriverSubdatasetInfo::parseFileName()
+{
+
+    if (!STARTS_WITH_CI(m_fileName.c_str(), "HDF5:"))
+    {
+        return;
+    }
+
+    CPLStringList aosParts{CSLTokenizeString2(m_fileName.c_str(), ":", 0)};
+    const int iPartsCount{CSLCount(aosParts)};
+
+    if (iPartsCount >= 3)
     {
 
-        if (!STARTS_WITH_CI(m_fileName.c_str(), "HDF5:"))
+        m_driverPrefixComponent = aosParts[0];
+
+        std::string part1{aosParts[1]};
+        if (!part1.empty() && part1[0] == '"')
         {
-            return;
+            part1 = part1.substr(1);
         }
 
-        CPLStringList aosParts{CSLTokenizeString2(m_fileName.c_str(), ":", 0)};
-        const int iPartsCount{CSLCount(aosParts)};
+        int subdatasetIndex{2};
+        const bool hasDriveLetter{
+            part1.length() == 1 &&
+            std::isalpha(static_cast<unsigned char>(part1.at(0))) &&
+            (strlen(aosParts[2]) > 1 &&
+             (aosParts[2][0] == '\\' ||
+              (aosParts[2][0] == '/' && aosParts[2][1] != '/')))};
 
-        if (iPartsCount >= 3)
+        const bool hasProtocol{part1 == "/vsicurl/http" ||
+                               part1 == "/vsicurl/https" ||
+                               part1 == "/vsicurl_streaming/http" ||
+                               part1 == "/vsicurl_streaming/https"};
+
+        m_pathComponent = aosParts[1];
+
+        if (hasDriveLetter || hasProtocol)
         {
+            m_pathComponent.append(":");
+            m_pathComponent.append(aosParts[2]);
+            subdatasetIndex++;
+        }
 
-            m_driverPrefixComponent = aosParts[0];
+        if (iPartsCount > subdatasetIndex)
+        {
+            m_subdatasetComponent = aosParts[subdatasetIndex];
 
-            std::string part1{aosParts[1]};
-            if (!part1.empty() && part1[0] == '"')
+            // Append any remaining part
+            for (int i = subdatasetIndex + 1; i < iPartsCount; ++i)
             {
-                part1 = part1.substr(1);
-            }
-
-            int subdatasetIndex{2};
-            const bool hasDriveLetter{
-                part1.length() == 1 &&
-                std::isalpha(static_cast<unsigned char>(part1.at(0))) &&
-                (strlen(aosParts[2]) > 1 &&
-                 (aosParts[2][0] == '\\' ||
-                  (aosParts[2][0] == '/' && aosParts[2][1] != '/')))};
-
-            const bool hasProtocol{part1 == "/vsicurl/http" ||
-                                   part1 == "/vsicurl/https" ||
-                                   part1 == "/vsicurl_streaming/http" ||
-                                   part1 == "/vsicurl_streaming/https"};
-
-            m_pathComponent = aosParts[1];
-
-            if (hasDriveLetter || hasProtocol)
-            {
-                m_pathComponent.append(":");
-                m_pathComponent.append(aosParts[2]);
-                subdatasetIndex++;
-            }
-
-            if (iPartsCount > subdatasetIndex)
-            {
-                m_subdatasetComponent = aosParts[subdatasetIndex];
-
-                // Append any remaining part
-                for (int i = subdatasetIndex + 1; i < iPartsCount; ++i)
-                {
-                    m_subdatasetComponent.append(":");
-                    m_subdatasetComponent.append(aosParts[i]);
-                }
+                m_subdatasetComponent.append(":");
+                m_subdatasetComponent.append(aosParts[i]);
             }
         }
     }
-};
+}
 
 static GDALSubdatasetInfo *HDF5DriverGetSubdatasetInfo(const char *pszFileName)
 {
@@ -280,30 +270,48 @@ static bool IdentifySxx(GDALOpenInfo *poOpenInfo, const char *pszDriverName,
         // Works at least on:
         // - /vsis3/noaa-s102-pds/ed2.1.0/national_bathymetric_source/boston/dcf2/tiles/102US00_US4MA1GC.h5
         // - https://datahub.admiralty.co.uk/portal/sharing/rest/content/items/6fd07bde26124d48820b6dee60695389/data (S-102_Liverpool_Trial_Cells.zip)
-        const int nLenMainGroup =
-            static_cast<int>(strlen(pszMainGroupName) + 1);
-        const int nLenGroupF = static_cast<int>(strlen("Group_F\0") + 1);
+        const int nLenMainGroup = static_cast<int>(strlen(pszMainGroupName));
+        const int nLenGroupF = static_cast<int>(strlen("Group_F"));
+        const int nLenProductSpecification =
+            static_cast<int>(strlen("productSpecification"));
         bool bFoundMainGroup = false;
         bool bFoundGroupF = false;
-        for (int i = 0;
-             i < poOpenInfo->nHeaderBytes - std::max(nLenMainGroup, nLenGroupF);
-             ++i)
+        bool bFoundProductSpecification = false;
+        for (int iTry = 0; iTry < 2; ++iTry)
         {
-            if (poOpenInfo->pabyHeader[i] == pszMainGroupName[0] &&
-                memcmp(poOpenInfo->pabyHeader + i, pszMainGroupName,
-                       nLenMainGroup) == 0)
+            for (int i = 0; i <= poOpenInfo->nHeaderBytes - nLenGroupF; ++i)
             {
-                bFoundMainGroup = true;
-                if (bFoundGroupF)
-                    return true;
+                if (i <= poOpenInfo->nHeaderBytes - nLenMainGroup &&
+                    poOpenInfo->pabyHeader[i] == pszMainGroupName[0] &&
+                    memcmp(poOpenInfo->pabyHeader + i, pszMainGroupName,
+                           nLenMainGroup) == 0)
+                {
+                    bFoundMainGroup = true;
+                    if (bFoundGroupF)
+                        return true;
+                }
+                if (poOpenInfo->pabyHeader[i] == 'G' &&
+                    memcmp(poOpenInfo->pabyHeader + i, "Group_F", nLenGroupF) ==
+                        0)
+                {
+                    bFoundGroupF = true;
+                    if (bFoundMainGroup)
+                        return true;
+                }
+                if (i <= poOpenInfo->nHeaderBytes - nLenProductSpecification &&
+                    poOpenInfo->pabyHeader[i] == 'p' &&
+                    memcmp(poOpenInfo->pabyHeader + i, "productSpecification",
+                           nLenProductSpecification) == 0)
+                {
+                    // For 102DE00OS08J.H5
+                    bFoundProductSpecification = true;
+                }
             }
-            if (poOpenInfo->pabyHeader[i] == 'G' &&
-                memcmp(poOpenInfo->pabyHeader + i, "Group_F\0", nLenGroupF) ==
-                    0)
+            if (!(iTry == 0 && bFoundProductSpecification &&
+                  poOpenInfo->nHeaderBytes == 1024 &&
+                  poOpenInfo->TryToIngest(4096)))
             {
-                bFoundGroupF = true;
-                if (bFoundMainGroup)
-                    return true;
+                break;
             }
         }
     }
@@ -361,7 +369,7 @@ int BAGDatasetIdentify(GDALOpenInfo *poOpenInfo)
         return FALSE;
 
     // Does it have the extension .bag?
-    if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "bag"))
+    if (!poOpenInfo->IsExtensionEqualToCI("bag"))
     {
         if (poOpenInfo->IsSingleAllowedDriver("BAG"))
         {

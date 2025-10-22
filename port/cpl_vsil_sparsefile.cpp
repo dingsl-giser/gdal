@@ -8,23 +8,7 @@
  * Copyright (c) 2010, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -34,10 +18,6 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 
 #include <algorithm>
 #include <map>
@@ -71,7 +51,7 @@ class SFRegion
 
 class VSISparseFileFilesystemHandler;
 
-class VSISparseFileHandle : public VSIVirtualHandle
+class VSISparseFileHandle final : public VSIVirtualHandle
 {
     CPL_DISALLOW_COPY_ASSIGN(VSISparseFileHandle)
 
@@ -84,6 +64,8 @@ class VSISparseFileHandle : public VSIVirtualHandle
         : m_poFS(poFS)
     {
     }
+
+    ~VSISparseFileHandle() override;
 
     GUIntBig nOverallLength = 0;
     GUIntBig nCurOffset = 0;
@@ -106,7 +88,7 @@ class VSISparseFileHandle : public VSIVirtualHandle
 /* ==================================================================== */
 /************************************************************************/
 
-class VSISparseFileFilesystemHandler : public VSIFilesystemHandler
+class VSISparseFileFilesystemHandler final : public VSIFilesystemHandler
 {
     std::map<GIntBig, int> oRecOpenCount{};
     CPL_DISALLOW_COPY_ASSIGN(VSISparseFileFilesystemHandler)
@@ -119,13 +101,9 @@ class VSISparseFileFilesystemHandler : public VSIFilesystemHandler
                       vsi_l_offset &nSparseFileOffset,
                       vsi_l_offset &nSparseFileSize);
 
-    // TODO(schwehr): Fix VSISparseFileFilesystemHandler::Stat to not need
-    // using.
-    using VSIFilesystemHandler::Open;
-
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError,
-                           CSLConstList /* papszOptions */) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList /* papszOptions */) override;
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     int Unlink(const char *pszFilename) override;
@@ -156,6 +134,15 @@ class VSISparseFileFilesystemHandler : public VSIFilesystemHandler
 /************************************************************************/
 
 /************************************************************************/
+/*                        ~VSISparseFileHandle()                        */
+/************************************************************************/
+
+VSISparseFileHandle::~VSISparseFileHandle()
+{
+    VSISparseFileHandle::Close();
+}
+
+/************************************************************************/
 /*                               Close()                                */
 /************************************************************************/
 
@@ -167,6 +154,7 @@ int VSISparseFileHandle::Close()
         if (aoRegions[i].fp != nullptr)
             CPL_IGNORE_RET_VAL(VSIFCloseL(aoRegions[i].fp));
     }
+    aoRegions.clear();
 
     return 0;
 }
@@ -411,7 +399,7 @@ void VSISparseFileHandle::ClearErr()
 /*                                Open()                                */
 /************************************************************************/
 
-VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
+VSIVirtualHandleUniquePtr VSISparseFileFilesystemHandler::Open(
     const char *pszFilename, const char *pszAccess, bool /* bSetError */,
     CSLConstList /* papszOptions */)
 
@@ -434,10 +422,8 @@ VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
     /* -------------------------------------------------------------------- */
     /*      Does this file even exist?                                      */
     /* -------------------------------------------------------------------- */
-    VSILFILE *fp = VSIFOpenL(osSparseFilePath, "r");
-    if (fp == nullptr)
+    if (VSIFilesystemHandler::OpenStatic(osSparseFilePath, "rb") == nullptr)
         return nullptr;
-    CPL_IGNORE_RET_VAL(VSIFCloseL(fp));
 
     /* -------------------------------------------------------------------- */
     /*      Read the XML file.                                              */
@@ -450,7 +436,7 @@ VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
     /* -------------------------------------------------------------------- */
     /*      Setup the file handle on this file.                             */
     /* -------------------------------------------------------------------- */
-    VSISparseFileHandle *poHandle = new VSISparseFileHandle(this);
+    auto poHandle = std::make_unique<VSISparseFileHandle>(this);
 
     /* -------------------------------------------------------------------- */
     /*      Translate the desired fields out of the XML tree.               */
@@ -470,9 +456,9 @@ VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
         oRegion.osFilename = CPLGetXMLValue(psRegion, "Filename", "");
         if (atoi(CPLGetXMLValue(psRegion, "Filename.relative", "0")) != 0)
         {
-            const CPLString osSFPath = CPLGetPath(osSparseFilePath);
-            oRegion.osFilename =
-                CPLFormFilename(osSFPath, oRegion.osFilename, nullptr);
+            const std::string osSFPath = CPLGetPathSafe(osSparseFilePath);
+            oRegion.osFilename = CPLFormFilenameSafe(
+                osSFPath.c_str(), oRegion.osFilename, nullptr);
         }
 
         // TODO(schwehr): Symbolic constant and an explanation for 32.
@@ -488,7 +474,7 @@ VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
         oRegion.byValue =
             static_cast<GByte>(atoi(CPLGetXMLValue(psRegion, "Value", "0")));
 
-        poHandle->aoRegions.push_back(oRegion);
+        poHandle->aoRegions.push_back(std::move(oRegion));
     }
 
     /* -------------------------------------------------------------------- */
@@ -509,7 +495,7 @@ VSIVirtualHandle *VSISparseFileFilesystemHandler::Open(
 
     CPLDestroyXMLNode(psXMLRoot);
 
-    return poHandle;
+    return VSIVirtualHandleUniquePtr(poHandle.release());
 }
 
 /************************************************************************/
@@ -520,9 +506,7 @@ int VSISparseFileFilesystemHandler::Stat(const char *pszFilename,
                                          VSIStatBufL *psStatBuf, int nFlags)
 
 {
-    // TODO(schwehr): Fix this so that the using statement is not needed.
-    // Will just adding the bool for bSetError be okay?
-    VSIVirtualHandle *poFile = Open(pszFilename, "r");
+    auto poFile = Open(pszFilename, "rb", false, nullptr);
 
     memset(psStatBuf, 0, sizeof(VSIStatBufL));
 
@@ -531,7 +515,6 @@ int VSISparseFileFilesystemHandler::Stat(const char *pszFilename,
 
     poFile->Seek(0, SEEK_END);
     const vsi_l_offset nLength = poFile->Tell();
-    delete poFile;
 
     const int nResult =
         VSIStatExL(pszFilename + strlen("/vsisparse/"), psStatBuf, nFlags);

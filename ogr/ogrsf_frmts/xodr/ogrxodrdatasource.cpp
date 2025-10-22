@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright 2024 German Aerospace Center (DLR), Institute of Transportation Systems
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_xodr.h"
@@ -105,7 +89,7 @@ bool OGRXODRDataSource::Open(const char *pszFilename, CSLConstList openOptions)
     return true;
 }
 
-OGRLayer *OGRXODRDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRXODRDataSource::GetLayer(int iLayer) const
 {
     if (iLayer < 0 || static_cast<size_t>(iLayer) >= m_apoLayers.size())
         return nullptr;
@@ -113,7 +97,7 @@ OGRLayer *OGRXODRDataSource::GetLayer(int iLayer)
     return m_apoLayers[iLayer].get();
 }
 
-int OGRXODRDataSource::TestCapability(const char *pszCap)
+int OGRXODRDataSource::TestCapability(const char *pszCap) const
 {
     int result = FALSE;
 
@@ -132,9 +116,8 @@ OGRXODRDataSource::createRoadElements(const std::vector<odr::Road> &roads)
     {
         elements.roads.insert({road.id, road});
 
-        odr::Line3D referenceLine =
-            road.ref_line.get_line(0.0, road.length, m_dfEpsilon);
-        elements.referenceLines.push_back(referenceLine);
+        elements.referenceLines.push_back(
+            road.ref_line.get_line(0.0, road.length, m_dfEpsilon));
 
         for (const odr::LaneSection &laneSection : road.get_lanesections())
         {
@@ -146,16 +129,17 @@ OGRXODRDataSource::createRoadElements(const std::vector<odr::Road> &roads)
 
                 elements.lanes.push_back(lane);
 
-                odr::Mesh3D laneMesh = road.get_lane_mesh(lane, m_dfEpsilon);
-                elements.laneMeshes.push_back(laneMesh);
+                // laneMesh
+                elements.laneMeshes.push_back(
+                    road.get_lane_mesh(lane, m_dfEpsilon));
 
-                odr::Line3D laneLineOuter =
-                    road.get_lane_border_line(lane, m_dfEpsilon, true);
-                elements.laneLinesOuter.push_back(laneLineOuter);
+                // laneLineOuter
+                elements.laneLinesOuter.push_back(
+                    road.get_lane_border_line(lane, m_dfEpsilon, true));
 
-                odr::Line3D laneLineInner =
-                    road.get_lane_border_line(lane, m_dfEpsilon, false);
-                elements.laneLinesInner.push_back(laneLineInner);
+                // laneLineInner
+                elements.laneLinesInner.push_back(
+                    road.get_lane_border_line(lane, m_dfEpsilon, false));
 
                 const double sectionStart = laneSection.s0;
                 const double sectionEnd = road.get_lanesection_end(laneSection);
@@ -164,9 +148,9 @@ OGRXODRDataSource::createRoadElements(const std::vector<odr::Road> &roads)
                 {
                     elements.roadMarks.push_back(roadMark);
 
-                    odr::Mesh3D roadMarkMesh =
-                        road.get_roadmark_mesh(lane, roadMark, m_dfEpsilon);
-                    elements.roadMarkMeshes.push_back(roadMarkMesh);
+                    // roadMarkMesh
+                    elements.roadMarkMeshes.push_back(
+                        road.get_roadmark_mesh(lane, roadMark, m_dfEpsilon));
                 }
             }
         }
@@ -175,17 +159,16 @@ OGRXODRDataSource::createRoadElements(const std::vector<odr::Road> &roads)
         {
             elements.roadObjects.push_back(roadObject);
 
-            odr::Mesh3D roadObjectMesh =
-                road.get_road_object_mesh(roadObject, m_dfEpsilon);
-            elements.roadObjectMeshes.push_back(roadObjectMesh);
+            elements.roadObjectMeshes.push_back(
+                road.get_road_object_mesh(roadObject, m_dfEpsilon));
         }
 
         for (const odr::RoadSignal &roadSignal : road.get_road_signals())
         {
             elements.roadSignals.push_back(roadSignal);
 
-            odr::Mesh3D roadSignalMesh = road.get_road_signal_mesh(roadSignal);
-            elements.roadSignalMeshes.push_back(roadSignalMesh);
+            elements.roadSignalMeshes.push_back(
+                road.get_road_signal_mesh(roadSignal));
         }
     }
     return elements;

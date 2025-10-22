@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  GML Reading Driver for Japanese FGD GML v4 testing.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2017, Hiroshi Miura <miurahr@linux.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -112,3 +95,25 @@ def test_ogr_gml_fgd_2():
     ogrtest.check_feature_geometry(feat, wkt)
 
     assert feat.GetField("devDate") == "2017-03-07", "Wrong attribute value"
+
+
+###############################################################################
+# Test reading Japanese FGD GML (v4) with JGD2024
+
+
+def test_ogr_gml_fgd_jgd2024():
+
+    # open FGD GML file
+    ds = ogr.Open(_fgd_dir + "ElevPt_JGD2024.xml")
+
+    # check number of layers
+    assert ds.GetLayerCount() == 1, "Wrong layer count"
+
+    lyr = ds.GetLayer(0)
+
+    assert lyr.GetSpatialRef().IsGeographic()
+    assert lyr.GetSpatialRef().GetName() == "JGD2024"
+
+    # check the first feature
+    feat = lyr.GetNextFeature()
+    ogrtest.check_feature_geometry(feat, "POINT (133.123456789 34.123456789)")

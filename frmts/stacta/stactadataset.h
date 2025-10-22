@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef STACTADATASET_H
@@ -35,7 +19,6 @@
 #include "memdataset.h"
 #include "tilematrixset.hpp"
 
-#include <array>
 #include <map>
 #include <memory>
 #include <vector>
@@ -64,7 +47,7 @@ class STACTADataset final : public GDALPamDataset
     friend class STACTARawDataset;
     friend class STACTARawRasterBand;
 
-    std::array<double, 6> m_adfGeoTransform = {{0.0, 1.0, 0, 0.0, 0.0, 1.0}};
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
     std::unique_ptr<GDALDataset> m_poDS{};
     // Array of overview datasets, that are guaranteed to have the same
@@ -79,6 +62,8 @@ class STACTADataset final : public GDALPamDataset
 
     bool m_bDownloadWholeMetaTile = false;
     bool m_bSkipMissingMetaTile = false;
+    bool m_bTriedVSICLOUDSubstitution = false;
+    bool m_bVSICLOUDSubstitutionOK = false;
 
     bool Open(GDALOpenInfo *poOpenInfo);
 
@@ -89,7 +74,7 @@ class STACTADataset final : public GDALPamDataset
     ~STACTADataset() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *padfGeoTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
                      int nYSize, void *pData, int nBufXSize, int nBufYSize,
                      GDALDataType eBufType, int nBandCount,
@@ -170,7 +155,7 @@ class STACTARawDataset final : public GDALDataset
     int m_nMetaTileHeight = 0;
     STACTADataset *m_poMasterDS = nullptr;
 
-    std::array<double, 6> m_adfGeoTransform = {{0.0, 1.0, 0, 0.0, 0.0, 1.0}};
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
   public:
@@ -187,7 +172,7 @@ class STACTARawDataset final : public GDALDataset
         return &m_oSRS;
     }
 
-    CPLErr GetGeoTransform(double *padfGeoTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
                      int nYSize, void *pData, int nBufXSize, int nBufYSize,
                      GDALDataType eBufType, int nBandCount,

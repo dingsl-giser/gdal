@@ -8,23 +8,7 @@
  * Copyright (c) 2011, Adam Estrada
  * Copyright (c) 2012-2016, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_elastic.h"
@@ -34,9 +18,9 @@
 #include "ogr_api.h"
 #include "ogr_p.h"
 #include "ogr_swq.h"
-#include "../geojson/ogrgeojsonwriter.h"
-#include "../geojson/ogrgeojsonreader.h"
-#include "../geojson/ogrgeojsonutils.h"
+#include "ogrgeojsonwriter.h"
+#include "ogrlibjsonutils.h"
+#include "ogrgeojsongeometry.h"
 #include "ogr_geo_utils.h"
 
 #include <cstdlib>
@@ -1058,10 +1042,10 @@ OGRErr OGRElasticLayer::SyncToDisk()
 /*                            GetLayerDefn()                            */
 /************************************************************************/
 
-OGRFeatureDefn *OGRElasticLayer::GetLayerDefn()
+const OGRFeatureDefn *OGRElasticLayer::GetLayerDefn() const
 {
 
-    FinalizeFeatureDefn();
+    const_cast<OGRElasticLayer *>(this)->FinalizeFeatureDefn();
 
     return m_poFeatureDefn;
 }
@@ -1070,7 +1054,7 @@ OGRFeatureDefn *OGRElasticLayer::GetLayerDefn()
 /*                            GetFIDColumn()                            */
 /************************************************************************/
 
-const char *OGRElasticLayer::GetFIDColumn()
+const char *OGRElasticLayer::GetFIDColumn() const
 {
     GetLayerDefn();
     return m_osFID.c_str();
@@ -1147,8 +1131,9 @@ json_object *OGRElasticLayer::BuildSort()
     {
         const int nIdx =
             m_poFeatureDefn->GetFieldIndex(m_aoSortColumns[i].osColumn);
-        CPLString osFieldName(
-            nIdx == 0 ? "_uid" : BuildPathFromArray(m_aaosFieldPaths[nIdx]));
+        CPLString osFieldName(nIdx == 0
+                                  ? CPLString("_uid")
+                                  : BuildPathFromArray(m_aaosFieldPaths[nIdx]));
         if (CSLFindString(m_papszFieldsWithRawValue,
                           m_aoSortColumns[i].osColumn) >= 0)
         {
@@ -1734,7 +1719,10 @@ void OGRElasticLayer::BuildFeature(OGRFeature *poFeature, json_object *poSource,
                 }
                 else
                 {
-                    poGeom = OGRGeoJSONReadGeometry(it.val);
+                    poGeom = OGRGeoJSONReadGeometry(
+                                 it.val, /* bHasM = */ false,
+                                 /* OGRSpatialReference* = */ nullptr)
+                                 .release();
                 }
             }
             else if (json_object_get_type(it.val) == json_type_string)
@@ -2421,16 +2409,11 @@ CPLString OGRElasticLayer::BuildJSonFromFeature(OGRFeature *poFeature)
                 else if (env.MinX < -180 || env.MinY < -90 || env.MaxX > 180 ||
                          env.MaxY > 90)
                 {
-                    static bool bHasWarned = false;
-                    if (!bHasWarned)
-                    {
-                        bHasWarned = true;
-                        CPLError(
-                            CE_Warning, CPLE_AppDefined,
-                            "At least one geometry has a bounding box outside "
-                            "of [-180,180] longitude range and/or [-90,90] "
-                            "latitude range. Undefined behavior");
-                    }
+                    CPLErrorOnce(
+                        CE_Warning, CPLE_AppDefined,
+                        "At least one geometry has a bounding box outside "
+                        "of [-180,180] longitude range and/or [-90,90] "
+                        "latitude range. Undefined behavior");
                 }
 
                 std::vector<CPLString> aosPath = m_aaosGeomFieldPaths[i];
@@ -3066,7 +3049,7 @@ OGRErr OGRElasticLayer::CreateGeomField(const OGRGeomFieldDefn *poFieldIn,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRElasticLayer::TestCapability(const char *pszCap)
+int OGRElasticLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCFastFeatureCount))
         return m_poAttrQuery == nullptr && m_poFilterGeom == nullptr;
@@ -3793,24 +3776,15 @@ void OGRElasticLayer::ClampEnvelope(OGREnvelope &sEnvelope)
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                         */
 /************************************************************************/
 
-void OGRElasticLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
+OGRErr OGRElasticLayer::ISetSpatialFilter(int iGeomField,
+                                          const OGRGeometry *poGeomIn)
 
 {
     FinalizeFeatureDefn();
 
-    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount() ||
-        GetLayerDefn()->GetGeomFieldDefn(iGeomField)->GetType() == wkbNone)
-    {
-        if (iGeomField != 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-        }
-        return;
-    }
     m_iGeomFieldFilter = iGeomField;
 
     InstallFilter(poGeomIn);
@@ -3819,14 +3793,14 @@ void OGRElasticLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
     m_poSpatialFilter = nullptr;
 
     if (poGeomIn == nullptr)
-        return;
+        return OGRERR_NONE;
 
     if (!m_osESSearch.empty())
     {
         CPLError(
             CE_Failure, CPLE_AppDefined,
             "Setting a spatial filter on a resulting layer is not supported");
-        return;
+        return OGRERR_FAILURE;
     }
 
     OGREnvelope sEnvelope;
@@ -3836,7 +3810,7 @@ void OGRElasticLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
     if (sEnvelope.MinX == -180 && sEnvelope.MinY == -90 &&
         sEnvelope.MaxX == 180 && sEnvelope.MaxY == 90)
     {
-        return;
+        return OGRERR_NONE;
     }
 
     m_poSpatialFilter = json_object_new_object();
@@ -3905,26 +3879,18 @@ void OGRElasticLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeomIn)
             json_object_new_double_with_precision(sEnvelope.MinY, 6));
         json_object_array_add(coordinates, bottom_right);
     }
+
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
-/*                            GetExtent()                                */
+/*                           IGetExtent()                                */
 /************************************************************************/
 
-OGRErr OGRElasticLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
-                                  int bForce)
+OGRErr OGRElasticLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                   bool bForce)
 {
     FinalizeFeatureDefn();
-
-    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount())
-    {
-        if (iGeomField != 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-        }
-        return OGRERR_FAILURE;
-    }
 
     // geo_shape aggregation is only available since ES 7.8, but only with XPack
     // for now
@@ -3933,8 +3899,7 @@ OGRErr OGRElasticLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
           (m_poDS->m_nMajorVersion == 7 && m_poDS->m_nMinorVersion >= 8)))
     {
         m_bUseSingleQueryParams = true;
-        const auto eRet =
-            OGRLayer::GetExtentInternal(iGeomField, psExtent, bForce);
+        const auto eRet = OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
         m_bUseSingleQueryParams = false;
         return eRet;
     }
@@ -3989,8 +3954,7 @@ OGRErr OGRElasticLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
         poBottomRightLon == nullptr || poBottomRightLat == nullptr)
     {
         m_bUseSingleQueryParams = true;
-        const auto eRet =
-            OGRLayer::GetExtentInternal(iGeomField, psExtent, bForce);
+        const auto eRet = OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
         m_bUseSingleQueryParams = false;
         return eRet;
     }

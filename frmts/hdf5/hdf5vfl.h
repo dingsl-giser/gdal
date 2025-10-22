@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2008-2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // This file contains the Virtual File Layer implementation that calls through
@@ -69,7 +53,7 @@ static herr_t HDF5_vsil_truncate(H5FD_t *_file, hid_t dxpl_id, hbool_t closing);
 static hid_t HDF5VFLGetFileDriver();
 static void HDF5VFLUnloadFileDriver();
 
-#define MAXADDR (((haddr_t)1 << (8 * sizeof(haddr_t) - 1)) - 1)
+#define MAXADDR ((static_cast<haddr_t>(1) << (8 * sizeof(haddr_t) - 1)) - 1)
 
 /* See https://support.hdfgroup.org/HDF5/doc/TechNotes/VFL.html */
 static const H5FD_class_t HDF5_vsil_g = {
@@ -79,7 +63,7 @@ static const H5FD_class_t HDF5_vsil_g = {
 #ifdef HDF5_1_13_OR_LATER
     /* value: 513 has been reserved with hdfgroup and is registered at:
      * https://portal.hdfgroup.org/pages/viewpage.action?pageId=74188097 */
-    (H5FD_class_value_t)(513),
+    static_cast<H5FD_class_value_t>(513),
 #endif
     "vsil",            /* name */
     MAXADDR,           /* maxaddr  */
@@ -127,7 +111,7 @@ static const H5FD_class_t HDF5_vsil_g = {
 
 typedef struct HDF5_vsil_t
 {
-    H5FD_t pub; /* must be first */
+    H5FD_t pub{}; /* must be first */
     VSILFILE *fp = nullptr;
     haddr_t eoa = 0;
     haddr_t eof = 0;

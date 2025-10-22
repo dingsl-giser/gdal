@@ -5,25 +5,9 @@
  * Author:   Laixer B.V., info at laixer dot com
  *
  ******************************************************************************
- * Copyright (c) 2021, Laixer B.V. <info at laixer dot com>
+ * Copyright (c) 2020, Laixer B.V. <info at laixer dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -53,9 +37,10 @@ OGRLVBAGLayer::OGRLVBAGLayer(const char *pszFilename, OGRLayerPool *poPoolIn,
       nNextFID{0}, nCurrentDepth{0}, nGeometryElementDepth{0},
       nFeatureCollectionDepth{0}, nFeatureElementDepth{0},
       nAttributeElementDepth{0},
-      eAddressRefState{AddressRefState::ADDRESS_PRIMARY}, bCollectData{false}
+      eAddressRefState{AddressRefState::ADDRESS_PRIMARY}, osElementString{},
+      osAttributeString{}, bCollectData{false}
 {
-    SetDescription(CPLGetBasename(pszFilename));
+    SetDescription(CPLGetBasenameSafe(pszFilename).c_str());
 
     poFeatureDefn->Reference();
 }
@@ -78,7 +63,9 @@ OGRLVBAGLayer::~OGRLVBAGLayer()
 void OGRLVBAGLayer::ResetReading()
 {
     if (!TouchLayer())
+    {
         return;
+    }
 
     VSIRewindL(fp);
 
@@ -96,17 +83,19 @@ void OGRLVBAGLayer::ResetReading()
 /*                            GetLayerDefn()                            */
 /************************************************************************/
 
-OGRFeatureDefn *OGRLVBAGLayer::GetLayerDefn()
+const OGRFeatureDefn *OGRLVBAGLayer::GetLayerDefn() const
 {
-    if (!TouchLayer())
-        return nullptr;
-
     if (!bHasReadSchema)
     {
+        if (!const_cast<OGRLVBAGLayer *>(this)->TouchLayer())
+        {
+            return nullptr;
+        }
+
         bSchemaOnly = true;
 
-        ConfigureParser();
-        ParseDocument();
+        const_cast<OGRLVBAGLayer *>(this)->ConfigureParser();
+        const_cast<OGRLVBAGLayer *>(this)->ParseDocument();
     }
 
     return poFeatureDefn;
@@ -121,7 +110,9 @@ static inline const char *XMLTagSplit(const char *pszName)
     const char *pszTag = pszName;
     const char *pszSep = strchr(pszTag, ':');
     if (pszSep)
+    {
         pszTag = pszSep + 1;
+    }
 
     return pszTag;
 }
@@ -336,8 +327,10 @@ void OGRLVBAGLayer::CreateFeatureDefn(const char *pszDataset)
         AddSpatialRef(wkbMultiPolygon);
     }
     else
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Parsing LV BAG extract failed : invalid layer definition");
+    }
 }
 
 /************************************************************************/
@@ -369,7 +362,9 @@ void OGRLVBAGLayer::StopDataCollect()
 void OGRLVBAGLayer::DataHandlerCbk(const char *data, int nLen)
 {
     if (nLen && bCollectData)
+    {
         osElementString.append(data, nLen);
+    }
 }
 
 /************************************************************************/
@@ -411,7 +406,9 @@ bool OGRLVBAGLayer::TouchLayer()
 void OGRLVBAGLayer::CloseUnderlyingLayer()
 {
     if (fp)
+    {
         VSIFCloseL(fp);
+    }
     fp = nullptr;
 
     eFileDescriptorsState = FD_CLOSED;
@@ -654,7 +651,7 @@ void OGRLVBAGLayer::EndElementCbk(const char *pszName)
                     poGeom->flattenTo2D();
 
 #ifdef HAVE_GEOS
-                if (!poGeom->IsValid() && bFixInvalidData)
+                if (bFixInvalidData && !poGeom->IsValid())
                 {
                     std::unique_ptr<OGRGeometry> poSubGeom =
                         std::unique_ptr<OGRGeometry>{poGeom->MakeValid()};
@@ -771,13 +768,17 @@ void OGRLVBAGLayer::EndElementCbk(const char *pszName)
         }
 
         if (!bHasReadSchema)
+        {
             CreateFeatureDefn(osElementString.c_str());
+        }
         bHasReadSchema = true;
 
         // The parser is suspended but never resumed. Stop
         // without resume indicated an error.
         if (bSchemaOnly)
+        {
             XML_StopParser(oParser.get(), XML_TRUE);
+        }
     }
 }
 
@@ -888,18 +889,16 @@ void OGRLVBAGLayer::ParseDocument()
 OGRFeature *OGRLVBAGLayer::GetNextFeature()
 {
     if (!TouchLayer())
+    {
         return nullptr;
+    }
 
+    GetLayerDefn();
     if (!bHasReadSchema)
     {
-        GetLayerDefn();
-        if (!bHasReadSchema)
-        {
-            CPLError(
-                CE_Failure, CPLE_AppDefined,
-                "Parsing LV BAG extract failed : invalid layer definition");
-            return nullptr;
-        }
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Parsing LV BAG extract failed : invalid layer definition");
+        return nullptr;
     }
 
     return OGRGetNextFeatureThroughRaw<OGRLVBAGLayer>::GetNextFeature();
@@ -914,7 +913,9 @@ OGRFeature *OGRLVBAGLayer::GetNextRawFeature()
     bSchemaOnly = false;
 
     if (nNextFID == 0)
+    {
         ConfigureParser();
+    }
 
     if (m_poFeature)
     {
@@ -932,13 +933,12 @@ OGRFeature *OGRLVBAGLayer::GetNextRawFeature()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRLVBAGLayer::TestCapability(const char *pszCap)
+int OGRLVBAGLayer::TestCapability(const char *pszCap) const
 {
-    if (!TouchLayer())
-        return FALSE;
-
     if (EQUAL(pszCap, OLCStringsAsUTF8))
+    {
         return TRUE;
+    }
 
     return FALSE;
 }

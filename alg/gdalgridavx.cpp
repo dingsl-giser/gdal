@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdalgrid.h"
@@ -35,8 +19,6 @@
 /************************************************************************/
 /*         GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX()     */
 /************************************************************************/
-
-#define GDAL_mm256_load1_ps(x) _mm256_set_ps(x, x, x, x, x, x, x, x)
 
 CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
     const void *poOptions, GUInt32 nPoints,
@@ -55,9 +37,9 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
     const float fEpsilon = 0.0000000000001f;
     const float fXPoint = static_cast<float>(dfXPoint);
     const float fYPoint = static_cast<float>(dfYPoint);
-    const __m256 ymm_small = GDAL_mm256_load1_ps(fEpsilon);
-    const __m256 ymm_x = GDAL_mm256_load1_ps(fXPoint);
-    const __m256 ymm_y = GDAL_mm256_load1_ps(fYPoint);
+    const __m256 ymm_small = _mm256_set1_ps(fEpsilon);
+    const __m256 ymm_x = _mm256_set1_ps(fXPoint);
+    const __m256 ymm_y = _mm256_set1_ps(fYPoint);
     __m256 ymm_nominator = _mm256_setzero_ps();
     __m256 ymm_denominator = _mm256_setzero_ps();
     int mask = 0;
@@ -135,12 +117,8 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
         {
             if (mask & (1 << j))
             {
-                (*pdfValue) = (pafZ)[i + j];
+                (*pdfValue) = double(pafZ[i + j]);
 
-                // GCC and MSVC need explicit zeroing.
-#if !defined(__clang__)
-                _mm256_zeroupper();
-#endif
                 return CE_None;
             }
         }
@@ -177,7 +155,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
 
         // If the test point is close to the grid node, use the point
         // value directly as a node value to avoid singularity.
-        if (fR2 < 0.0000000000001)
+        if (fR2 < 1e-13f)
         {
             break;
         }
@@ -191,9 +169,9 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
 
     if (i != nPoints)
     {
-        (*pdfValue) = pafZ[i];
+        (*pdfValue) = double(pafZ[i]);
     }
-    else if (fDenominator == 0.0)
+    else if (fDenominator == 0.0f)
     {
         (*pdfValue) =
             static_cast<const GDALGridInverseDistanceToAPowerOptions *>(
@@ -201,12 +179,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchAVX(
                 ->dfNoDataValue;
     }
     else
-        (*pdfValue) = fNominator / fDenominator;
-
-        // GCC needs explicit zeroing.
-#if defined(__GNUC__) && !defined(__clang__)
-    _mm256_zeroupper();
-#endif
+        (*pdfValue) = double(fNominator / fDenominator);
 
     return CE_None;
 }

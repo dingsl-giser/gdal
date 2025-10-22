@@ -11,23 +11,7 @@
  * Copyright (c) 2013, NextGIS
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_sxf.h"
@@ -277,8 +261,12 @@ bool OGRSXFLayer::AddRecord(long nFID, unsigned nClassCode,
 
 OGRErr OGRSXFLayer::SetNextByIndex(GIntBig nIndex)
 {
+    m_bEOF = false;
     if (nIndex < 0 || nIndex > (long)mnRecordDesc.size())
-        return OGRERR_FAILURE;
+    {
+        m_bEOF = true;
+        return OGRERR_NON_EXISTING_FEATURE;
+    }
 
     oNextIt = mnRecordDesc.begin();
     std::advance(oNextIt, static_cast<size_t>(nIndex));
@@ -313,20 +301,21 @@ OGRFeature *OGRSXFLayer::GetFeature(GIntBig nFID)
 /*                           GetSpatialRef()                            */
 /************************************************************************/
 
-OGRSpatialReference *OGRSXFLayer::GetSpatialRef()
+const OGRSpatialReference *OGRSXFLayer::GetSpatialRef() const
 {
     return stSXFMapDescription.pSpatRef;
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            IGetExtent()                              */
 /************************************************************************/
 
-OGRErr OGRSXFLayer::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr OGRSXFLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                               bool bForce)
 {
     if (bForce)
     {
-        return OGRLayer::GetExtent(psExtent, bForce);
+        return OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
     }
     else
     {
@@ -358,6 +347,7 @@ GIntBig OGRSXFLayer::GetFeatureCount(int bForce)
 void OGRSXFLayer::ResetReading()
 
 {
+    m_bEOF = false;
     oNextIt = mnRecordDesc.begin();
 }
 
@@ -367,6 +357,8 @@ void OGRSXFLayer::ResetReading()
 
 OGRFeature *OGRSXFLayer::GetNextFeature()
 {
+    if (m_bEOF)
+        return nullptr;
     CPLMutexHolderD(m_hIOMutex);
     while (oNextIt != mnRecordDesc.end())
     {
@@ -401,7 +393,7 @@ OGRFeature *OGRSXFLayer::GetNextFeature()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRSXFLayer::TestCapability(const char *pszCap)
+int OGRSXFLayer::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, OLCStringsAsUTF8) &&
@@ -897,7 +889,8 @@ OGRFeature *OGRSXFLayer::GetNextRawFeature(long nFID)
             {
                 char *psSemanticsdBufBeg = psSemanticsdBuf + offset;
                 SXFRecordAttributeInfo stAttInfo =
-                    *(SXFRecordAttributeInfo *)psSemanticsdBufBeg;
+                    *reinterpret_cast<SXFRecordAttributeInfo *>(
+                        psSemanticsdBufBeg);
                 CPL_LSBPTR16(&(stAttInfo.nCode));
                 offset += 4;
 
@@ -1645,7 +1638,7 @@ OGRFeature *OGRSXFLayer::TranslateText(const SXFRecordDescription &certifInfo,
     return poFeature;
 }
 
-const char *OGRSXFLayer::GetFIDColumn()
+const char *OGRSXFLayer::GetFIDColumn() const
 {
     return sFIDColumn_.c_str();
 }

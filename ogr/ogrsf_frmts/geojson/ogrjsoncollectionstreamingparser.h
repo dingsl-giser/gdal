@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2017, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGRJSONCOLLECTIONSTREAMING_PARSER_H_INCLUDED
@@ -51,6 +35,8 @@ class OGRJSONCollectionStreamingParser CPL_NON_FINAL
     bool m_bInType = false;
     bool m_bIsTypeKnown = false;
     bool m_bIsFeatureCollection = false;
+    bool m_bInMeasures = false;
+    bool m_bInMeasuresEnabled = false;
     json_object *m_poRootObj = nullptr;
     size_t m_nRootObjMemEstimate = 0;
     json_object *m_poCurObj = nullptr;
@@ -81,27 +67,34 @@ class OGRJSONCollectionStreamingParser CPL_NON_FINAL
                             const std::string &osJson) = 0;
     virtual void TooComplex() = 0;
 
+    bool m_bHasTopLevelMeasures = false;
+
   public:
     OGRJSONCollectionStreamingParser(bool bFirstPass, bool bStoreNativeData,
                                      size_t nMaxObjectSize);
-    ~OGRJSONCollectionStreamingParser();
+    ~OGRJSONCollectionStreamingParser() override;
 
-    virtual void String(const char * /*pszValue*/, size_t) override;
-    virtual void Number(const char * /*pszValue*/, size_t) override;
-    virtual void Boolean(bool b) override;
-    virtual void Null() override;
+    void String(std::string_view) override;
+    void Number(std::string_view) override;
+    void Boolean(bool b) override;
+    void Null() override;
 
-    virtual void StartObject() override;
-    virtual void EndObject() override;
-    virtual void StartObjectMember(const char * /*pszKey*/, size_t) override;
+    void StartObject() override;
+    void EndObject() override;
+    void StartObjectMember(std::string_view) override;
 
-    virtual void StartArray() override;
-    virtual void EndArray() override;
-    virtual void StartArrayMember() override;
+    void StartArray() override;
+    void EndArray() override;
+    void StartArrayMember() override;
 
-    virtual void Exception(const char * /*pszMessage*/) override;
+    void Exception(const char * /*pszMessage*/) override;
 
     json_object *StealRootObject();
+
+    inline bool HasTopLevelMeasures() const
+    {
+        return m_bHasTopLevelMeasures;
+    }
 
     inline bool IsTypeKnown() const
     {

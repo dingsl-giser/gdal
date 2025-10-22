@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  XLSX Translator
  * Purpose:  Definition of classes for OGR OpenOfficeSpreadsheet .xlsx driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_XLSX_H_INCLUDED
@@ -33,7 +16,7 @@
 #include "ogrsf_frmts.h"
 
 #include "ogr_expat.h"
-#include "ogr_mem.h"
+#include "memdataset.h"
 
 #include <vector>
 #include <set>
@@ -86,17 +69,17 @@ class OGRXLSXLayer final : public OGRMemLayer
         bHasHeaderLine = bIn;
     }
 
-    const char *GetName() override
+    const char *GetName() const override
     {
         return OGRMemLayer::GetLayerDefn()->GetName();
     }
 
-    OGRwkbGeometryType GetGeomType() override
+    OGRwkbGeometryType GetGeomType() const override
     {
         return wkbNone;
     }
 
-    virtual OGRSpatialReference *GetSpatialRef() override
+    const OGRSpatialReference *GetSpatialRef() const override
     {
         return nullptr;
     }
@@ -107,33 +90,35 @@ class OGRXLSXLayer final : public OGRMemLayer
         OGRMemLayer::ResetReading();
     }
 
+    int TestCapability(const char *pszCap) const override;
+
     const CPLString &GetFilename() const
     {
         return osFilename;
     }
 
     /* For external usage. Mess with FID */
-    virtual OGRFeature *GetNextFeature() override;
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
-    virtual OGRErr ISetFeature(OGRFeature *poFeature) override;
+    OGRFeature *GetNextFeature() override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRErr ISetFeature(OGRFeature *poFeature) override;
     OGRErr IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
                           const int *panUpdatedFieldsIdx,
                           int nUpdatedGeomFieldsCount,
                           const int *panUpdatedGeomFieldsIdx,
                           bool bUpdateStyleString) override;
-    virtual OGRErr DeleteFeature(GIntBig nFID) override;
+    OGRErr DeleteFeature(GIntBig nFID) override;
 
-    virtual OGRErr SetNextByIndex(GIntBig nIndex) override
+    OGRErr SetNextByIndex(GIntBig nIndex) override
     {
         Init();
         return OGRMemLayer::SetNextByIndex(nIndex);
     }
 
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
-        Init();
+        const_cast<OGRXLSXLayer *>(this)->Init();
         return OGRMemLayer::GetLayerDefn();
     }
 
@@ -146,14 +131,14 @@ class OGRXLSXLayer final : public OGRMemLayer
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
 
-    virtual OGRErr DeleteField(int iField) override
+    OGRErr DeleteField(int iField) override
     {
         Init();
         SetUpdated();
         return OGRMemLayer::DeleteField(iField);
     }
 
-    virtual OGRErr ReorderFields(int *panMap) override
+    OGRErr ReorderFields(int *panMap) override
     {
         Init();
         SetUpdated();
@@ -168,18 +153,12 @@ class OGRXLSXLayer final : public OGRMemLayer
         return OGRMemLayer::AlterFieldDefn(iField, poNewFieldDefn, nFlagsIn);
     }
 
-    int TestCapability(const char *pszCap) override
-    {
-        Init();
-        return OGRMemLayer::TestCapability(pszCap);
-    }
-
     const std::string &GetCols() const
     {
         return m_osCols;
     }
 
-    virtual OGRErr SyncToDisk() override;
+    OGRErr SyncToDisk() override;
 
     GDALDataset *GetDataset() override;
 };
@@ -297,7 +276,7 @@ class OGRXLSXDataSource final : public GDALDataset
 
   public:
     explicit OGRXLSXDataSource(CSLConstList papszOpenOptionsIn);
-    virtual ~OGRXLSXDataSource();
+    ~OGRXLSXDataSource() override;
     CPLErr Close() override;
 
     int Open(const char *pszFilename, const char *pszPrefixedFilename,
@@ -305,18 +284,18 @@ class OGRXLSXDataSource final : public GDALDataset
              VSILFILE *fpSharedStrings, VSILFILE *fpStyles, int bUpdate);
     int Create(const char *pszName, char **papszOptions);
 
-    virtual int GetLayerCount() override;
-    virtual OGRLayer *GetLayer(int) override;
+    int GetLayerCount() const override;
+    const OGRLayer *GetLayer(int) const override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    virtual OGRErr DeleteLayer(int iLayer) override;
+    OGRErr DeleteLayer(int iLayer) override;
 
-    virtual CPLErr FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
     void startElementCbk(const char *pszName, const char **ppszAttr);
     void endElementCbk(const char *pszName);

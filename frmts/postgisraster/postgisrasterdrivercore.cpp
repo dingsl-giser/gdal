@@ -4,34 +4,22 @@
  * Purpose:  Implements PostGIS Raster driver class methods
  * Author:   Jorge Arevalo, jorge.arevalo@deimos-space.com
  *
- * Last changes: $Id$
  *
  ******************************************************************************
  * Copyright (c) 2010, Jorge Arevalo, jorge.arevalo@deimos-space.com
  * Copyright (c) 2013, Even Rouault
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
+
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
 
 #include <stdexcept>
 
 #include "postgisrasterdrivercore.h"
+
+#include "gdalsubdatasetinfo.h"
 
 /************************************************************************/
 /*                     PostGISRasterDriverIdentify()                    */
@@ -115,7 +103,7 @@ char **PostGISRasterParseConnectionString(const char *pszConnectionString)
 /*                    PostGISRasterDriverGetSubdatasetInfo()            */
 /************************************************************************/
 
-struct PostGISRasterDriverSubdatasetInfo : public GDALSubdatasetInfo
+struct PostGISRasterDriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit PostGISRasterDriverSubdatasetInfo(const std::string &fileName)
@@ -125,55 +113,56 @@ struct PostGISRasterDriverSubdatasetInfo : public GDALSubdatasetInfo
 
     // GDALSubdatasetInfo interface
   private:
-    void parseFileName() override
-    {
-        if (!STARTS_WITH_CI(m_fileName.c_str(), "PG:"))
-        {
-            return;
-        }
-
-        char **papszParams =
-            PostGISRasterParseConnectionString(m_fileName.c_str());
-
-        const int nTableIdx = CSLFindName(papszParams, "table");
-        if (nTableIdx != -1)
-        {
-            size_t nTableStart = m_fileName.find("table=");
-            bool bHasQuotes{false};
-            try
-            {
-                bHasQuotes = m_fileName.at(nTableStart + 6) == '\'';
-            }
-            catch (const std::out_of_range &)
-            {
-                // ignore error
-            }
-
-            m_subdatasetComponent = papszParams[nTableIdx];
-
-            if (bHasQuotes)
-            {
-                m_subdatasetComponent.insert(6, "'");
-                m_subdatasetComponent.push_back('\'');
-            }
-
-            m_driverPrefixComponent = "PG";
-
-            size_t nPathLength = m_subdatasetComponent.length();
-            if (nTableStart != 0)
-            {
-                nPathLength++;
-                nTableStart--;
-            }
-
-            m_pathComponent = m_fileName;
-            m_pathComponent.erase(nTableStart, nPathLength);
-            m_pathComponent.erase(0, 3);
-        }
-
-        CSLDestroy(papszParams);
-    }
+    void parseFileName() override;
 };
+
+void PostGISRasterDriverSubdatasetInfo::parseFileName()
+{
+    if (!STARTS_WITH_CI(m_fileName.c_str(), "PG:"))
+    {
+        return;
+    }
+
+    char **papszParams = PostGISRasterParseConnectionString(m_fileName.c_str());
+
+    const int nTableIdx = CSLFindName(papszParams, "table");
+    if (nTableIdx != -1)
+    {
+        size_t nTableStart = m_fileName.find("table=");
+        bool bHasQuotes{false};
+        try
+        {
+            bHasQuotes = m_fileName.at(nTableStart + 6) == '\'';
+        }
+        catch (const std::out_of_range &)
+        {
+            // ignore error
+        }
+
+        m_subdatasetComponent = papszParams[nTableIdx];
+
+        if (bHasQuotes)
+        {
+            m_subdatasetComponent.insert(6, "'");
+            m_subdatasetComponent.push_back('\'');
+        }
+
+        m_driverPrefixComponent = "PG";
+
+        size_t nPathLength = m_subdatasetComponent.length();
+        if (nTableStart != 0)
+        {
+            nPathLength++;
+            nTableStart--;
+        }
+
+        m_pathComponent = m_fileName;
+        m_pathComponent.erase(nTableStart, nPathLength);
+        m_pathComponent.erase(0, 3);
+    }
+
+    CSLDestroy(papszParams);
+}
 
 static GDALSubdatasetInfo *
 PostGISRasterDriverGetSubdatasetInfo(const char *pszFileName)
@@ -201,6 +190,7 @@ void PostGISRasterDriverSetCommonMetadata(GDALDriver *poDriver)
     poDriver->SetMetadataItem(GDAL_DCAP_RASTER, "YES");
     poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "PostGIS Raster driver");
     poDriver->SetMetadataItem(GDAL_DMD_SUBDATASETS, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_CONNECTION_PREFIX, "PG:");
 
     poDriver->pfnIdentify = PostGISRasterDriverIdentify;
     poDriver->pfnGetSubdatasetInfoFunc = PostGISRasterDriverGetSubdatasetInfo;

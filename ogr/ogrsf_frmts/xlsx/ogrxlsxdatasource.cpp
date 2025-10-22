@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_xlsx.h"
@@ -264,6 +248,18 @@ GDALDataset *OGRXLSXLayer::GetDataset()
 }
 
 /************************************************************************/
+/*                           TestCapability()                           */
+/************************************************************************/
+
+int OGRXLSXLayer::TestCapability(const char *pszCap) const
+
+{
+    if (EQUAL(pszCap, OLCUpsertFeature))
+        return false;
+    return OGRMemLayer::TestCapability(pszCap);
+}
+
+/************************************************************************/
 /*                          OGRXLSXDataSource()                         */
 /************************************************************************/
 
@@ -320,7 +316,7 @@ CPLErr OGRXLSXDataSource::Close()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRXLSXDataSource::TestCapability(const char *pszCap)
+int OGRXLSXDataSource::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
@@ -343,7 +339,7 @@ int OGRXLSXDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRXLSXDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRXLSXDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || iLayer >= nLayers)
@@ -356,7 +352,7 @@ OGRLayer *OGRXLSXDataSource::GetLayer(int iLayer)
 /*                            GetLayerCount()                           */
 /************************************************************************/
 
-int OGRXLSXDataSource::GetLayerCount()
+int OGRXLSXDataSource::GetLayerCount() const
 {
     return nLayers;
 }
@@ -832,14 +828,22 @@ void OGRXLSXDataSource::startElementTable(const char *pszNameIn,
         apoCurLineValues.clear();
         apoCurLineTypes.clear();
 
-        int nNewCurLine = atoi(GetAttributeValue(ppszAttr, "r", "0"));
-        if (nNewCurLine <= 0)
+        int nNewCurLine;
+        if (const char *pszR = GetAttributeValue(ppszAttr, "r", nullptr))
         {
-            CPLError(CE_Failure, CPLE_AppDefined, "Invalid row: %d",
-                     nNewCurLine);
-            return;
+            nNewCurLine = atoi(pszR);
+            if (nNewCurLine <= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined, "Invalid row: %d",
+                         nNewCurLine);
+                return;
+            }
+            nNewCurLine--;
         }
-        nNewCurLine--;
+        else
+        {
+            nNewCurLine = nCurLine;
+        }
         const int nFields = std::max(
             static_cast<int>(apoFirstLineValues.size()),
             poCurLayer != nullptr ? poCurLayer->GetLayerDefn()->GetFieldCount()
@@ -912,8 +916,8 @@ void OGRXLSXDataSource::endElementTable(CPL_UNUSED const char *pszNameIn)
 
         if (poCurLayer)
         {
-            ((OGRMemLayer *)poCurLayer)->SetUpdatable(CPL_TO_BOOL(bUpdatable));
-            ((OGRXLSXLayer *)poCurLayer)->SetUpdated(false);
+            poCurLayer->SetUpdatable(CPL_TO_BOOL(bUpdatable));
+            poCurLayer->SetUpdated(false);
         }
 
         poCurLayer = nullptr;
@@ -1137,8 +1141,9 @@ void OGRXLSXDataSource::endElementRow(CPL_UNUSED const char *pszNameIn)
                         OGRFieldType eValType = GetOGRFieldType(
                             apoCurLineValues[i].c_str(),
                             apoCurLineTypes[i].c_str(), eValSubType);
+                        OGRLayer *poCurLayerAsLayer = poCurLayer;
                         OGRFieldDefn *poFieldDefn =
-                            poCurLayer->GetLayerDefn()->GetFieldDefn(
+                            poCurLayerAsLayer->GetLayerDefn()->GetFieldDefn(
                                 static_cast<int>(i));
                         const OGRFieldType eFieldType = poFieldDefn->GetType();
                         auto oIter = poCurLayer->oSetFieldsOfUnknownType.find(
@@ -2168,7 +2173,7 @@ static bool WriteWorkbook(const char *pszName, GDALDataset *poDS)
     VSIFPrintfL(fp, "<sheets>\n");
     for (int i = 0; i < poDS->GetLayerCount(); i++)
     {
-        OGRXLSXLayer *poLayer = (OGRXLSXLayer *)poDS->GetLayer(i);
+        auto poLayer = poDS->GetLayer(i);
         const char *pszLayerName = poLayer->GetName();
         char *pszXML = OGRGetXML_UTF8_EscapedString(pszLayerName);
         VSIFPrintfL(fp,
@@ -2246,7 +2251,7 @@ static bool WriteLayer(const char *pszName, OGRXLSXLayer *poLayer, int iLayer,
 
     OGRFeature *poFeature = poLayer->GetNextFeature();
 
-    OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
+    const OGRFeatureDefn *poFDefn = poLayer->GetLayerDefn();
     bool bHasHeaders = false;
     int iRow = 1;
 
@@ -2311,7 +2316,7 @@ static bool WriteLayer(const char *pszName, OGRXLSXLayer *poLayer, int iLayer,
             {
                 CPLString osCol = BuildColString(j);
 
-                OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn(j);
+                const OGRFieldDefn *poFieldDefn = poFDefn->GetFieldDefn(j);
                 OGRFieldType eType = poFieldDefn->GetType();
 
                 if (eType == OFTReal)

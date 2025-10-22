@@ -9,34 +9,23 @@
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 #include "ogr_dxf.h"
 #include "cpl_conv.h"
 #include "cpl_string.h"
 #include "cpl_vsi_error.h"
+
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
+#endif
 
 /************************************************************************/
 /*                          OGRDXFWriterDS()                          */
@@ -134,13 +123,18 @@ OGRDXFWriterDS::~OGRDXFWriterDS()
     delete poBlocksLayer;
 
     CSLDestroy(papszLayersToCreate);
+
+    if (m_bHeaderFileIsTemp)
+        VSIUnlink(osHeaderFile.c_str());
+    if (m_bTrailerFileIsTemp)
+        VSIUnlink(osTrailerFile.c_str());
 }
 
 /************************************************************************/
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRDXFWriterDS::TestCapability(const char *pszCap)
+int OGRDXFWriterDS::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
@@ -155,7 +149,7 @@ int OGRDXFWriterDS::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRDXFWriterDS::GetLayer(int iLayer)
+const OGRLayer *OGRDXFWriterDS::GetLayer(int iLayer) const
 
 {
     if (iLayer == 0)
@@ -168,7 +162,7 @@ OGRLayer *OGRDXFWriterDS::GetLayer(int iLayer)
 /*                           GetLayerCount()                            */
 /************************************************************************/
 
-int OGRDXFWriterDS::GetLayerCount()
+int OGRDXFWriterDS::GetLayerCount() const
 
 {
     if (poLayer)
@@ -191,13 +185,36 @@ int OGRDXFWriterDS::Open(const char *pszFilename, char **papszOptions)
         osHeaderFile = CSLFetchNameValue(papszOptions, "HEADER");
     else
     {
+#ifdef EMBED_RESOURCE_FILES
+        CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
+#endif
+#ifdef USE_ONLY_EMBEDDED_RESOURCE_FILES
+        const char *pszValue = nullptr;
+#else
         const char *pszValue = CPLFindFile("gdal", "header.dxf");
         if (pszValue == nullptr)
+#endif
         {
+#ifdef EMBED_RESOURCE_FILES
+            static const bool bOnce [[maybe_unused]] = []()
+            {
+                CPLDebug("DXF", "Using embedded header.dxf");
+                return true;
+            }();
+            pszValue = VSIMemGenerateHiddenFilename("header.dxf");
+            VSIFCloseL(VSIFileFromMemBuffer(
+                pszValue,
+                const_cast<GByte *>(
+                    reinterpret_cast<const GByte *>(OGRDXFGetHEADER())),
+                static_cast<int>(strlen(OGRDXFGetHEADER())),
+                /* bTakeOwnership = */ false));
+            m_bHeaderFileIsTemp = true;
+#else
             CPLError(CE_Failure, CPLE_OpenFailed,
                      "Failed to find template header file header.dxf for "
                      "reading,\nis GDAL_DATA set properly?");
             return FALSE;
+#endif
         }
         osHeaderFile = pszValue;
     }
@@ -209,9 +226,34 @@ int OGRDXFWriterDS::Open(const char *pszFilename, char **papszOptions)
         osTrailerFile = CSLFetchNameValue(papszOptions, "TRAILER");
     else
     {
+#ifdef EMBED_RESOURCE_FILES
+        CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
+#endif
+#ifdef USE_ONLY_EMBEDDED_RESOURCE_FILES
+        const char *pszValue = nullptr;
+#else
         const char *pszValue = CPLFindFile("gdal", "trailer.dxf");
         if (pszValue != nullptr)
             osTrailerFile = pszValue;
+#endif
+#ifdef EMBED_RESOURCE_FILES
+        if (!pszValue)
+        {
+            static const bool bOnce [[maybe_unused]] = []()
+            {
+                CPLDebug("DXF", "Using embedded trailer.dxf");
+                return true;
+            }();
+            osTrailerFile = VSIMemGenerateHiddenFilename("trailer.dxf");
+            m_bTrailerFileIsTemp = false;
+            VSIFCloseL(VSIFileFromMemBuffer(
+                osTrailerFile.c_str(),
+                const_cast<GByte *>(
+                    reinterpret_cast<const GByte *>(OGRDXFGetTRAILER())),
+                static_cast<int>(strlen(OGRDXFGetTRAILER())),
+                /* bTakeOwnership = */ false));
+        }
+#endif
     }
 
 /* -------------------------------------------------------------------- */
@@ -228,6 +270,11 @@ int OGRDXFWriterDS::Open(const char *pszFilename, char **papszOptions)
     if (CSLFetchNameValue(papszOptions, "FIRST_ENTITY") != nullptr)
         nNextFID = atoi(CSLFetchNameValue(papszOptions, "FIRST_ENTITY"));
 
+    m_osINSUNITS =
+        CSLFetchNameValueDef(papszOptions, "INSUNITS", m_osINSUNITS.c_str());
+    m_osMEASUREMENT = CSLFetchNameValueDef(papszOptions, "MEASUREMENT",
+                                           m_osMEASUREMENT.c_str());
+
     /* -------------------------------------------------------------------- */
     /*      Prescan the header and trailer for entity codes.                */
     /* -------------------------------------------------------------------- */
@@ -238,7 +285,7 @@ int OGRDXFWriterDS::Open(const char *pszFilename, char **papszOptions)
     /*      Attempt to read the template header file so we have a list      */
     /*      of layers, linestyles and blocks.                               */
     /* -------------------------------------------------------------------- */
-    if (!oHeaderDS.Open(osHeaderFile, true, nullptr))
+    if (!oHeaderDS.Open(osHeaderFile, nullptr, true, nullptr))
         return FALSE;
 
     /* -------------------------------------------------------------------- */
@@ -275,12 +322,17 @@ int OGRDXFWriterDS::Open(const char *pszFilename, char **papszOptions)
 /*                           ICreateLayer()                             */
 /************************************************************************/
 
-OGRLayer *
-OGRDXFWriterDS::ICreateLayer(const char *pszName,
-                             const OGRGeomFieldDefn * /*poGeomFieldDefn*/,
-                             CSLConstList /*papszOptions*/)
+OGRLayer *OGRDXFWriterDS::ICreateLayer(const char *pszName,
+                                       const OGRGeomFieldDefn *poGeomFieldDefn,
+                                       CSLConstList /*papszOptions*/)
 
 {
+    if (poGeomFieldDefn)
+    {
+        const auto poSRS = poGeomFieldDefn->GetSpatialRef();
+        if (poSRS)
+            m_oSRS = *poSRS;
+    }
     if (EQUAL(pszName, "blocks") && poBlocksLayer == nullptr)
     {
         poBlocksLayer = new OGRDXFBlocksWriterLayer(this);
@@ -487,6 +539,135 @@ bool OGRDXFWriterDS::TransferUpdateHeader(VSILFILE *fpOut)
             }
         }
 
+        // Patch INSUNITS
+        if (nCode == 9 && EQUAL(szLineBuf, "$INSUNITS") &&
+            m_osINSUNITS != "HEADER_VALUE")
+        {
+            if (!WriteValue(fpOut, nCode, szLineBuf))
+                return false;
+            nCode = oHeaderDS.ReadValue(szLineBuf, sizeof(szLineBuf));
+            if (nCode == 70)
+            {
+                int nVal = -1;
+                if (m_osINSUNITS == "AUTO" && m_oSRS.IsProjected())
+                {
+                    const char *pszUnits = nullptr;
+                    const double dfUnits = m_oSRS.GetLinearUnits(&pszUnits);
+                    const auto IsAlmostEqual = [](double x, double y)
+                    { return std::fabs(x - y) <= 1e-10; };
+                    if (IsAlmostEqual(dfUnits, 1)) /* METERS */
+                    {
+                        nVal = 6;
+                    }
+                    else if (IsAlmostEqual(dfUnits, CPLAtof(SRS_UL_FOOT_CONV)))
+                    {
+                        nVal = 2;
+                    }
+                    else if (IsAlmostEqual(dfUnits,
+                                           CPLAtof(SRS_UL_US_FOOT_CONV)))
+                    {
+                        nVal = 21;
+                    }
+                    else
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Could not translate CRS unit %s to "
+                                 "$INSUNIT. Using default value from "
+                                 "template header file",
+                                 pszUnits);
+                    }
+                }
+                else if (m_osINSUNITS != "AUTO")
+                {
+                    static const struct
+                    {
+                        const char *pszValue;
+                        int nValue;
+                    } INSUNITSMap[] = {
+                        {"UNITLESS", 0},
+                        {"INCHES", 1},
+                        {"FEET", 2},
+                        {"MILLIMETERS", 4},
+                        {"CENTIMETERS", 5},
+                        {"METERS", 6},
+                        {"US_SURVEY_FEET", 21},
+                    };
+
+                    for (const auto &sTuple : INSUNITSMap)
+                    {
+                        if (m_osINSUNITS == sTuple.pszValue ||
+                            m_osINSUNITS == CPLSPrintf("%d", sTuple.nValue))
+                        {
+                            nVal = sTuple.nValue;
+                            break;
+                        }
+                    }
+                    if (nVal < 0)
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Could not translate $INSUNITS=%s. "
+                                 "Using default value from template header "
+                                 "file",
+                                 m_osINSUNITS.c_str());
+                    }
+                }
+
+                if (nVal >= 0)
+                {
+                    if (!WriteValue(fpOut, nCode, CPLSPrintf("%d", nVal)))
+                        return false;
+
+                    continue;
+                }
+            }
+        }
+
+        // Patch MEASUREMENT
+        if (nCode == 9 && EQUAL(szLineBuf, "$MEASUREMENT") &&
+            m_osMEASUREMENT != "HEADER_VALUE")
+        {
+            if (!WriteValue(fpOut, nCode, szLineBuf))
+                return false;
+            nCode = oHeaderDS.ReadValue(szLineBuf, sizeof(szLineBuf));
+            if (nCode == 70)
+            {
+                int nVal = -1;
+
+                static const struct
+                {
+                    const char *pszValue;
+                    int nValue;
+                } MEASUREMENTMap[] = {
+                    {"IMPERIAL", 0},
+                    {"METRIC", 1},
+                };
+
+                for (const auto &sTuple : MEASUREMENTMap)
+                {
+                    if (m_osMEASUREMENT == sTuple.pszValue ||
+                        m_osMEASUREMENT == CPLSPrintf("%d", sTuple.nValue))
+                    {
+                        nVal = sTuple.nValue;
+                        break;
+                    }
+                }
+                if (nVal < 0)
+                {
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Could not translate $MEASUREMENT=%s. "
+                             "Using default value from template header file",
+                             m_osMEASUREMENT.c_str());
+                }
+                else
+                {
+                    if (!WriteValue(fpOut, nCode, CPLSPrintf("%d", nVal)))
+                        return false;
+
+                    continue;
+                }
+            }
+        }
+
         // Copy over the source line.
         if (!WriteValue(fpOut, nCode, szLineBuf))
             return false;
@@ -563,7 +744,7 @@ bool OGRDXFWriterDS::TransferUpdateTrailer(VSILFILE *fpOut)
     if (l_fp == nullptr)
         return false;
 
-    OGRDXFReader oReader;
+    OGRDXFReaderASCII oReader;
     oReader.Initialize(l_fp);
 
     /* -------------------------------------------------------------------- */
@@ -696,7 +877,7 @@ bool OGRDXFWriterDS::WriteNewLayerDefinitions(VSILFILE *fpOut)
             }
             else if (anDefaultLayerCode[i] == 5)
             {
-                long nIgnored;
+                unsigned int nIgnored;
                 if (!WriteEntityID(fpOut, nIgnored))
                     return false;
             }
@@ -739,7 +920,7 @@ bool OGRDXFWriterDS::WriteNewLineTypeRecords(VSILFILE *fpIn)
     for (const auto &oPair : oNewLineTypes)
     {
         bRet &= WriteValue(fpIn, 0, "LTYPE");
-        long nIgnored;
+        unsigned int nIgnored;
         bRet &= WriteEntityID(fpIn, nIgnored);
         bRet &= WriteValue(fpIn, 100, "AcDbSymbolTableRecord");
         bRet &= WriteValue(fpIn, 100, "AcDbLinetypeTableRecord");
@@ -780,7 +961,7 @@ bool OGRDXFWriterDS::WriteNewTextStyleRecords(VSILFILE *fpIn)
     for (auto &oPair : oNewTextStyles)
     {
         bRet &= WriteValue(fpIn, 0, "STYLE");
-        long nIgnored;
+        unsigned int nIgnored;
         bRet &= WriteEntityID(fpIn, nIgnored);
         bRet &= WriteValue(fpIn, 100, "AcDbSymbolTableRecord");
         bRet &= WriteValue(fpIn, 100, "AcDbTextStyleTableRecord");
@@ -847,7 +1028,7 @@ bool OGRDXFWriterDS::WriteNewBlockRecords(VSILFILE *fpIn)
         if (aosAlreadyHandled.find(osBlockName) != aosAlreadyHandled.end())
             continue;
 
-        aosAlreadyHandled.insert(osBlockName);
+        aosAlreadyHandled.insert(std::move(osBlockName));
 
         /* --------------------------------------------------------------------
          */
@@ -855,7 +1036,7 @@ bool OGRDXFWriterDS::WriteNewBlockRecords(VSILFILE *fpIn)
         /* --------------------------------------------------------------------
          */
         bRet &= WriteValue(fpIn, 0, "BLOCK_RECORD");
-        long nIgnored;
+        unsigned int nIgnored;
         bRet &= WriteEntityID(fpIn, nIgnored);
         bRet &= WriteValue(fpIn, 100, "AcDbSymbolTableRecord");
         bRet &= WriteValue(fpIn, 100, "AcDbBlockTableRecord");
@@ -904,7 +1085,7 @@ bool OGRDXFWriterDS::WriteNewBlockDefinitions(VSILFILE *fpIn)
                  poThisBlockFeat->GetFieldAsString("Block"));
 
         bRet &= WriteValue(fpIn, 0, "BLOCK");
-        long nIgnored;
+        unsigned int nIgnored;
         bRet &= WriteEntityID(fpIn, nIgnored);
         bRet &= WriteValue(fpIn, 100, "AcDbEntity");
         if (strlen(poThisBlockFeat->GetFieldAsString("Layer")) > 0)
@@ -988,7 +1169,7 @@ void OGRDXFWriterDS::ScanForEntities(const char *pszFilename,
     if (l_fp == nullptr)
         return;
 
-    OGRDXFReader oReader;
+    OGRDXFReaderASCII oReader;
     oReader.Initialize(l_fp);
 
     /* -------------------------------------------------------------------- */
@@ -1008,7 +1189,7 @@ void OGRDXFWriterDS::ScanForEntities(const char *pszFilename,
                 CPLDebug("DXF", "Encountered entity '%s' multiple times.",
                          osEntity.c_str());
             else
-                aosUsedEntities.insert(osEntity);
+                aosUsedEntities.insert(std::move(osEntity));
         }
 
         if (nCode == 0 && EQUAL(szLineBuf, "SECTION"))
@@ -1043,22 +1224,26 @@ bool OGRDXFWriterDS::CheckEntityID(const char *pszEntityID)
 /*                           WriteEntityID()                            */
 /************************************************************************/
 
-bool OGRDXFWriterDS::WriteEntityID(VSILFILE *fpIn, long &nAssignedFID,
-                                   long nPreferredFID)
+bool OGRDXFWriterDS::WriteEntityID(VSILFILE *fpIn, unsigned int &nAssignedFID,
+                                   GIntBig nPreferredFID)
 
 {
     CPLString osEntityID;
 
-    if (nPreferredFID != OGRNullFID)
+    // From https://github.com/OSGeo/gdal/issues/11299 it seems that 0 is an
+    // invalid handle value.
+    if (nPreferredFID > 0 &&
+        nPreferredFID <=
+            static_cast<GIntBig>(std::numeric_limits<unsigned int>::max()))
     {
 
-        osEntityID.Printf("%X", (unsigned int)nPreferredFID);
+        osEntityID.Printf("%X", static_cast<unsigned int>(nPreferredFID));
         if (!CheckEntityID(osEntityID))
         {
             aosUsedEntities.insert(osEntityID);
             if (!WriteValue(fpIn, 5, osEntityID))
                 return false;
-            nAssignedFID = nPreferredFID;
+            nAssignedFID = static_cast<unsigned int>(nPreferredFID);
             return true;
         }
     }

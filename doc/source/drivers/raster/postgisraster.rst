@@ -59,7 +59,7 @@ unnecessary fields (like password, in some cases).
       more than one row. This mode is intended for reading tiled rasters
       from database.
 
--  **outdb_resolution** - (GDAL >= 2.3.1) option to specify how
+-  **outdb_resolution** - Option to specify how
    out-database rasters should be resolved. Default is server_side.
 
    -  **server_side**: The outDB raster will be fetched by the
@@ -130,6 +130,6 @@ See Also
 --------
 
 -  `GDAL PostGISRaster driver
-   Wiki <https://trac.osgeo.org/gdal/wiki/frmts_wtkraster.html>`__
+   Wiki <http://web.archive.org/web/20240812045916/https://trac.osgeo.org/gdal/wiki/frmts_wtkraster.html>`__
 -  `PostGIS Raster
    documentation <https://postgis.net/docs/RT_reference.html>`__

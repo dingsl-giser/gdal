@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Purpose:  Interface of Prologue class. Parse the prologue of one repeat
  *           cycle and keep the interesting info.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2004, ITC
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #if !defined(AFX_PROLOGUE_H__777B5B86_04F4_4A01_86F6_24615DCD8446__INCLUDED_)
@@ -56,7 +39,7 @@ class PlannedCoverageVIS_IRRecord
     int WesternColumnPlanned;
 };
 
-class PlannedCoverageHRVRecord
+class PlannedCoverageHRVRecord final
 {
   public:
     explicit PlannedCoverageHRVRecord(std::ifstream &ifile);
@@ -70,13 +53,13 @@ class PlannedCoverageHRVRecord
     int UpperWestColumnPlanned;
 };
 
-class ImageDescriptionRecord
+class ImageDescriptionRecord final
 {
     CPL_DISALLOW_COPY_ASSIGN(ImageDescriptionRecord)
 
   public:
     explicit ImageDescriptionRecord(std::ifstream &ifile);
-    virtual ~ImageDescriptionRecord();
+    ~ImageDescriptionRecord();
 
     unsigned char
         TypeOfProjection;  // 1 == Geostationary, Earth centered in grid
@@ -99,11 +82,11 @@ class RadiometricProcessingRecord
     double Cal_Offset[12];
 };
 
-class Prologue
+class Prologue final
 {
   public:
     Prologue();
-    virtual ~Prologue();
+    ~Prologue();
 
     void read(std::ifstream &ifile);
 
@@ -120,6 +103,11 @@ class Prologue
   private:
     ImageDescriptionRecord *m_idr;
     RadiometricProcessingRecord *m_rpr;
+
+    Prologue(const Prologue &) = delete;
+    Prologue &operator=(const Prologue &) = delete;
+    Prologue(Prologue &&) = delete;
+    Prologue &operator=(Prologue &&) = delete;
 };
 
 #endif  // !defined(AFX_PROLOGUE_H__777B5B86_04F4_4A01_86F6_24615DCD8446__INCLUDED_)

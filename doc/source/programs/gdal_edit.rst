@@ -15,14 +15,14 @@ Synopsis
 
 .. code-block::
 
-    gdal_edit [--help] [--help-general] [-ro] [-a_srs <srs_def>] 
+    gdal_edit [--help] [--help-general] [-ro] [-a_srs <srs_def>]
             [-a_ullr <ulx> <uly> <lrx> <lry>] [-a_ulurll <ulx> <uly> <urx> <ury> <llx> <lly>]
             [-tr <xres> <yres>] [-unsetgt] [-unsetrpc] [-a_nodata <value>] [-unsetnodata]
             [-a_coord_epoch <epoch>] [-unsetepoch]
             [-unsetstats] [-stats] [-approx_stats]
             [-setstats <min> <max> <mean> <stddev>]
             [-scale <value>] [-offset <value>] [-units <value>]
-            [-colorinterp_<X> {red|green|blue|alpha|gray|undefined}]...
+            [-colorinterp_<X> {red|green|blue|alpha|gray|undefined|pan|coastal|rededge|nir|swir|mwir|lwir|...}]...
             [-gcp <pixel> <line> <easting> <northing> [<elevation>]]...
             [-unsetmd] [-oo <NAME>=<VALUE>]... [-mo <META-TAG>=<VALUE>]...
             <datasetname>
@@ -100,34 +100,24 @@ It works only with raster formats that support update access to existing dataset
 
     Remove RPC information.
 
-    .. versionadded:: 2.4
-
 .. option:: -unsetstats
 
     Remove band statistics information.
-
-    .. versionadded:: 2.0
 
 .. option:: -stats
 
     Calculate and store band statistics.
 
-    .. versionadded:: 2.0
-
 .. option:: -setstats <min> <max> <mean> <stddev>
 
     Store user-defined values for band statistics (minimum, maximum,
     mean and standard deviation). If any of the values is set to None,
-    the real statistics are calclulated from the file and the ones set
+    the real statistics are calculated from the file and the ones set
     to None are used from the real statistics.
-
-    .. versionadded:: 2.4
 
 .. option:: -approx_stats
 
     Calculate and store approximate band statistics.
-
-    .. versionadded:: 2.0
 
 .. option:: -a_nodata <value>
 
@@ -136,8 +126,6 @@ It works only with raster formats that support update access to existing dataset
 .. option:: -unsetnodata
 
     Remove existing nodata values.
-
-    .. versionadded:: 2.1
 
 .. option:: -scale <value>
 
@@ -153,8 +141,6 @@ It works only with raster formats that support update access to existing dataset
 
     .. note:: These values can be applied using -unscale during a :program:`gdal_translate` run.
 
-    .. versionadded:: 2.2
-
 .. option:: -offset <value>
 
     Assign a specified offset value to output bands.
@@ -164,20 +150,16 @@ It works only with raster formats that support update access to existing dataset
     If no offset is needed, it recommended to set the value to 0.
     For more see scale.
 
-    .. versionadded:: 2.2
-
 .. option:: -units <value>
 
     Assign a unit to output band(s).
 
     .. versionadded:: 3.1
 
-.. option:: -colorinterp_<X> {red|green|blue|alpha|gray|undefined}
+.. option:: -colorinterp_<X> {red|green|blue|alpha|gray|undefined|pan|coastal|rededge|nir|swir|mwir|lwir|...}
 
     Change the color interpretation of band X (where X is a valid band
     number, starting at 1).
-
-    .. versionadded:: 2.3
 
 .. option:: -gcp pixel <line> <easting> <northing> [<elevation>]
 
@@ -189,8 +171,6 @@ It works only with raster formats that support update access to existing dataset
     Remove existing metadata (in the default metadata domain).
     Can be combined with :option:`-mo`.
 
-    .. versionadded:: 2.0
-
 .. option:: -mo <META-TAG>=<VALUE>
 
     Passes a metadata key and value to set on the output dataset if possible.
@@ -201,8 +181,6 @@ It works only with raster formats that support update access to existing dataset
 
     Open option (format specific).
 
-    .. versionadded:: 2.0
-
 The :option:`-a_ullr`, :option:`-a_ulurll`, :option:`-tr` and :option:`-unsetgt` options are exclusive.
 
 The :option:`-unsetstats` and either :option:`-stats` or :option:`-approx_stats` options are exclusive.
@@ -210,10 +188,18 @@ The :option:`-unsetstats` and either :option:`-stats` or :option:`-approx_stats`
 Example
 -------
 
-.. code-block::
+.. example::
+   :title: Override the spatial bounds of a dataset and assign metadata values
 
-    gdal_edit -mo DATUM=WGS84 -mo PROJ=GEODETIC -a_ullr 7 47 8 46 test.ecw
+   .. code-block:: bash
 
-.. code-block::
+       gdal_edit -mo DATUM=WGS84 -mo PROJ=GEODETIC -a_ullr 7 47 8 46 test.ecw
 
-    gdal_edit -scale 1e3 1e4 -offset 0 10 twoBand.tif
+.. example::
+   :title: Assign scale and offset values to dataset
+
+   .. code-block:: bash
+
+       gdal_edit -scale 1e3 1e4 -offset 0 10 twoBand.tif
+
+   The values in the GeoTIFF are not changed.

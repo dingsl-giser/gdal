@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  jpip read driver
  * Purpose:  GDAL bindings for JPIP.
@@ -11,22 +10,7 @@ following license:
  *
  * Copyright (c) 2000-2007, ITT Visual Information Solutions
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
-
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
 **/
 
 #include "gdal_pam.h"
@@ -190,7 +174,7 @@ class JPIPKAKDataset final : public GDALPamDataset
     int nCodestream = 0;
     long nDatabins = 0;
 
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     int bWindowDone = FALSE;
     int bGeoTransformValid = FALSE;
@@ -226,7 +210,7 @@ class JPIPKAKDataset final : public GDALPamDataset
 
   public:
     JPIPKAKDataset();
-    virtual ~JPIPKAKDataset();
+    ~JPIPKAKDataset() override;
 
     // progressive methods
     virtual GDALAsyncReader *
@@ -236,7 +220,7 @@ class JPIPKAKDataset final : public GDALPamDataset
                      int nLineSpace, int nBandSpace,
                      char **papszOptions) override;
 
-    virtual void EndAsyncReader(GDALAsyncReader *) override;
+    void EndAsyncReader(GDALAsyncReader *) override;
 
     int GetNQualityLayers() const
     {
@@ -260,18 +244,17 @@ class JPIPKAKDataset final : public GDALPamDataset
                        int nBandCount, const int *panBandList) const;
 
     // gdaldataset methods
-    virtual CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
-    virtual int GetGCPCount() override;
+    int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
-    virtual const GDAL_GCP *GetGCPs() override;
-    virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                             int nXSize, int nYSize, void *pData, int nBufXSize,
-                             int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, BANDMAP_TYPE panBandMap,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GSpacing nBandSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    const GDAL_GCP *GetGCPs() override;
+    CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
+                     int nYSize, void *pData, int nBufXSize, int nBufYSize,
+                     GDALDataType eBufType, int nBandCount,
+                     BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static const GByte JPIP_EOR_IMAGE_DONE = 1;
@@ -313,16 +296,15 @@ class JPIPKAKRasterBand final : public GDALPamRasterBand
 
   public:
     JPIPKAKRasterBand(int, int, kdu_codestream *, int, JPIPKAKDataset *);
-    virtual ~JPIPKAKRasterBand();
+    ~JPIPKAKRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, GSpacing nPixelSpace,
-                             GSpacing nLineSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
+                     GDALDataType, GSpacing nPixelSpace, GSpacing nLineSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
-    virtual int GetOverviewCount() override;
-    virtual GDALRasterBand *GetOverview(int) override;
+    int GetOverviewCount() override;
+    GDALRasterBand *GetOverview(int) override;
 };
 
 /************************************************************************/
@@ -352,7 +334,7 @@ class JPIPKAKAsyncReader final : public GDALAsyncReader
 
   public:
     JPIPKAKAsyncReader();
-    virtual ~JPIPKAKAsyncReader();
+    ~JPIPKAKAsyncReader() override;
 
     virtual GDALAsyncStatusType
     GetNextUpdatedRegion(double timeout, int *pnxbufoff, int *pnybufoff,

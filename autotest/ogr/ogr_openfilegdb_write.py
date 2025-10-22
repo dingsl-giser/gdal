@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  OpenFileGDB driver testing (write side)
@@ -10,25 +9,10 @@
 ###############################################################################
 # Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import os
 import struct
 import sys
 
@@ -2410,6 +2394,7 @@ def test_ogr_openfilegdb_write_alter_field_defn(tmp_vsimem):
 # Test writing field domains
 
 
+@gdaltest.enable_exceptions()
 def test_ogr_openfilegdb_write_domains(tmp_vsimem):
 
     dirname = tmp_vsimem / "out.gdb"
@@ -2427,9 +2412,44 @@ def test_ogr_openfilegdb_write_domains(tmp_vsimem):
     fld_defn.SetDomainName("domain")
     assert lyr.CreateField(fld_defn) == ogr.OGRERR_NONE
 
-    fld_defn = ogr.FieldDefn("foo2", ogr.OFTInteger)
-    fld_defn.SetDomainName("domain")
+    fld_defn = ogr.FieldDefn("int_range", ogr.OFTInteger)
+    fld_defn.SetDomainName("int_range_domain")
+    domain = ogr.CreateRangeFieldDomain(
+        "int_range_domain",
+        "int_range_desc",
+        ogr.OFTInteger,
+        ogr.OFSTNone,
+        1,
+        True,
+        2,
+        True,
+    )
+    assert ds.AddFieldDomain(domain)
     assert lyr.CreateField(fld_defn) == ogr.OGRERR_NONE
+
+    fld_defn = ogr.FieldDefn("real_range", ogr.OFTReal)
+    fld_defn.SetDomainName("real_range_domain")
+    domain = ogr.CreateRangeFieldDomain(
+        "real_range_domain", "desc", ogr.OFTReal, ogr.OFSTNone, 1.5, True, 2.5, True
+    )
+    assert ds.AddFieldDomain(domain)
+    assert lyr.CreateField(fld_defn) == ogr.OGRERR_NONE
+
+    domain = ogr.CreateRangeFieldDomain(
+        "int_range_without_bounds",
+        "desc",
+        ogr.OFTInteger,
+        ogr.OFSTNone,
+        None,
+        False,
+        None,
+        False,
+    )
+    with pytest.raises(
+        Exception,
+        match="FileGeoDatabase requires that both minimum and maximum values of a range field domain are set",
+    ):
+        ds.AddFieldDomain(domain)
 
     domain = ogr.CreateRangeFieldDomainDateTime(
         "datetime_range",
@@ -2443,7 +2463,27 @@ def test_ogr_openfilegdb_write_domains(tmp_vsimem):
     ds = None
 
     ds = gdal.OpenEx(dirname)
-    assert ds.GetLayerByName("GDB_ItemRelationships").GetFeatureCount() == 2
+    assert ds.GetLayerByName("GDB_ItemRelationships").GetFeatureCount() == 4
+
+    domain = ds.GetFieldDomain("int_range_domain")
+    assert domain is not None
+    assert domain.GetName() == "int_range_domain"
+    assert domain.GetDescription() == "int_range_desc"
+    assert domain.GetDomainType() == ogr.OFDT_RANGE
+    assert domain.GetFieldType() == ogr.OFTInteger
+    assert domain.GetFieldSubType() == ogr.OFSTNone
+    assert domain.GetMinAsDouble() == 1
+    assert domain.GetMaxAsDouble() == 2
+
+    domain = ds.GetFieldDomain("real_range_domain")
+    assert domain is not None
+    assert domain.GetName() == "real_range_domain"
+    assert domain.GetDescription() == "desc"
+    assert domain.GetDomainType() == ogr.OFDT_RANGE
+    assert domain.GetFieldType() == ogr.OFTReal
+    assert domain.GetFieldSubType() == ogr.OFSTNone
+    assert domain.GetMinAsDouble() == 1.5
+    assert domain.GetMaxAsDouble() == 2.5
 
     domain = ds.GetFieldDomain("datetime_range")
     assert domain is not None
@@ -2455,6 +2495,15 @@ def test_ogr_openfilegdb_write_domains(tmp_vsimem):
     assert domain.GetMinAsString() == "2023-07-03T12:13:14"
     assert domain.GetMaxAsString() == "2023-07-03T12:13:15"
 
+    ds = None
+
+    ds = ogr.Open(dirname, update=1)
+    lyr = ds.GetLayer(0)
+    assert lyr.DeleteField(0) == ogr.OGRERR_NONE
+    ds = None
+
+    ds = ogr.Open(dirname, update=1)
+    assert ds.GetLayerByName("GDB_ItemRelationships").GetFeatureCount() == 3
     ds = None
 
     ds = ogr.Open(dirname, update=1)
@@ -4270,18 +4319,19 @@ def test_ogr_openfilegdb_write_new_datetime_types(tmp_vsimem):
 
     filename = str(tmp_vsimem / "out.gdb")
     with gdal.quiet_errors():
+        gdal.ErrorReset()
         ds = gdal.VectorTranslate(
             filename,
             "data/filegdb/arcgis_pro_32_types.gdb",
-            format="OpenFileGDB",
             layers=["date_types", "date_types_high_precision"],
             layerCreationOptions=["TARGET_ARCGIS_VERSION=ARCGIS_PRO_3_2_OR_LATER"],
         )
+        assert gdal.GetLastErrorMsg() == ""
 
     lyr = ds.GetLayerByName("date_types")
     lyr_defn = lyr.GetLayerDefn()
 
-    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date_"))
+    fld_defn = lyr_defn.GetFieldDefn(lyr_defn.GetFieldIndex("date"))
     assert fld_defn.GetType() == ogr.OFTDateTime
     assert fld_defn.GetDefault() == "'2023/02/01 04:05:06'"
 
@@ -4298,13 +4348,13 @@ def test_ogr_openfilegdb_write_new_datetime_types(tmp_vsimem):
     assert fld_defn.GetDefault() == "'2023/02/01 04:05:06.000+06:00'"
 
     f = lyr.GetNextFeature()
-    assert f["date_"] == "2023/11/29 13:14:15+00"
+    assert f["date"] == "2023/11/29 13:14:15+00"
     assert f["date_only"] == "2023/11/29"
     assert f["time_only"] == "13:14:15"
     assert f["timestamp_offset"] == "2023/11/29 13:14:15-05"
 
     f = lyr.GetNextFeature()
-    assert f["date_"] == "2023/12/31 00:01:01+00"
+    assert f["date"] == "2023/12/31 00:01:01+00"
     assert f["date_only"] == "2023/12/31"
     assert f["time_only"] == "00:01:01"
     assert f["timestamp_offset"] == "2023/12/31 00:01:01+10"
@@ -4313,13 +4363,13 @@ def test_ogr_openfilegdb_write_new_datetime_types(tmp_vsimem):
     lyr_defn = lyr.GetLayerDefn()
 
     f = lyr.GetNextFeature()
-    assert f["date_"] == "2023/11/29 13:14:15.678+00"
+    assert f["date"] == "2023/11/29 13:14:15.678+00"
     assert f["date_only"] == "2023/11/29"
     assert f["time_only"] == "13:14:15"
     assert f["timestamp_offset"] == "2023/11/29 13:14:15-05"
 
     f = lyr.GetNextFeature()
-    assert f["date_"] == "2023/12/31 00:01:01.001+00"
+    assert f["date"] == "2023/12/31 00:01:01.001+00"
     assert f["date_only"] == "2023/12/31"
     assert f["time_only"] == "00:01:01"
     assert f["timestamp_offset"] == "2023/12/31 00:01:01+10"
@@ -4587,3 +4637,74 @@ def test_ogr_openfilegdb_write_OGRUnsetMarker(tmp_vsimem):
         lyr = ds.GetLayer(0)
         f = lyr.GetNextFeature()
         assert f["i32"] == -21121
+
+
+###############################################################################
+# Verify that we can generate an output that is byte-identical to the expected golden file.
+
+
+@pytest.mark.parametrize(
+    "src_directory",
+    [
+        # Generated with:
+        # ogr2ogr autotest/ogr/data/openfilegdb/polygon_golden.gdb '{"type":"Feature","properties":{"foo":"bar"},"geometry":{"type":"Polygon","coordinates":[[[0,0],[0,1],[1,0],[0,0]]]}}' --config OPENFILEGDB_CREATOR GDAL --config OPENFILEGDB_REPRODUCIBLE_UUID YES -f openfilegdb
+        "data/openfilegdb/polygon_golden.gdb",
+    ],
+)
+def test_ogr_openfilegdb_write_check_golden_file(tmp_path, src_directory):
+
+    out_directory = str(tmp_path / "test.gdb")
+    with gdaltest.config_options(
+        {"OPENFILEGDB_CREATOR": "GDAL", "OPENFILEGDB_REPRODUCIBLE_UUID": "YES"}
+    ):
+        gdal.VectorTranslate(out_directory, src_directory, format="OpenFileGDB")
+    for filename in os.listdir(src_directory):
+        src_filename = os.path.join(src_directory, filename)
+        out_filename = os.path.join(out_directory, filename)
+
+        assert os.stat(src_filename).st_size == os.stat(out_filename).st_size, filename
+        assert (
+            open(src_filename, "rb").read() == open(out_filename, "rb").read()
+        ), filename
+
+
+###############################################################################
+# Test 'gdal driver openfilegdb repack'
+
+
+@gdaltest.enable_exceptions()
+def test_ogropenfilegdb_write_gdal_driver_openfilegdb_repack(tmp_path):
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]
+    assert alg.GetName() == "driver"
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["openfilegdb"]
+    assert alg.GetName() == "openfilegdb"
+
+    out_directory = str(tmp_path / "test.gdb")
+    gdal.VectorTranslate(
+        out_directory, "data/openfilegdb/polygon_golden.gdb", format="OpenFileGDB"
+    )
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["openfilegdb"]["repack"]
+    assert alg.GetName() == "repack"
+    alg["dataset"] = "data/poly.shp"
+    with pytest.raises(Exception, match="is not a FileGeoDatabase"):
+        alg.Run()
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["openfilegdb"]["repack"]
+    assert alg.GetName() == "repack"
+    alg["dataset"] = out_directory
+    assert alg.Run()
+
+    last_pct = [0]
+
+    def my_progress(pct, msg, user_data):
+        last_pct[0] = pct
+        return True
+
+    alg = gdal.GetGlobalAlgorithmRegistry()["driver"]["openfilegdb"]["repack"]
+    assert alg.GetName() == "repack"
+    alg["dataset"] = out_directory
+    assert alg.Run(my_progress)
+    assert last_pct[0] == 1.0

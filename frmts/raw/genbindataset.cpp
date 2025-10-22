@@ -8,27 +8,12 @@
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -49,8 +34,8 @@ class GenBinDataset final : public RawDataset
 
     VSILFILE *fpImage;  // image data file.
 
-    bool bGotTransform;
-    double adfGeoTransform[6];
+    bool bGotTransform{};
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
 
     char **papszHDR;
@@ -65,7 +50,7 @@ class GenBinDataset final : public RawDataset
     GenBinDataset();
     ~GenBinDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -126,7 +111,7 @@ CPLErr GenBinBitRasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
                                        void *pImage)
 
 {
-    GenBinDataset *poGDS = reinterpret_cast<GenBinDataset *>(poDS);
+    GenBinDataset *poGDS = cpl::down_cast<GenBinDataset *>(poDS);
 
     /* -------------------------------------------------------------------- */
     /*      Establish desired position.                                     */
@@ -212,12 +197,6 @@ GenBinDataset::GenBinDataset()
     : fpImage(nullptr), bGotTransform(false), papszHDR(nullptr)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -263,16 +242,16 @@ CPLErr GenBinDataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GenBinDataset::GetGeoTransform(double *padfTransform)
+CPLErr GenBinDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGotTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -282,14 +261,14 @@ CPLErr GenBinDataset::GetGeoTransform(double *padfTransform)
 char **GenBinDataset::GetFileList()
 
 {
-    const CPLString osPath = CPLGetPath(GetDescription());
-    const CPLString osName = CPLGetBasename(GetDescription());
+    const CPLString osPath = CPLGetPathSafe(GetDescription());
+    const CPLString osName = CPLGetBasenameSafe(GetDescription());
 
     // Main data file, etc.
     char **papszFileList = GDALPamDataset::GetFileList();
 
     // Header file.
-    const CPLString osFilename = CPLFormCIFilename(osPath, osName, "hdr");
+    const CPLString osFilename = CPLFormCIFilenameSafe(osPath, osName, "hdr");
     papszFileList = CSLAddString(papszFileList, osFilename);
 
     return papszFileList;
@@ -410,31 +389,36 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      We assume the user is pointing to the binary (i.e. .bil) file.  */
     /* -------------------------------------------------------------------- */
-    if (poOpenInfo->nHeaderBytes < 2 || poOpenInfo->fpL == nullptr)
+    if (poOpenInfo->nHeaderBytes < 2 || poOpenInfo->fpL == nullptr ||
+        (!poOpenInfo->IsSingleAllowedDriver("GenBin") &&
+         poOpenInfo->IsExtensionEqualToCI("zarr")))
+    {
         return nullptr;
+    }
 
     /* -------------------------------------------------------------------- */
     /*      Now we need to tear apart the filename to form a .HDR           */
     /*      filename.                                                       */
     /* -------------------------------------------------------------------- */
-    const CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
-    const CPLString osName = CPLGetBasename(poOpenInfo->pszFilename);
+    const CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
+    const CPLString osName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
     CPLString osHDRFilename;
 
-    char **papszSiblingFiles = poOpenInfo->GetSiblingFiles();
+    CSLConstList papszSiblingFiles = poOpenInfo->GetSiblingFiles();
     if (papszSiblingFiles)
     {
-        const int iFile = CSLFindString(
-            papszSiblingFiles, CPLFormFilename(nullptr, osName, "hdr"));
+        const int iFile =
+            CSLFindString(papszSiblingFiles,
+                          CPLFormFilenameSafe(nullptr, osName, "hdr").c_str());
         if (iFile < 0)  // return if there is no corresponding .hdr file
             return nullptr;
 
         osHDRFilename =
-            CPLFormFilename(osPath, papszSiblingFiles[iFile], nullptr);
+            CPLFormFilenameSafe(osPath, papszSiblingFiles[iFile], nullptr);
     }
     else
     {
-        osHDRFilename = CPLFormCIFilename(osPath, osName, "hdr");
+        osHDRFilename = CPLFormCIFilenameSafe(osPath, osName, "hdr");
     }
 
     const bool bSelectedHDR = EQUAL(osHDRFilename, poOpenInfo->pszFilename);
@@ -716,13 +700,13 @@ GDALDataset *GenBinDataset::Open(GDALOpenInfo *poOpenInfo)
         const double dfLRY =
             CPLAtofM(CSLFetchNameValue(papszHdr, "LR_Y_COORDINATE"));
 
-        poDS->adfGeoTransform[1] = (dfLRX - dfULX) / (poDS->nRasterXSize - 1);
-        poDS->adfGeoTransform[2] = 0.0;
-        poDS->adfGeoTransform[4] = 0.0;
-        poDS->adfGeoTransform[5] = (dfLRY - dfULY) / (poDS->nRasterYSize - 1);
+        poDS->m_gt[1] = (dfLRX - dfULX) / (poDS->nRasterXSize - 1);
+        poDS->m_gt[2] = 0.0;
+        poDS->m_gt[4] = 0.0;
+        poDS->m_gt[5] = (dfLRY - dfULY) / (poDS->nRasterYSize - 1);
 
-        poDS->adfGeoTransform[0] = dfULX - poDS->adfGeoTransform[1] * 0.5;
-        poDS->adfGeoTransform[3] = dfULY - poDS->adfGeoTransform[5] * 0.5;
+        poDS->m_gt[0] = dfULX - poDS->m_gt[1] * 0.5;
+        poDS->m_gt[3] = dfULY - poDS->m_gt[5] * 0.5;
 
         poDS->bGotTransform = true;
     }

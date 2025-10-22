@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test driver metadata
@@ -9,29 +8,12 @@
 ###############################################################################
 # Copyright (c) 2020, Rene Buffat <buffat at gmail dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
 import gdaltest
 import pytest
-from lxml import etree
 
 from osgeo import gdal
 
@@ -69,8 +51,13 @@ multidim_driver_name = [
     == "YES"
 ]
 
-schema_openoptionslist = etree.XML(
-    r"""
+
+def get_schema_openoptionslist():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
     <xs:element name="Value">
     <xs:complexType>
@@ -136,10 +123,15 @@ schema_openoptionslist = etree.XML(
   </xs:element>
 </xs:schema>
 """
-)
+    )
 
-schema_creationoptionslist_xml = etree.XML(
-    r"""
+
+def get_schema_creationoptionslist_xml(root_element="CreationOptionList"):
+
+    from lxml import etree
+
+    return etree.XML(
+        rf"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
     <xs:element name="Value">
     <xs:complexType>
@@ -147,6 +139,7 @@ schema_creationoptionslist_xml = etree.XML(
         <xs:extension base="xs:string">
           <xs:attribute type="xs:string" name="alias" use="optional"/>
           <xs:attribute type="xs:string" name="aliasOf" use="optional"/>
+          <xs:attribute type="xs:string" name="remark" use="optional"/>
         </xs:extension>
       </xs:simpleContent>
     </xs:complexType>
@@ -196,7 +189,7 @@ schema_creationoptionslist_xml = etree.XML(
       <xs:attribute type="xs:string" name="alt_config_option" use="optional"/>
     </xs:complexType>
   </xs:element>
-  <xs:element name="CreationOptionList">
+  <xs:element name="{root_element}">
     <xs:complexType>
       <xs:sequence>
         <xs:element ref="Option" maxOccurs="unbounded" minOccurs="0"/>
@@ -205,10 +198,15 @@ schema_creationoptionslist_xml = etree.XML(
   </xs:element>
 </xs:schema>
 """
-)
+    )
 
-schema_layer_creationoptionslist_xml = etree.XML(
-    r"""
+
+def get_schema_layer_creationoptionslist_xml():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
     <xs:element name="Value">
     <xs:complexType>
@@ -274,11 +272,15 @@ schema_layer_creationoptionslist_xml = etree.XML(
   </xs:element>
 </xs:schema>
 """
-)
+    )
 
 
-schema_multidim_array_creationoptionslist_xml = etree.XML(
-    r"""
+def get_schema_multidim_array_creationoptionslist_xml():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
     <xs:element name="Value">
     <xs:complexType>
@@ -312,11 +314,15 @@ schema_multidim_array_creationoptionslist_xml = etree.XML(
   </xs:element>
 </xs:schema>
 """
-)
+    )
 
 
-schema_multidim_attribute_creationoptionslist_xml = etree.XML(
-    r"""
+def get_schema_multidim_attribute_creationoptionslist_xml():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:element name="Value" type="xs:string"/>
   <xs:element name="Option">
@@ -337,11 +343,15 @@ schema_multidim_attribute_creationoptionslist_xml = etree.XML(
     </xs:complexType>
   </xs:element>
 </xs:schema>"""
-)
+    )
 
 
-schema_multidim_dataset_creationoptionslist_xml = etree.XML(
-    r"""
+def get_schema_multidim_dataset_creationoptionslist_xml():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:element name="Value" type="xs:string"/>
   <xs:element name="Option">
@@ -363,11 +373,15 @@ schema_multidim_dataset_creationoptionslist_xml = etree.XML(
     </xs:complexType>
   </xs:element>
 </xs:schema>"""
-)
+    )
 
 
-schema_multidim_dimension_creationoptionslist_xml = etree.XML(
-    r"""
+def get_schema_multidim_dimension_creationoptionslist_xml():
+
+    from lxml import etree
+
+    return etree.XML(
+        r"""
 <xs:schema attributeFormDefault="unqualified" elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   <xs:element name="Option">
     <xs:complexType>
@@ -389,7 +403,14 @@ schema_multidim_dimension_creationoptionslist_xml = etree.XML(
     </xs:complexType>
   </xs:element>
 </xs:schema>"""
-)
+    )
+
+
+@pytest.mark.parametrize("driver_name", all_driver_names)
+def test_metadata_has_long_name(driver_name):
+
+    driver = gdal.GetDriverByName(driver_name)
+    assert driver.GetMetadataItem(gdal.DMD_LONGNAME) is not None
 
 
 @pytest.mark.parametrize("driver_name", all_driver_names)
@@ -408,7 +429,9 @@ def test_metadata_dcap_yes(driver_name):
 def test_metadata_openoptionlist(driver_name):
     """Test if DMD_OPENOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_openoptionslist)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_openoptionslist())
 
     driver = gdal.GetDriverByName(driver_name)
     openoptionlist_xml = driver.GetMetadataItem("DMD_OPENOPTIONLIST")
@@ -427,10 +450,37 @@ def test_metadata_openoptionlist(driver_name):
 def test_metadata_creationoptionslist(driver_name):
     """Test if DMD_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     creationoptionslist_xml = driver.GetMetadataItem("DMD_CREATIONOPTIONLIST")
+
+    if creationoptionslist_xml is not None and len(creationoptionslist_xml) > 0:
+        # do not fail
+        try:
+            parser = etree.XMLParser(schema=schema)
+            etree.fromstring(creationoptionslist_xml, parser)
+        except Exception:
+            print(creationoptionslist_xml)
+            raise
+
+
+@pytest.mark.parametrize("driver_name", all_driver_names)
+def test_metadata_overview_creationoptionslist(driver_name):
+    """Test if DMD_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
+
+    from lxml import etree
+
+    schema = etree.XMLSchema(
+        get_schema_creationoptionslist_xml("OverviewCreationOptionList")
+    )
+
+    driver = gdal.GetDriverByName(driver_name)
+    creationoptionslist_xml = driver.GetMetadataItem(
+        gdal.DMD_OVERVIEW_CREATIONOPTIONLIST
+    )
 
     if creationoptionslist_xml is not None and len(creationoptionslist_xml) > 0:
         # do not fail
@@ -446,7 +496,9 @@ def test_metadata_creationoptionslist(driver_name):
 def test_metadata_layer_creationoptionslist(driver_name):
     """Test if DS_LAYER_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_layer_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_layer_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     creationoptionslist_xml = driver.GetMetadataItem("DS_LAYER_CREATIONOPTIONLIST")
@@ -465,7 +517,9 @@ def test_metadata_layer_creationoptionslist(driver_name):
 def test_metadata_multidim_array_creationoptionslist(driver_name):
     """Test if DMD_MULTIDIM_ARRAY_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_multidim_array_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_multidim_array_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     xml = driver.GetMetadataItem("DMD_MULTIDIM_ARRAY_CREATIONOPTIONLIST")
@@ -484,7 +538,9 @@ def test_metadata_multidim_array_creationoptionslist(driver_name):
 def test_metadata_multidim_attribute_creationoptionslist(driver_name):
     """Test if DMD_MULTIDIM_ATTRIBUTE_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_multidim_attribute_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_multidim_attribute_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     xml = driver.GetMetadataItem("DMD_MULTIDIM_ATTRIBUTE_CREATIONOPTIONLIST")
@@ -503,7 +559,9 @@ def test_metadata_multidim_attribute_creationoptionslist(driver_name):
 def test_metadata_multidim_dataset_creationoptionslist(driver_name):
     """Test if DMD_MULTIDIM_DATASET_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_multidim_dataset_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_multidim_dataset_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     xml = driver.GetMetadataItem("DMD_MULTIDIM_DATASET_CREATIONOPTIONLIST")
@@ -522,7 +580,9 @@ def test_metadata_multidim_dataset_creationoptionslist(driver_name):
 def test_metadata_multidim_dimension_creationoptionslist(driver_name):
     """Test if DMD_MULTIDIM_DIMENSION_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
 
-    schema = etree.XMLSchema(schema_multidim_dimension_creationoptionslist_xml)
+    from lxml import etree
+
+    schema = etree.XMLSchema(get_schema_multidim_dimension_creationoptionslist_xml())
 
     driver = gdal.GetDriverByName(driver_name)
     xml = driver.GetMetadataItem("DMD_MULTIDIM_DIMENSION_CREATIONOPTIONLIST")
@@ -540,6 +600,8 @@ def test_metadata_multidim_dimension_creationoptionslist(driver_name):
 @pytest.mark.parametrize("driver_name", multidim_driver_name)
 def test_metadata_multidim_group_creationoptionslist(driver_name):
     """Test if DMD_MULTIDIM_GROUP_CREATIONOPTIONLIST metadataitem is present and can be parsed"""
+
+    from lxml import etree
 
     # TODO: create schema if xml is available
     # schema = etree.XMLSchema(schema_multidim_group_creationoptionslist_xml)
@@ -652,3 +714,30 @@ def test_metadata_creation_field_defn_flags(driver_name):
     if flags_str is not None:
         for flag in flags_str.split(" "):
             assert flag in supported_flags
+
+
+@pytest.mark.parametrize("driver_name", ogr_driver_names)
+def test_metadata_update_items(driver_name):
+    """Test if DMD_UPDATE_ITEMS metadataitem returns valid flags"""
+
+    supported_flags = {
+        "GeoTransform",
+        "SRS",
+        "GCPs",
+        "NoData",
+        "ColorInterpretation",
+        "RasterValues",
+        "DatasetMetadata",
+        "BandMetadata",
+        "Features",
+        "LayerMetadata",
+    }
+
+    driver = gdal.GetDriverByName(driver_name)
+    flags_str = driver.GetMetadataItem(gdal.DMD_UPDATE_ITEMS)
+    if flags_str is not None:
+        assert driver.GetMetadataItem(gdal.DCAP_UPDATE)
+        for flag in flags_str.split(" "):
+            assert flag in supported_flags
+    else:
+        assert not driver.GetMetadataItem(gdal.DCAP_UPDATE)

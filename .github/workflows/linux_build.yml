@@ -4,12 +4,14 @@ on:
     push:
         paths-ignore:
             - 'doc/**'
+            - 'docker/**'
         branches-ignore:
             - 'backport**'
             - 'dependabot**'
     pull_request:
         paths-ignore:
             - 'doc/**'
+            - 'docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -65,12 +67,6 @@ jobs:
             build_script: build.sh
             os: ubuntu-22.04
 
-          - name: Alpine, numpy 2
-            id: alpine_numpy2
-            container: alpine_numpy2
-            build_script: build.sh
-            os: ubuntu-22.04
-
           - name: Alpine, clang 32-bit
             id: alpine_32bit
             container: alpine_32bit
@@ -84,6 +80,7 @@ jobs:
             travis_branch: fedora_rawhide
             container: fedora_rawhide
             build_script: build.sh
+            test_script: test.sh
             os: ubuntu-22.04
 
           - name: Ubuntu 24.04, gcc
@@ -104,13 +101,13 @@ jobs:
             test_script: test.sh
             os: ubuntu-22.04
 
-          - name: Ubuntu 22.04, clang ASAN
+          - name: Ubuntu 24.04, clang ASAN
             id: asan
             travis_branch: sanitize
-            container: ubuntu_22.04
+            container: ubuntu_24.04
             build_script: build.sh
             test_script: test.sh
-            os: ubuntu-22.04
+            os: ubuntu-24.04
 
           - name: Ubuntu 20.04, gcc
             id: ubuntu_20.04
@@ -138,10 +135,25 @@ jobs:
             test_script: test.sh
             os: ubuntu-22.04
 
-          - name: Ubuntu 20.04, Intel compiler
+          - name: Ubuntu 22.04, Intel compiler
             id: icc
             container: icc
             build_script: build.sh
+            os: ubuntu-22.04
+
+          - name: Ubuntu 24.04, s390x
+            id: s390x
+            container: s390x
+            travis_branch: s390x
+            build_script: build.sh
+            test_script: test.sh
+            os: ubuntu-22.04
+
+          - name: Ubuntu 24.04, armhf (32 bit)
+            id: armhf
+            container: armhf
+            build_script: build.sh
+            test_script: test.sh
             os: ubuntu-22.04
 
     name: ${{ matrix.name }}
@@ -174,11 +186,11 @@ jobs:
           sudo sysctl vm.mmap_rnd_bits=28
 
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Login to Docker Hub
         if: env.CONTAINER_REGISTRY == 'docker.io'
-        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -186,6 +198,11 @@ jobs:
       - name: Login to GHCR
         if: env.CONTAINER_REGISTRY == 'ghcr.io'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $ --password-stdin
+
+      - name: Enable Docker qemu
+        shell: bash -l {0}
+        run: |
+          docker run --rm --privileged linuxkit/binfmt:v0.8
 
         # Pull build environment in forks or pull requests, unless [skip cache] is included in the commit message
       - name: Pull build environment
@@ -241,7 +258,7 @@ jobs:
       # different architecture.
       - name: Restore build cache
         id: restore-cache
-        uses: actions/cache/restore@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ${{ matrix.id }}-${{ steps.get-arch.outputs.arch }}-${{ github.ref_name }}-${{ github.run_id }}
@@ -262,6 +279,10 @@ jobs:
         # FIXME the default BUILD_CMD here isn't working...we get an error
         # about the quotes not matching.
       - name: Build
+        env:
+          TRAVIS: yes
+          TRAVIS_BRANCH: ${{ matrix.travis_branch }}
+          BUILD_NAME: ${{ matrix.travis_branch }}
         run: |
           if test -f ".github/workflows/${{ matrix.id }}/${{ matrix.build_script }}"; then
             BUILD_CMD="$(pwd)/.github/workflows/${{ matrix.id }}/${{ matrix.build_script }}"
@@ -269,11 +290,20 @@ jobs:
             BUILD_CMD="sh -c 'cmake .. && make -j$(nproc)'"
           fi
 
+          # For cache
+          mkdir -p .gdal
+
           mkdir -p build-${{ matrix.id }}
           docker run --name gdal-build \
             --rm \
+            -e CI \
+            -e GITHUB_WORKFLOW \
+            -e TRAVIS \
+            -e TRAVIS_BRANCH \
+            -e BUILD_NAME \
             -e "GDAL_SOURCE_DIR=$(pwd)" \
             -u $(id -u ${USER}):$(id -g ${USER}) \
+            -v $(pwd)/.gdal:/.gdal:rw \
             -v $(pwd):$(pwd):rw \
             -v ${{ github.workspace }}/.ccache:/.ccache:rw \
             --workdir $(pwd)/build-${{ matrix.id }} \
@@ -289,7 +319,7 @@ jobs:
             ccache -s
 
       - name: Save build cache
-        uses: actions/cache/save@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4.0.2
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.ccache
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
@@ -320,7 +350,8 @@ jobs:
           fi
 
           # For cache
-          mkdir .gdal
+          mkdir -p .gdal
+          mkdir -p .duckdb
 
           docker run \
             -e CI \
@@ -334,13 +365,14 @@ jobs:
             --add-host=host.docker.internal:host-gateway \
             --rm \
             -v $(pwd)/.gdal:/.gdal \
+            -v $(pwd)/.duckdb:/.duckdb \
             -v $(pwd):$(pwd) \
             --workdir $(pwd)/build-${{ matrix.id }} \
             ${CONTAINER_NAME_FULL} \
             ${TEST_CMD}
 
       - name: Coveralls
-        uses: coverallsapp/github-action@643bc377ffa44ace6394b2b5d0d3950076de9f63 # v2.3.0
+        uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2.3.6
         if: ${{ matrix.id == 'coverage' }}
         with:
           format: lcov
@@ -355,14 +387,14 @@ jobs:
           docker push ${CONTAINER_NAME_FULL}
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ matrix.id == 'coverage' }}
         with:
           name: coverage_index.html
           path: build-${{ matrix.id }}/coverage_html/index.html
 
       - name: Upload coverage artifacts
-        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: ${{ matrix.id == 'coverage' }}
         with:
           name: HTML

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  C++ classes for the MiraMon driver
@@ -7,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2024, Xavier Pons
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGRMIRAMON_H_INCLUDED
@@ -42,6 +25,9 @@ class OGRMiraMonLayer final
     : public OGRLayer,
       public OGRGetNextFeatureThroughRaw<OGRMiraMonLayer>
 {
+    OGRMiraMonLayer(const OGRMiraMonLayer &) = delete;
+    OGRMiraMonLayer &operator=(const OGRMiraMonLayer &) = delete;
+
     GDALDataset *m_poDS;
     OGRSpatialReference *m_poSRS;
     OGRFeatureDefn *m_poFeatureDefn;
@@ -68,8 +54,8 @@ class OGRMiraMonLayer final
     VSILFILE *m_fp = nullptr;
 
     // Array of doubles used in the field features processing
-    double *padfValues;
-    GInt64 *pnInt64Values;
+    double *padfValues = nullptr;
+    GInt64 *pnInt64Values = nullptr;
 
     OGRFeature *GetNextRawFeature();
     OGRFeature *GetFeature(GIntBig nFeatureId) override;
@@ -93,29 +79,27 @@ class OGRMiraMonLayer final
                     const OGRSpatialReference *poSRS, int bUpdate,
                     CSLConstList papszOpenOptions,
                     struct MiraMonVectMapInfo *MMMap);
-    virtual ~OGRMiraMonLayer();
+    ~OGRMiraMonLayer() override;
 
     void ResetReading() override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRMiraMonLayer)
 
     OGRErr TranslateFieldsToMM();
     OGRErr TranslateFieldsValuesToMM(OGRFeature *poFeature);
-    OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
+    static int MM_SprintfDoubleSignifFigures(char *szChain, size_t size_szChain,
+                                             int nSignifFigures,
+                                             double dfRealValue);
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    OGRFeatureDefn *GetLayerDefn() override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
     void AddToFileList(CPLStringList &oFileList);
 
     GDALDataset *GetDataset() override
@@ -130,32 +114,35 @@ class OGRMiraMonLayer final
 
 class OGRMiraMonDataSource final : public GDALDataset
 {
-    std::vector<std::unique_ptr<OGRMiraMonLayer>> m_apoLayers;
+    std::vector<std::unique_ptr<OGRMiraMonLayer>> m_apoLayers = {};
     std::string m_osRootName{};
     bool m_bUpdate = false;
-    struct MiraMonVectMapInfo m_MMMap;
+    struct MiraMonVectMapInfo m_MMMap = {};
 
   public:
     OGRMiraMonDataSource();
-    ~OGRMiraMonDataSource();
+    OGRMiraMonDataSource(const OGRMiraMonDataSource &) = delete;
+    OGRMiraMonDataSource &operator=(const OGRMiraMonDataSource &) = delete;
+
+    ~OGRMiraMonDataSource() override;
 
     bool Open(const char *pszFilename, VSILFILE *fp,
               const OGRSpatialReference *poSRS, CSLConstList papszOpenOptions);
     bool Create(const char *pszFilename, CSLConstList papszOptions);
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
     char **GetFileList() override;
 
     OGRLayer *ICreateLayer(const char *pszLayerName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 };
 
 #endif /* OGRMIRAMON_H_INCLUDED */

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in netCDF driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
@@ -1528,6 +1511,10 @@ def test_netcdf_multidim_create_dim_zero():
     gdal.Unlink(tmpfilename2)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_netcdf_multidim_dims_with_same_name_different_size():
 
     src_ds = gdal.OpenEx(
@@ -4169,3 +4156,94 @@ def test_netcdf_multidim_as_classic_dataset_metadata():
 
     assert os.path.exists(pam_filename)
     os.unlink(pam_filename)
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.require_proj(9)
+def test_netcdf_multidim_WGS84_and_EGM96_height(tmp_path):
+
+    tmp_filename = str(tmp_path / "out.nc")
+    with gdal.GetDriverByName("netCDF").Create(tmp_filename, 3, 3) as ds:
+        srs = osr.SpatialReference()
+        srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        srs.ImportFromEPSG(9707)
+        ds.SetSpatialRef(srs)
+        ds.SetGeoTransform([2, 1, 0, 49, 0, -1])
+    with gdal.Open(tmp_filename) as ds:
+        srs = ds.GetSpatialRef()
+        assert srs.GetAuthorityCode(None) == "9707"
+        # We currently report a 3rd axis, which is dubious
+        assert srs.GetDataAxisToSRSAxisMapping()[0:2] == [2, 1]
+    with gdal.OpenEx(tmp_filename, gdal.OF_MULTIDIM_RASTER) as ds:
+        rg = ds.GetRootGroup()
+        ar = rg.OpenMDArray("Band1")
+        srs = ar.GetSpatialRef()
+        assert srs.GetAuthorityCode(None) == "9707"
+        assert srs.GetDataAxisToSRSAxisMapping() == [1, 2]
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_netcdf_multidim_enumeration():
+
+    # File generated with:
+    if False:
+        import netCDF4
+        import numpy as np
+
+        nc = netCDF4.Dataset("data/netcdf/enumeration.nc", "w")
+        nc.createEnumType(np.uint8, "my_enum", {"two": 2, "one": 1, "three": 3})
+        nc.close()
+
+    ds = gdal.OpenEx("data/netcdf/enumeration.nc", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+
+    assert rg.GetDataTypeCount() == 1
+    with pytest.raises(Exception, match="invalid index"):
+        rg.GetDataType(1)
+
+    types = rg.GetDataTypes()
+    assert (len(types)) == 1
+    assert types[0].GetName() == "my_enum"
+    assert types[0].GetNumericDataType() == gdal.GDT_Byte
+    rat = types[0].GetRAT()
+    assert rat
+    assert rat.GetRowCount() == 3
+    assert rat.GetColumnCount() == 2
+    assert rat.GetNameOfCol(0) == "value"
+    assert rat.GetTypeOfCol(0) == gdal.GFT_Integer
+    assert rat.GetUsageOfCol(0) == gdal.GFU_MinMax
+    assert rat.GetNameOfCol(1) == "name"
+    assert rat.GetTypeOfCol(1) == gdal.GFT_String
+    assert rat.GetUsageOfCol(1) == gdal.GFU_Name
+    assert rat.GetValueAsInt(0, 0) == 2
+    assert rat.GetValueAsString(0, 1) == "two"
+    assert rat.GetValueAsInt(1, 0) == 1
+    assert rat.GetValueAsString(1, 1) == "one"
+    assert rat.GetValueAsInt(2, 0) == 3
+    assert rat.GetValueAsString(2, 1) == "three"
+
+    j = gdal.MultiDimInfo(ds)
+    assert j == {
+        "type": "group",
+        "driver": "netCDF",
+        "name": "/",
+        "datatypes": [
+            {
+                "name": "my_enum",
+                "type": "Byte",
+                "attribute_table": [
+                    {"value": 2, "name": "two"},
+                    {"value": 1, "name": "one"},
+                    {"value": 3, "name": "three"},
+                ],
+            }
+        ],
+        "structural_info": {"NC_FORMAT": "NETCDF4"},
+    }
+    gdaltest.validate_json(j, "gdalmdiminfo_output.schema.json")

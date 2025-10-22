@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test OGR INDEX support.
@@ -33,6 +32,8 @@ import ogrtest
 import pytest
 
 from osgeo import ogr
+
+pytestmark = pytest.mark.require_driver("MapInfo File")
 
 ###############################################################################
 

@@ -8,29 +8,18 @@
  * Copyright (c) 2001, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "bsb_read.h"
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_colortable.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 #include <cstdlib>
@@ -53,7 +42,7 @@ class BSBDataset final : public GDALPamDataset
     GDAL_GCP *pasGCPList;
     OGRSpatialReference m_oGCPSRS{};
 
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     int bGeoTransformSet;
 
     void ScanForGCPs(bool isNos, const char *pszFilename);
@@ -77,7 +66,7 @@ class BSBDataset final : public GDALPamDataset
     const OGRSpatialReference *GetSpatialRef() const override;
     const GDAL_GCP *GetGCPs() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
 };
 
@@ -133,7 +122,7 @@ BSBRasterBand::BSBRasterBand(BSBDataset *poDSIn)
 CPLErr BSBRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                                  void *pImage)
 {
-    BSBDataset *poGDS = (BSBDataset *)poDS;
+    BSBDataset *poGDS = cpl::down_cast<BSBDataset *>(poDS);
     GByte *pabyScanline = (GByte *)pImage;
 
     if (BSBReadScanline(poGDS->psInfo, nBlockYOff, pabyScanline))
@@ -189,13 +178,6 @@ BSBDataset::BSBDataset()
 {
     m_oGCPSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     m_oGCPSRS.importFromWkt(SRS_WKT_WGS84_LAT_LONG);
-
-    adfGeoTransform[0] = 0.0; /* X Origin (top left corner) */
-    adfGeoTransform[1] = 1.0; /* X Pixel size */
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0; /* Y Origin (top left corner) */
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0; /* Y Pixel Size */
 }
 
 /************************************************************************/
@@ -218,10 +200,10 @@ BSBDataset::~BSBDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr BSBDataset::GetGeoTransform(double *padfTransform)
+CPLErr BSBDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
 
     if (bGeoTransformSet)
         return CE_None;
@@ -565,7 +547,7 @@ void BSBDataset::ScanForGCPs(bool isNos, const char *pszFilename)
     /* -------------------------------------------------------------------- */
     /*      Attempt to prepare a geotransform from the GCPs.                */
     /* -------------------------------------------------------------------- */
-    if (GDALGCPsToGeoTransform(nGCPCount, pasGCPList, adfGeoTransform, FALSE))
+    if (GDALGCPsToGeoTransform(nGCPCount, pasGCPList, m_gt.data(), FALSE))
     {
         bGeoTransformSet = TRUE;
     }
@@ -584,24 +566,24 @@ void BSBDataset::ScanForGCPs(bool isNos, const char *pszFilename)
 
 void BSBDataset::ScanForGCPsNos(const char *pszFilename)
 {
-    const char *extension = CPLGetExtension(pszFilename);
+    const std::string extension = CPLGetExtensionSafe(pszFilename);
 
     // pseudointelligently try and guess whether we want a .geo or a .GEO
-    const char *geofile = nullptr;
-    if (extension[1] == 'O')
+    std::string geofile;
+    if (extension.size() >= 2 && extension[1] == 'O')
     {
-        geofile = CPLResetExtension(pszFilename, "GEO");
+        geofile = CPLResetExtensionSafe(pszFilename, "GEO");
     }
     else
     {
-        geofile = CPLResetExtension(pszFilename, "geo");
+        geofile = CPLResetExtensionSafe(pszFilename, "geo");
     }
 
-    FILE *gfp = VSIFOpen(geofile, "r");  // Text files
+    FILE *gfp = VSIFOpen(geofile.c_str(), "r");  // Text files
     if (gfp == nullptr)
     {
         CPLError(CE_Failure, CPLE_OpenFailed,
-                 "Couldn't find a matching .GEO file: %s", geofile);
+                 "Couldn't find a matching .GEO file: %s", geofile.c_str());
         return;
     }
 
@@ -834,9 +816,7 @@ GDALDataset *BSBDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The BSB driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("BSB");
         return nullptr;
     }
 
@@ -1136,7 +1116,7 @@ static GDALDataset *BSBCreateCopy(const char *pszFilename, GDALDataset *poSrcDS,
     /* -------------------------------------------------------------------- */
     /*      Write the GCPs.                                                 */
     /* -------------------------------------------------------------------- */
-    double adfGeoTransform[6];
+    GDALGeoTransform gt;
     int nGCPCount = poSrcDS->GetGCPCount();
     if (nGCPCount)
     {
@@ -1152,31 +1132,23 @@ static GDALDataset *BSBCreateCopy(const char *pszFilename, GDALDataset *poSrcDS,
             }
         }
     }
-    else if (poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None)
+    else if (poSrcDS->GetGeoTransform(gt) == CE_None)
     {
         const char *pszProjection = poSrcDS->GetProjectionRef();
         if (BSBIsSRSOK(pszProjection))
         {
             VSIFPrintfL(psBSB->fp, "REF/%d,%d,%d,%f,%f\n", 1, 0, 0,
-                        adfGeoTransform[3] + 0 * adfGeoTransform[4] +
-                            0 * adfGeoTransform[5],
-                        adfGeoTransform[0] + 0 * adfGeoTransform[1] +
-                            0 * adfGeoTransform[2]);
+                        gt[3] + 0 * gt[4] + 0 * gt[5],
+                        gt[0] + 0 * gt[1] + 0 * gt[2]);
             VSIFPrintfL(psBSB->fp, "REF/%d,%d,%d,%f,%f\n", 2, nXSize, 0,
-                        adfGeoTransform[3] + nXSize * adfGeoTransform[4] +
-                            0 * adfGeoTransform[5],
-                        adfGeoTransform[0] + nXSize * adfGeoTransform[1] +
-                            0 * adfGeoTransform[2]);
+                        gt[3] + nXSize * gt[4] + 0 * gt[5],
+                        gt[0] + nXSize * gt[1] + 0 * gt[2]);
             VSIFPrintfL(psBSB->fp, "REF/%d,%d,%d,%f,%f\n", 3, nXSize, nYSize,
-                        adfGeoTransform[3] + nXSize * adfGeoTransform[4] +
-                            nYSize * adfGeoTransform[5],
-                        adfGeoTransform[0] + nXSize * adfGeoTransform[1] +
-                            nYSize * adfGeoTransform[2]);
+                        gt[3] + nXSize * gt[4] + nYSize * gt[5],
+                        gt[0] + nXSize * gt[1] + nYSize * gt[2]);
             VSIFPrintfL(psBSB->fp, "REF/%d,%d,%d,%f,%f\n", 4, 0, nYSize,
-                        adfGeoTransform[3] + 0 * adfGeoTransform[4] +
-                            nYSize * adfGeoTransform[5],
-                        adfGeoTransform[0] + 0 * adfGeoTransform[1] +
-                            nYSize * adfGeoTransform[2]);
+                        gt[3] + 0 * gt[4] + nYSize * gt[5],
+                        gt[0] + 0 * gt[1] + nYSize * gt[2]);
         }
     }
 

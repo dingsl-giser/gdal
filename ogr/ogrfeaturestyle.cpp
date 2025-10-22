@@ -8,23 +8,7 @@
  * Copyright (c) 2000-2001, Stephane Villeneuve
  * Copyright (c) 2008-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -1793,7 +1777,6 @@ GBool OGRStyleTool::Parse(const OGRStyleParamId *pasStyle,
             CSLDestroy(papszToken);
             CSLDestroy(papszToken2);
             return FALSE;
-            break;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -2126,6 +2109,46 @@ double OGRStyleTool::GetParamDbl(const OGRStyleParamId &sStyleParam,
                 return static_cast<double>(sStyleValue.nValue);
         case OGRSTypeBoolean:
             return static_cast<double>(sStyleValue.nValue != 0);
+        default:
+            bValueIsNull = TRUE;
+            return 0.0;
+    }
+}
+
+/****************************************************************************/
+/*                           GetRawParamDbl()                               */
+/****************************************************************************/
+
+/** Return the raw value of a parameter of type double.
+ *
+ * @param sStyleParam Identifier of the parameter.
+ * @param sStyleValue Value of the parameter.
+ * @param[out] eRawUnit Raw unit
+ * @param[out] bValueIsNull if the value is null
+ * @return the raw value.
+ */
+double OGRStyleTool::GetRawParamDbl(const OGRStyleParamId &sStyleParam,
+                                    const OGRStyleValue &sStyleValue,
+                                    OGRSTUnitId &eRawUnit, GBool &bValueIsNull)
+{
+    eRawUnit = OGRSTUGround;
+    if (!Parse())
+    {
+        bValueIsNull = TRUE;
+        return 0.0;
+    }
+
+    bValueIsNull = !sStyleValue.bValid;
+
+    if (bValueIsNull == TRUE)
+        return 0.0;
+
+    switch (sStyleParam.eType)
+    {
+        case OGRSTypeDouble:
+            eRawUnit = sStyleValue.eUnit;
+            return sStyleValue.dfValue;
+
         default:
             bValueIsNull = TRUE;
             return 0.0;
@@ -2695,6 +2718,16 @@ double OGRStylePen::GetParamDbl(OGRSTPenParam eParam, GBool &bValueIsNull)
 {
     return OGRStyleTool::GetParamDbl(asStylePen[eParam],
                                      m_pasStyleValue[eParam], bValueIsNull);
+}
+
+/************************************************************************/
+/*                           GetRawParamDbl()                           */
+/************************************************************************/
+double OGRStylePen::GetRawParamDbl(OGRSTPenParam eParam, OGRSTUnitId &eRawUnit,
+                                   GBool &bValueIsNull)
+{
+    return OGRStyleTool::GetRawParamDbl(
+        asStylePen[eParam], m_pasStyleValue[eParam], eRawUnit, bValueIsNull);
 }
 
 /************************************************************************/

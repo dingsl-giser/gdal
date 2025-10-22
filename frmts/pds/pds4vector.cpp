@@ -7,27 +7,11 @@
  ******************************************************************************
  * Copyright (c) 2019, Hobu Inc
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "pds4dataset.h"
-#include "ogr_vrt.h"
+#include "ogrvrtgeometrytypes.h"
 
 #include "ogr_p.h"
 
@@ -535,7 +519,7 @@ OGRFeature *PDS4FixedWidthTable::GetNextFeature()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int PDS4FixedWidthTable::TestCapability(const char *pszCap)
+int PDS4FixedWidthTable::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCRandomRead) || EQUAL(pszCap, OLCStringsAsUTF8) ||
         EQUAL(pszCap, OLCZGeometries))
@@ -1804,7 +1788,7 @@ PDS4DelimitedTable::~PDS4DelimitedTable()
 
 void PDS4DelimitedTable::GenerateVRT()
 {
-    CPLString osVRTFilename = CPLResetExtension(m_osFilename, "vrt");
+    CPLString osVRTFilename = CPLResetExtensionSafe(m_osFilename, "vrt");
     if (m_bCreation)
     {
         // In creation mode, generate the VRT, unless explicitly disabled by
@@ -1829,7 +1813,8 @@ void PDS4DelimitedTable::GenerateVRT()
         psLayer, "SrcDataSource", CPLGetFilename(m_osFilename));
     CPLAddXMLAttributeAndValue(psSrcDataSource, "relativeToVRT", "1");
 
-    CPLCreateXMLElementAndValue(psLayer, "SrcLayer", GetName());
+    CPLCreateXMLElementAndValue(
+        psLayer, "SrcLayer", CPLGetBasenameSafe(m_osFilename.c_str()).c_str());
 
     CPLXMLNode *psLastChild = CPLCreateXMLElementAndValue(
         psLayer, "GeometryType",
@@ -2011,7 +1996,7 @@ OGRFeature *PDS4DelimitedTable::GetNextFeature()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int PDS4DelimitedTable::TestCapability(const char *pszCap)
+int PDS4DelimitedTable::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCRandomRead) || EQUAL(pszCap, OLCStringsAsUTF8) ||
         EQUAL(pszCap, OLCZGeometries))
@@ -2060,7 +2045,7 @@ OGRErr PDS4DelimitedTable::ICreateFeature(OGRFeature *poFeature)
         m_iWKT = m_poRawFeatureDefn->GetFieldCount() - 1;
         Field f;
         f.m_osDataType = "ASCII_String";
-        m_aoFields.push_back(f);
+        m_aoFields.push_back(std::move(f));
         m_bAddWKTColumnPending = false;
     }
 
@@ -2166,7 +2151,7 @@ OGRErr PDS4DelimitedTable::CreateField(const OGRFieldDefn *poFieldIn, int)
     }
 
     MarkHeaderDirty();
-    m_aoFields.push_back(f);
+    m_aoFields.push_back(std::move(f));
     m_poRawFeatureDefn->AddFieldDefn(poFieldIn);
     m_poFeatureDefn->AddFieldDefn(poFieldIn);
 
@@ -2482,7 +2467,7 @@ void PDS4DelimitedTable::RefreshFileAreaObservational(CPLXMLNode *psFAO)
 char **PDS4DelimitedTable::GetFileList() const
 {
     auto papszFileList = PDS4TableBaseLayer::GetFileList();
-    CPLString osVRTFilename = CPLResetExtension(m_osFilename, "vrt");
+    CPLString osVRTFilename = CPLResetExtensionSafe(m_osFilename, "vrt");
     VSIStatBufL sStat;
     if (VSIStatL(osVRTFilename, &sStat) == 0)
     {
@@ -2527,7 +2512,7 @@ bool PDS4DelimitedTable::InitializeNewLayer(const OGRSpatialReference *poSRS,
             m_iLatField = m_poRawFeatureDefn->GetFieldCount() - 1;
             Field f;
             f.m_osDataType = "ASCII_Real";
-            m_aoFields.push_back(f);
+            m_aoFields.push_back(std::move(f));
         }
         {
             OGRFieldDefn oFieldDefn(
@@ -2537,7 +2522,7 @@ bool PDS4DelimitedTable::InitializeNewLayer(const OGRSpatialReference *poSRS,
             m_iLongField = m_poRawFeatureDefn->GetFieldCount() - 1;
             Field f;
             f.m_osDataType = "ASCII_Real";
-            m_aoFields.push_back(f);
+            m_aoFields.push_back(std::move(f));
         }
         if (eGType == wkbPoint25D)
         {
@@ -2547,7 +2532,7 @@ bool PDS4DelimitedTable::InitializeNewLayer(const OGRSpatialReference *poSRS,
             m_iAltField = m_poRawFeatureDefn->GetFieldCount() - 1;
             Field f;
             f.m_osDataType = "ASCII_Real";
-            m_aoFields.push_back(f);
+            m_aoFields.push_back(std::move(f));
         }
     }
     else if (eGType != wkbNone &&
@@ -2735,18 +2720,27 @@ PDS4EditableSynchronizer<T>::EditableSyncToDisk(OGRLayer *poEditableLayer,
 /* ==================================================================== */
 /************************************************************************/
 
-PDS4EditableLayer::PDS4EditableLayer(PDS4FixedWidthTable *poBaseLayer)
-    : OGREditableLayer(poBaseLayer, true,
-                       new PDS4EditableSynchronizer<PDS4FixedWidthTable>(),
-                       true)
+PDS4EditableLayer::PDS4EditableLayer(
+    std::unique_ptr<PDS4FixedWidthTable> poBaseLayer)
+    : OGREditableLayer(
+          poBaseLayer.release(), true,
+          std::make_unique<PDS4EditableSynchronizer<PDS4FixedWidthTable>>()
+              .release(),
+          true)
 {
 }
 
-PDS4EditableLayer::PDS4EditableLayer(PDS4DelimitedTable *poBaseLayer)
-    : OGREditableLayer(poBaseLayer, true,
-                       new PDS4EditableSynchronizer<PDS4DelimitedTable>(), true)
+PDS4EditableLayer::PDS4EditableLayer(
+    std::unique_ptr<PDS4DelimitedTable> poBaseLayer)
+    : OGREditableLayer(
+          poBaseLayer.release(), true,
+          std::make_unique<PDS4EditableSynchronizer<PDS4DelimitedTable>>()
+              .release(),
+          true)
 {
 }
+
+PDS4EditableLayer::~PDS4EditableLayer() = default;
 
 /************************************************************************/
 /*                           GetBaseLayer()                             */

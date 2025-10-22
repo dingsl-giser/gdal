@@ -62,7 +62,7 @@ int LLVMFuzzerInitialize(int * /*argc*/, char ***argv)
     const char *exe_path = (*argv)[0];
     if (CPLGetConfigOption("GDAL_DATA", nullptr) == nullptr)
     {
-        CPLSetConfigOption("GDAL_DATA", CPLGetPath(exe_path));
+        CPLSetConfigOption("GDAL_DATA", CPLGetPathSafe(exe_path).c_str());
     }
     CPLSetConfigOption("CPL_TMPDIR", "/tmp");
     CPLSetConfigOption("DISABLE_OPEN_REAL_NETCDF_FILES", "YES");
@@ -114,9 +114,9 @@ int LLVMFuzzerTestOneInput(const uint8_t *buf, size_t len)
     std::string osFileInTar;
     for (int i = 0; papszFiles && papszFiles[i]; ++i)
     {
-        if (EQUAL(CPLGetExtension(papszFiles[i]), "pol") ||
-            EQUAL(CPLGetExtension(papszFiles[i]), "arc") ||
-            EQUAL(CPLGetExtension(papszFiles[i]), "pnt"))
+        if (EQUAL(CPLGetExtensionSafe(papszFiles[i]).c_str(), "pol") ||
+            EQUAL(CPLGetExtensionSafe(papszFiles[i]).c_str(), "arc") ||
+            EQUAL(CPLGetExtensionSafe(papszFiles[i]).c_str(), "pnt"))
         {
             osFileInTar = papszFiles[i];
             break;

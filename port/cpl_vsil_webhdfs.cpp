@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -210,7 +194,7 @@ class VSIWebHDFSWriteHandle final : public VSIAppendWriteHandle
 
   public:
     VSIWebHDFSWriteHandle(VSIWebHDFSFSHandler *poFS, const char *pszFilename);
-    virtual ~VSIWebHDFSWriteHandle();
+    ~VSIWebHDFSWriteHandle() override;
 };
 
 /************************************************************************/
@@ -285,7 +269,8 @@ void VSIWebHDFSWriteHandle::InvalidateParentDirectory()
     std::string osFilenameWithoutSlash(m_osFilename);
     if (!osFilenameWithoutSlash.empty() && osFilenameWithoutSlash.back() == '/')
         osFilenameWithoutSlash.pop_back();
-    m_poFS->InvalidateDirContent(CPLGetDirname(osFilenameWithoutSlash.c_str()));
+    m_poFS->InvalidateDirContent(
+        CPLGetDirnameSafe(osFilenameWithoutSlash.c_str()));
 }
 
 /************************************************************************/
@@ -606,11 +591,12 @@ char **VSIWebHDFSFSHandler::GetFileList(const char *pszDirname,
         osDelegationParam = "&delegation=" + osDelegationParam;
     std::string osURL =
         osBaseURL + "?op=LISTSTATUS" + osUsernameParam + osDelegationParam;
+    const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszDirname));
 
     CURL *hCurlHandle = curl_easy_init();
 
     struct curl_slist *headers =
-        VSICurlSetOptions(hCurlHandle, osURL.c_str(), nullptr);
+        VSICurlSetOptions(hCurlHandle, osURL.c_str(), aosHTTPOptions.List());
 
     WriteFuncStruct sWriteFuncData;
     VSICURLInitWriteFuncStruct(&sWriteFuncData, nullptr, nullptr, nullptr);
@@ -654,6 +640,14 @@ char **VSIWebHDFSFSHandler::GetFileList(const char *pszDirname,
                 // case the file entry is reported but with an empty pathSuffix
                 if (!osName.empty())
                 {
+                    if (CPLHasUnbalancedPathTraversal(osName.c_str()))
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "Ignoring pathSuffix '%s' that has a path "
+                                 "traversal pattern",
+                                 osName.c_str());
+                        continue;
+                    }
                     aosList.AddString(osName.c_str());
 
                     FileProp prop;
@@ -709,13 +703,14 @@ int VSIWebHDFSFSHandler::Unlink(const char *pszFilename)
         osDelegationParam = "&delegation=" + osDelegationParam;
     std::string osURL =
         osBaseURL + "?op=DELETE" + osUsernameParam + osDelegationParam;
+    const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszFilename));
 
     CURL *hCurlHandle = curl_easy_init();
 
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_CUSTOMREQUEST, "DELETE");
 
     struct curl_slist *headers =
-        VSICurlSetOptions(hCurlHandle, osURL.c_str(), nullptr);
+        VSICurlSetOptions(hCurlHandle, osURL.c_str(), aosHTTPOptions.List());
 
     WriteFuncStruct sWriteFuncData;
     VSICURLInitWriteFuncStruct(&sWriteFuncData, nullptr, nullptr, nullptr);
@@ -756,7 +751,7 @@ int VSIWebHDFSFSHandler::Unlink(const char *pszFilename)
             osFilenameWithoutSlash.back() == '/')
             osFilenameWithoutSlash.pop_back();
 
-        InvalidateDirContent(CPLGetDirname(osFilenameWithoutSlash.c_str()));
+        InvalidateDirContent(CPLGetDirnameSafe(osFilenameWithoutSlash.c_str()));
     }
     else
     {
@@ -832,13 +827,14 @@ int VSIWebHDFSFSHandler::Mkdir(const char *pszDirname, long nMode)
         osURL += "&permission=";
         osURL += CPLSPrintf("%o", static_cast<int>(nMode));
     }
+    const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(pszDirname));
 
     CURL *hCurlHandle = curl_easy_init();
 
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_CUSTOMREQUEST, "PUT");
 
     struct curl_slist *headers =
-        VSICurlSetOptions(hCurlHandle, osURL.c_str(), nullptr);
+        VSICurlSetOptions(hCurlHandle, osURL.c_str(), aosHTTPOptions.List());
 
     WriteFuncStruct sWriteFuncData;
     VSICURLInitWriteFuncStruct(&sWriteFuncData, nullptr, nullptr, nullptr);
@@ -872,7 +868,8 @@ int VSIWebHDFSFSHandler::Mkdir(const char *pszDirname, long nMode)
     }
     if (bOK)
     {
-        InvalidateDirContent(CPLGetDirname(osDirnameWithoutEndSlash.c_str()));
+        InvalidateDirContent(
+            CPLGetDirnameSafe(osDirnameWithoutEndSlash.c_str()));
 
         FileProp cachedFileProp;
         cachedFileProp.eExists = EXIST_YES;
@@ -1202,7 +1199,6 @@ retry:
  See :ref:`/vsiwebhdfs/ documentation <vsiwebhdfs>`
  \endverbatim
 
- @since GDAL 2.4
  */
 void VSIInstallWebHdfsHandler(void)
 {

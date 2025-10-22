@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  MSSQL Spatial driver
  * Purpose:  Definition of classes for OGR MSSQL Spatial driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010, Tamas Szekeres
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_MSSQLSPATIAL_H_INCLUDED
@@ -117,15 +100,14 @@ void OGRMSSQLAppendEscaped(CPLODBCStatement *poStatement,
 class OGRMSSQLGeometryValidator
 {
   protected:
-    bool bIsValid;
-    OGRGeometry *poValidGeometry;
-    OGRGeometry *poOriginalGeometry;
-    int nGeomColumnType;
+    const OGRGeometry *const poOriginalGeometry;
+    const int nGeomColumnType;
+    const bool bIsValid;
+    std::unique_ptr<OGRGeometry> poValidGeometry{};
 
   public:
-    explicit OGRMSSQLGeometryValidator(OGRGeometry *poGeom,
+    explicit OGRMSSQLGeometryValidator(const OGRGeometry *poGeom,
                                        int nGeomColumnType);
-    ~OGRMSSQLGeometryValidator();
 
     bool IsValidLatLon(double longitude, double latitude);
     bool IsValidCircularZ(double z1, double z2);
@@ -154,9 +136,9 @@ class OGRMSSQLGeometryValidator
     void MakeValid(OGRGeometry *poGeom);
     bool ValidateGeometry(OGRGeometry *poGeom);
 
-    OGRGeometry *GetValidGeometryRef();
+    const OGRGeometry *GetValidGeometryRef() const;
 
-    bool IsValid()
+    bool IsValid() const
     {
         return bIsValid;
     }
@@ -169,7 +151,7 @@ class OGRMSSQLGeometryValidator
 class OGRMSSQLGeometryParser
 {
   protected:
-    unsigned char *pszData;
+    const unsigned char *pszData;
     /* version information */
     char chVersion;
     /* serialization properties */
@@ -210,7 +192,7 @@ class OGRMSSQLGeometryParser
 
   public:
     explicit OGRMSSQLGeometryParser(int nGeomColumnType);
-    OGRErr ParseSqlGeometry(unsigned char *pszInput, int nLen,
+    OGRErr ParseSqlGeometry(const unsigned char *pszInput, int nLen,
                             OGRGeometry **poGeom);
 
     int GetSRSId()
@@ -290,7 +272,7 @@ class OGRMSSQLGeometryWriter
 class OGRMSSQLSpatialLayer CPL_NON_FINAL : public OGRLayer
 {
   protected:
-    OGRFeatureDefn *poFeatureDefn = nullptr;
+    mutable OGRFeatureDefn *poFeatureDefn = nullptr;
     int nRawColumns = 0;
 
     CPLODBCStatement *poStmt = nullptr;
@@ -298,17 +280,17 @@ class OGRMSSQLSpatialLayer CPL_NON_FINAL : public OGRLayer
     bool m_bResetNeeded = false;
 
     // Layer spatial reference system, and srid.
-    OGRSpatialReference *poSRS = nullptr;
-    int nSRSId = 0;
+    mutable OGRSpatialReference *poSRS = nullptr;
+    mutable int nSRSId = 0;
 
     GIntBig iNextShapeId = 0;
 
     OGRMSSQLSpatialDataSource *poDS = nullptr;
 
-    int nGeomColumnType = -1;
-    char *pszGeomColumn = nullptr;
+    mutable int nGeomColumnType = -1;
+    mutable char *pszGeomColumn = nullptr;
     int nGeomColumnIndex = -1;
-    char *pszFIDColumn = nullptr;
+    mutable char *pszFIDColumn = nullptr;
     int nFIDColumnIndex = -1;
 
     // UUID doesn't work for now in bulk copy mode
@@ -333,28 +315,28 @@ class OGRMSSQLSpatialLayer CPL_NON_FINAL : public OGRLayer
 
   public:
     explicit OGRMSSQLSpatialLayer(OGRMSSQLSpatialDataSource *);
-    virtual ~OGRMSSQLSpatialLayer();
+    ~OGRMSSQLSpatialLayer() override;
 
-    virtual void ResetReading() override;
-    virtual OGRFeature *GetNextFeature() override;
+    void ResetReading() override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    virtual OGRSpatialReference *GetSpatialRef() override;
+    const OGRSpatialReference *GetSpatialRef() const override;
 
-    virtual OGRErr StartTransaction() override;
-    virtual OGRErr CommitTransaction() override;
-    virtual OGRErr RollbackTransaction() override;
+    OGRErr StartTransaction() override;
+    OGRErr CommitTransaction() override;
+    OGRErr RollbackTransaction() override;
 
-    virtual const char *GetFIDColumn() override;
-    virtual const char *GetGeometryColumn() override;
+    const char *GetFIDColumn() const override;
+    const char *GetGeometryColumn() const override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
     static char *GByteArrayToHexString(const GByte *pabyData, int nLen);
 
     void SetLayerStatus(int nStatus)
@@ -439,7 +421,7 @@ class OGRMSSQLSpatialTableLayer final : public OGRMSSQLSpatialLayer
 
     CPLString BuildFields();
 
-    virtual CPLODBCStatement *GetStatement() override;
+    CPLODBCStatement *GetStatement() override;
 
     char *pszTableName = nullptr;
     char *pszLayerName = nullptr;
@@ -449,7 +431,7 @@ class OGRMSSQLSpatialTableLayer final : public OGRMSSQLSpatialLayer
 
   public:
     explicit OGRMSSQLSpatialTableLayer(OGRMSSQLSpatialDataSource *);
-    virtual ~OGRMSSQLSpatialTableLayer();
+    ~OGRMSSQLSpatialTableLayer() override;
 
     CPLErr Initialize(const char *pszSchema, const char *pszTableName,
                       const char *pszGeomCol, int nCoordDimension, int nSRId,
@@ -458,26 +440,21 @@ class OGRMSSQLSpatialTableLayer final : public OGRMSSQLSpatialLayer
     OGRErr CreateSpatialIndex();
     void DropSpatialIndex();
 
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override
-    {
-        return GetExtent(0, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override;
+    GIntBig GetFeatureCount(int) override;
 
-    virtual GIntBig GetFeatureCount(int) override;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override;
+    const char *GetName() const override;
 
-    virtual const char *GetName() override;
+    OGRErr SetAttributeFilter(const char *) override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual OGRErr SetAttributeFilter(const char *) override;
-    virtual OGRFeature *GetNextFeature() override;
-
-    virtual OGRErr ISetFeature(OGRFeature *poFeature) override;
-    virtual OGRErr DeleteFeature(GIntBig nFID) override;
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    OGRErr ISetFeature(OGRFeature *poFeature) override;
+    OGRErr DeleteFeature(GIntBig nFID) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
     const char *GetTableName()
     {
@@ -497,9 +474,9 @@ class OGRMSSQLSpatialTableLayer final : public OGRMSSQLSpatialLayer
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
 
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     void SetLaunderFlag(int bFlag)
     {
@@ -537,8 +514,8 @@ class OGRMSSQLSpatialTableLayer final : public OGRMSSQLSpatialLayer
         bUpdateAccess = bFlag;
     }
 
-    // cppcheck-suppress functionStatic
-    OGRErr StartCopy();
+    static OGRErr StartCopy();
+
     // cppcheck-suppress functionStatic
     OGRErr EndCopy();
 
@@ -559,32 +536,24 @@ class OGRMSSQLSpatialSelectLayer final : public OGRMSSQLSpatialLayer
 {
     char *pszBaseStatement;
 
-    virtual CPLODBCStatement *GetStatement() override;
+    CPLODBCStatement *GetStatement() override;
 
   public:
     OGRMSSQLSpatialSelectLayer(OGRMSSQLSpatialDataSource *, CPLODBCStatement *);
-    virtual ~OGRMSSQLSpatialSelectLayer();
+    ~OGRMSSQLSpatialSelectLayer() override;
 
-    virtual GIntBig GetFeatureCount(int) override;
+    GIntBig GetFeatureCount(int) override;
 
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
-
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 };
 
 /************************************************************************/
 /*                           OGRODBCDataSource                          */
 /************************************************************************/
 
-class OGRMSSQLSpatialDataSource final : public OGRDataSource
+class OGRMSSQLSpatialDataSource final : public GDALDataset
 {
     typedef struct
     {
@@ -596,8 +565,6 @@ class OGRMSSQLSpatialDataSource final : public OGRDataSource
 
     OGRMSSQLSpatialTableLayer **papoLayers;
     int nLayers;
-
-    char *pszName;
 
     char *pszCatalog;
 
@@ -631,7 +598,7 @@ class OGRMSSQLSpatialDataSource final : public OGRDataSource
     MSSQLVer sMSSQLVersion;
 
     OGRMSSQLSpatialDataSource();
-    virtual ~OGRMSSQLSpatialDataSource();
+    ~OGRMSSQLSpatialDataSource() override;
 
     const char *GetCatalog()
     {
@@ -647,13 +614,8 @@ class OGRMSSQLSpatialDataSource final : public OGRDataSource
                   const char *pszSRText, OGRwkbGeometryType eType,
                   bool bUpdate);
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
-    int GetLayerCount() override;
-    OGRLayer *GetLayer(int) override;
+    int GetLayerCount() const override;
+    const OGRLayer *GetLayer(int) const override;
     OGRLayer *GetLayerByName(const char *pszLayerName) override;
 
     int GetGeometryFormat()
@@ -671,17 +633,17 @@ class OGRMSSQLSpatialDataSource final : public OGRDataSource
         return bAlwaysOutputFid;
     }
 
-    virtual OGRErr DeleteLayer(int iLayer) override;
+    OGRErr DeleteLayer(int iLayer) override;
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRLayer *ExecuteSQL(const char *pszSQLCommand,
-                                 OGRGeometry *poSpatialFilter,
-                                 const char *pszDialect) override;
-    virtual void ReleaseResultSet(OGRLayer *poLayer) override;
+    OGRLayer *ExecuteSQL(const char *pszSQLCommand,
+                         OGRGeometry *poSpatialFilter,
+                         const char *pszDialect) override;
+    void ReleaseResultSet(OGRLayer *poLayer) override;
 
     static char *LaunderName(const char *pszSrcName);
     OGRErr InitializeMetadataTables();

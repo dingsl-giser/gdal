@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  S-57 Translator
  * Purpose:  Declarations for classes binding S57 support onto OGRLayer,
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 1999, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_S57_H_INCLUDED
@@ -57,39 +40,32 @@ class OGRS57Layer final : public OGRLayer
   public:
     OGRS57Layer(OGRS57DataSource *poDS, OGRFeatureDefn *,
                 int nFeatureCount = -1, int nOBJL = -1);
-    virtual ~OGRS57Layer();
+    ~OGRS57Layer() override;
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
     OGRFeature *GetNextUnfilteredFeature();
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
+    GIntBig GetFeatureCount(int bForce = TRUE) override;
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
-
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    int TestCapability(const char *) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    int TestCapability(const char *) const override;
 };
 
 /************************************************************************/
 /*                          OGRS57DataSource                            */
 /************************************************************************/
 
-class OGRS57DataSource final : public OGRDataSource
+class OGRS57DataSource final : public GDALDataset
 {
-    char *pszName;
-
     int nLayers;
     OGRS57Layer **papoLayers;
 
@@ -111,7 +87,7 @@ class OGRS57DataSource final : public OGRDataSource
 
   public:
     explicit OGRS57DataSource(char **papszOpenOptions = nullptr);
-    ~OGRS57DataSource();
+    ~OGRS57DataSource() override;
 
     void SetOptionList(char **);
     const char *GetOption(const char *);
@@ -119,21 +95,17 @@ class OGRS57DataSource final : public OGRDataSource
     int Open(const char *pszName);
     int Create(const char *pszName, char **papszOptions);
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return nLayers;
     }
 
-    OGRLayer *GetLayer(int) override;
+    using GDALDataset::GetLayer;
+    const OGRLayer *GetLayer(int) const override;
     void AddLayer(OGRS57Layer *);
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    OGRSpatialReference *DSGetSpatialRef()
+    const OGRSpatialReference *DSGetSpatialRef() const
     {
         return poSpatialRef;
     }
@@ -163,7 +135,7 @@ class OGRS57Driver final : public GDALDriver
 
   public:
     OGRS57Driver();
-    ~OGRS57Driver();
+    ~OGRS57Driver() override;
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Create(const char *pszName, int nBands, int nXSize,

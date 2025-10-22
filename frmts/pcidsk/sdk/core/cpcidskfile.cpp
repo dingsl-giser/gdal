@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "pcidsk_file.h"
 #include "pcidsk_exception.h"
@@ -90,6 +74,12 @@
 #include <algorithm>
 
 using namespace PCIDSK;
+
+PCIDSKFile::~PCIDSKFile() = default;
+
+IOInterfaces::~IOInterfaces() = default;
+
+EDBFile::~EDBFile() = default;
 
 /************************************************************************/
 /*                             CPCIDSKFile()                             */
@@ -1207,13 +1197,13 @@ std::string CPCIDSKFile::GetUniqueEDBFilename()
         //trigger call to AccessDB()
         poChannel->GetBlockWidth();
 
-        const std::string oFilename = poExt->GetExternalFilename();
+        std::string osFilename = poExt->GetExternalFilename();
 
         if(oEDBName.size() == 0)
         {
-            oEDBName = oFilename;
+            oEDBName = std::move(osFilename);
         }
-        else if(oEDBName != oFilename)
+        else if(oEDBName != osFilename)
         {
             bAllSameFile = false;
             break;
@@ -1332,7 +1322,7 @@ void CPCIDSKFile::GetIODetails( void ***io_handle_pp,
     new_file.filename = filename;
     new_file.writable = writable;
 
-    file_list.push_back( new_file );
+    file_list.push_back( std::move(new_file) );
 
     *io_handle_pp = &(file_list.back().io_handle);
     *io_mutex_pp  = &(file_list.back().io_mutex);

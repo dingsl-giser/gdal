@@ -6,24 +6,7 @@
  *
  *  This file is part of LibKEA.
  *
- *  Permission is hereby granted, free of charge, to any person
- *  obtaining a copy of this software and associated documentation
- *  files (the "Software"), to deal in the Software without restriction,
- *  including without limitation the rights to use, copy, modify,
- *  merge, publish, distribute, sublicense, and/or sell copies of the
- *  Software, and to permit persons to whom the Software is furnished
- *  to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be
- *  included in all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- *  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *  OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- *  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
- *  ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- *  CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- *  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *
  */
 
@@ -545,19 +528,19 @@ void KEADataset::UpdateMetadataList()
 }
 
 // read in the geotransform
-CPLErr KEADataset::GetGeoTransform(double *padfTransform)
+CPLErr KEADataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     try
     {
         kealib::KEAImageSpatialInfo *pSpatialInfo =
             m_pImageIO->getSpatialInfo();
         // GDAL uses an array format
-        padfTransform[0] = pSpatialInfo->tlX;
-        padfTransform[1] = pSpatialInfo->xRes;
-        padfTransform[2] = pSpatialInfo->xRot;
-        padfTransform[3] = pSpatialInfo->tlY;
-        padfTransform[4] = pSpatialInfo->yRot;
-        padfTransform[5] = pSpatialInfo->yRes;
+        gt[0] = pSpatialInfo->tlX;
+        gt[1] = pSpatialInfo->xRes;
+        gt[2] = pSpatialInfo->xRot;
+        gt[3] = pSpatialInfo->tlY;
+        gt[4] = pSpatialInfo->yRot;
+        gt[5] = pSpatialInfo->yRes;
 
         return CE_None;
     }
@@ -590,7 +573,7 @@ const OGRSpatialReference *KEADataset::GetSpatialRef() const
 }
 
 // set the geotransform
-CPLErr KEADataset::SetGeoTransform(double *padfTransform)
+CPLErr KEADataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
     try
     {
@@ -598,12 +581,12 @@ CPLErr KEADataset::SetGeoTransform(double *padfTransform)
         kealib::KEAImageSpatialInfo *pSpatialInfo =
             m_pImageIO->getSpatialInfo();
         // convert back from GDAL's array format
-        pSpatialInfo->tlX = padfTransform[0];
-        pSpatialInfo->xRes = padfTransform[1];
-        pSpatialInfo->xRot = padfTransform[2];
-        pSpatialInfo->tlY = padfTransform[3];
-        pSpatialInfo->yRot = padfTransform[4];
-        pSpatialInfo->yRes = padfTransform[5];
+        pSpatialInfo->tlX = gt[0];
+        pSpatialInfo->xRes = gt[1];
+        pSpatialInfo->xRot = gt[2];
+        pSpatialInfo->tlY = gt[3];
+        pSpatialInfo->yRot = gt[4];
+        pSpatialInfo->yRes = gt[5];
 
         m_pImageIO->setSpatialInfo(pSpatialInfo);
         return CE_None;
@@ -673,7 +656,7 @@ CPLErr KEADataset::IBuildOverviews(const char *pszResampling, int nOverviews,
         nCurrentBand = panBandList[nBandCount];
         // get the band
         KEARasterBand *pBand =
-            (KEARasterBand *)this->GetRasterBand(nCurrentBand);
+            cpl::down_cast<KEARasterBand *>(GetRasterBand(nCurrentBand));
         // create the overview object
         pBand->CreateOverviews(nOverviews, panOverviewList);
 

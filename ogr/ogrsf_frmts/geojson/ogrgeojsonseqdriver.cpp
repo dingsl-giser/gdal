@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -32,8 +16,10 @@
 #include "cpl_vsi_error.h"
 
 #include "ogr_geojson.h"
+#include "ogrlibjsonutils.h"
 #include "ogrgeojsonreader.h"
 #include "ogrgeojsonwriter.h"
+#include "ogrgeojsongeometry.h"
 
 #include <algorithm>
 #include <memory>
@@ -57,18 +43,18 @@ class OGRGeoJSONSeqDataSource final : public GDALDataset
 
   public:
     OGRGeoJSONSeqDataSource();
-    ~OGRGeoJSONSeqDataSource();
+    ~OGRGeoJSONSeqDataSource() override;
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 
     bool Open(GDALOpenInfo *poOpenInfo, GeoJSONSourceType nSrcType);
     bool Create(const char *pszName, char **papszOptions);
@@ -114,26 +100,26 @@ class OGRGeoJSONSeqLayer final : public OGRLayer
                        CSLConstList papszOptions,
                        std::unique_ptr<OGRCoordinateTransformation> &&poCT);
 
-    ~OGRGeoJSONSeqLayer();
+    ~OGRGeoJSONSeqLayer() override;
 
     bool Init(bool bLooseIdentification, bool bEstablishLayerDefn);
 
-    const char *GetName() override
+    const char *GetName() const override
     {
         return GetDescription();
     }
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
-    OGRFeatureDefn *GetLayerDefn() override;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    const char *GetFIDColumn() override
+    const char *GetFIDColumn() const override
     {
         return m_osFIDColumn.c_str();
     }
 
     GIntBig GetFeatureCount(int) override;
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
     OGRErr CreateField(const OGRFieldDefn *, int) override;
 
@@ -171,7 +157,7 @@ OGRGeoJSONSeqDataSource::~OGRGeoJSONSeqDataSource()
 /*                               GetLayer()                             */
 /************************************************************************/
 
-OGRLayer *OGRGeoJSONSeqDataSource::GetLayer(int nIndex)
+const OGRLayer *OGRGeoJSONSeqDataSource::GetLayer(int nIndex) const
 {
     if (nIndex < 0 || nIndex >= GetLayerCount())
         return nullptr;
@@ -298,7 +284,7 @@ OGRLayer *OGRGeoJSONSeqDataSource::ICreateLayer(
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRGeoJSONSeqDataSource::TestCapability(const char *pszCap)
+int OGRGeoJSONSeqDataSource::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
         return eAccess == GA_Update;
@@ -390,12 +376,13 @@ OGRGeoJSONSeqLayer::~OGRGeoJSONSeqLayer()
 /*                           GetLayerDefn()                             */
 /************************************************************************/
 
-OGRFeatureDefn *OGRGeoJSONSeqLayer::GetLayerDefn()
+const OGRFeatureDefn *OGRGeoJSONSeqLayer::GetLayerDefn() const
 {
     if (!m_bLayerDefnEstablished)
     {
-        Init(/* bLooseIdentification = */ false,
-             /* bEstablishLayerDefn = */ true);
+        const_cast<OGRGeoJSONSeqLayer *>(this)->Init(
+            /* bLooseIdentification = */ false,
+            /* bEstablishLayerDefn = */ true);
     }
     return m_poFeatureDefn;
 }
@@ -679,7 +666,7 @@ GIntBig OGRGeoJSONSeqLayer::GetFeatureCount(int bForce)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRGeoJSONSeqLayer::TestCapability(const char *pszCap)
+int OGRGeoJSONSeqLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCStringsAsUTF8))
         return true;
@@ -803,13 +790,13 @@ bool OGRGeoJSONSeqDataSource::Open(GDALOpenInfo *poOpenInfo,
     {
         if (pszUnprefixedFilename != poOpenInfo->pszFilename)
         {
-            osLayerName = CPLGetBasename(pszUnprefixedFilename);
+            osLayerName = CPLGetBasenameSafe(pszUnprefixedFilename);
             m_fp = VSIFOpenL(pszUnprefixedFilename,
                              poOpenInfo->eAccess == GA_Update ? "rb+" : "rb");
         }
         else
         {
-            osLayerName = CPLGetBasename(poOpenInfo->pszFilename);
+            osLayerName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
             std::swap(m_fp, poOpenInfo->fpL);
         }
     }
@@ -818,7 +805,7 @@ bool OGRGeoJSONSeqDataSource::Open(GDALOpenInfo *poOpenInfo,
         if (poOpenInfo->eAccess == GA_Update)
             return false;
 
-        m_osTmpFile = CPLSPrintf("/vsimem/geojsonseq/%p", this);
+        m_osTmpFile = VSIMemGenerateHiddenFilename("geojsonseq");
         m_fp = VSIFileFromMemBuffer(
             m_osTmpFile.c_str(),
             reinterpret_cast<GByte *>(CPLStrdup(poOpenInfo->pszFilename)),
@@ -842,7 +829,7 @@ bool OGRGeoJSONSeqDataSource::Open(GDALOpenInfo *poOpenInfo,
             }
             else
             {
-                m_osTmpFile = CPLSPrintf("/vsimem/geojsonseq/%p", this);
+                m_osTmpFile = VSIMemGenerateHiddenFilename("geojsonseq");
                 m_fp = VSIFileFromMemBuffer(
                     m_osTmpFile.c_str(),
                     reinterpret_cast<GByte *>(pszStoredContent),
@@ -851,29 +838,14 @@ bool OGRGeoJSONSeqDataSource::Open(GDALOpenInfo *poOpenInfo,
         }
         else
         {
-            const char *const papsOptions[] = {
-                "HEADERS=Accept: text/plain, application/json", nullptr};
-
             CPLHTTPResult *pResult =
-                CPLHTTPFetch(pszUnprefixedFilename, papsOptions);
-
-            if (nullptr == pResult || 0 == pResult->nDataLen ||
-                0 != CPLGetLastErrorNo())
+                GeoJSONHTTPFetchWithContentTypeHeader(pszUnprefixedFilename);
+            if (!pResult)
             {
-                CPLHTTPDestroyResult(pResult);
-                return false;
+                return FALSE;
             }
 
-            if (0 != pResult->nStatus)
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Curl reports error: %d: %s", pResult->nStatus,
-                         pResult->pszErrBuf);
-                CPLHTTPDestroyResult(pResult);
-                return false;
-            }
-
-            m_osTmpFile = CPLSPrintf("/vsimem/geojsonseq/%p", this);
+            m_osTmpFile = VSIMemGenerateHiddenFilename("geojsonseq");
             m_fp = VSIFileFromMemBuffer(m_osTmpFile.c_str(), pResult->pabyData,
                                         pResult->nDataLen, true);
             pResult->pabyData = nullptr;
@@ -941,7 +913,7 @@ bool OGRGeoJSONSeqDataSource::Create(const char *pszName,
 
     eAccess = GA_Update;
 
-    m_bIsRSSeparated = EQUAL(CPLGetExtension(pszName), "GEOJSONS");
+    m_bIsRSSeparated = EQUAL(CPLGetExtensionSafe(pszName).c_str(), "GEOJSONS");
 
     return true;
 }
@@ -1071,6 +1043,7 @@ void RegisterOGRGeoJSONSeq()
     poDriver->SetMetadataItem(GDAL_DMD_CREATIONFIELDDATASUBTYPES, "Boolean");
     poDriver->SetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS, "OGRSQL SQLITE");
     poDriver->SetMetadataItem(GDAL_DCAP_HONOR_GEOM_COORDINATE_PRECISION, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_APPEND, "YES");
 
     poDriver->pfnOpen = OGRGeoJSONSeqDriverOpen;
     poDriver->pfnIdentify = OGRGeoJSONSeqDriverIdentify;

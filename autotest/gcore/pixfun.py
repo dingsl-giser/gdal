@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test pixel functions support.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2010-2014, Antonio Valentino <antonio.valentino@tiscali.it>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -35,9 +18,14 @@ import pytest
 
 from osgeo import gdal
 
+pytestmark = pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+
 # All tests will be skipped if numpy is unavailable.
 numpy = pytest.importorskip("numpy")
-
+gdaltest.importorskip_gdal_array()
 
 ###############################################################################
 # Verify real part extraction from a complex dataset.
@@ -545,6 +533,41 @@ def test_pixfun_div_r():
     refdata2 = refds.GetRasterBand(1).ReadAsArray(10, 10, 5, 6)
 
     assert numpy.all(data == (refdata1 / refdata2))
+
+
+@pytest.mark.parametrize(
+    "dtype,expected",
+    [(gdal.GDT_Float32, float("inf")), (gdal.GDT_Int16, 32767), (gdal.GDT_Byte, 255)],
+)
+def test_pixfun_div_by_zero(tmp_vsimem, dtype, expected):
+
+    with gdal.GetDriverByName("GTiff").Create(
+        tmp_vsimem / "src.tif", 1, 1, 2, dtype
+    ) as src:
+        src.GetRasterBand(1).Fill(5)
+        src.GetRasterBand(2).Fill(0)
+
+    nodata_value = 123
+
+    xml = f"""
+    <VRTDataset rasterXSize="1" rasterYSize="1">
+      <VRTRasterBand dataType="{gdal.GetDataTypeName(dtype)}" band="1" subclass="VRTDerivedRasterBand">
+        <NoDataValue>{nodata_value}</NoDataValue>
+        <PixelFunctionType>div</PixelFunctionType>
+        <SimpleSource>
+           <SourceFilename>{tmp_vsimem / "src.tif"}</SourceFilename>
+           <SourceBand>1</SourceBand>
+        </SimpleSource>
+        <SimpleSource>
+           <SourceFilename>{tmp_vsimem / "src.tif"}</SourceFilename>
+           <SourceBand>2</SourceBand>
+        </SimpleSource>
+      </VRTRasterBand>
+    </VRTDataset>"""
+
+    result = gdal.Open(xml).ReadAsArray()[0, 0]
+
+    assert result == expected
 
 
 ###############################################################################

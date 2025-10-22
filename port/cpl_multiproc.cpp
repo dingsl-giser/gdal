@@ -8,23 +8,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef _GNU_SOURCE
@@ -61,7 +45,7 @@
 
 // #define DEBUG_MUTEX
 
-#if defined(DEBUG) &&                                                          \
+#if defined(DEBUG) && !defined(__COVERITY__) &&                                \
     (defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__)))
 #ifndef DEBUG_CONTENTION
 #define DEBUG_CONTENTION
@@ -652,60 +636,16 @@ void CPLDestroyCond(CPLCond * /* hCond */)
 
 /************************************************************************/
 /*                            CPLLockFile()                             */
-/*                                                                      */
-/*      Lock a file.  This implementation has a terrible race           */
-/*      condition.  If we don't succeed in opening the lock file, we    */
-/*      assume we can create one and own the target file, but other     */
-/*      processes might easily try creating the target file at the      */
-/*      same time, overlapping us.  Death!  Mayhem!  The traditional    */
-/*      solution is to use open() with _O_CREAT|_O_EXCL but this        */
-/*      function and these arguments aren't trivially portable.         */
-/*      Also, this still leaves a race condition on NFS drivers         */
-/*      (apparently).                                                   */
 /************************************************************************/
 
 void *CPLLockFile(const char *pszPath, double dfWaitInSeconds)
 
 {
-    /* -------------------------------------------------------------------- */
-    /*      We use a lock file with a name derived from the file we want    */
-    /*      to lock to represent the file being locked.  Note that for      */
-    /*      the stub implementation the target file does not even need      */
-    /*      to exist to be locked.                                          */
-    /* -------------------------------------------------------------------- */
-    char *pszLockFilename =
-        static_cast<char *>(CPLMalloc(strlen(pszPath) + 30));
-    snprintf(pszLockFilename, strlen(pszPath) + 30, "%s.lock", pszPath);
-
-    FILE *fpLock = fopen(pszLockFilename, "r");
-    while (fpLock != nullptr && dfWaitInSeconds > 0.0)
-    {
-        fclose(fpLock);
-        CPLSleep(std::min(dfWaitInSeconds, 0.5));
-        dfWaitInSeconds -= 0.5;
-
-        fpLock = fopen(pszLockFilename, "r");
-    }
-
-    if (fpLock != nullptr)
-    {
-        fclose(fpLock);
-        CPLFree(pszLockFilename);
-        return nullptr;
-    }
-
-    fpLock = fopen(pszLockFilename, "w");
-
-    if (fpLock == nullptr)
-    {
-        CPLFree(pszLockFilename);
-        return nullptr;
-    }
-
-    fwrite("held\n", 1, 5, fpLock);
-    fclose(fpLock);
-
-    return pszLockFilename;
+    CPLLockFileHandle hHandle = nullptr;
+    CPLStringList aosOptions;
+    aosOptions.SetNameValue("WAIT_TIME", CPLSPrintf("%f", dfWaitInSeconds));
+    CPLLockFileEx(pszPath, &hHandle, aosOptions);
+    return hHandle;
 }
 
 /************************************************************************/
@@ -715,14 +655,7 @@ void *CPLLockFile(const char *pszPath, double dfWaitInSeconds)
 void CPLUnlockFile(void *hLock)
 
 {
-    char *pszLockFilename = static_cast<char *>(hLock);
-
-    if (hLock == nullptr)
-        return;
-
-    VSIUnlink(pszLockFilename);
-
-    CPLFree(pszLockFilename);
+    CPLUnlockFileEx(static_cast<CPLLockFileHandle>(hLock));
 }
 
 /************************************************************************/
@@ -1913,11 +1846,15 @@ static pthread_once_t oTLSKeySetup = PTHREAD_ONCE_INIT;
 /*                             CPLMake_key()                            */
 /************************************************************************/
 
+static void CPLCleanupTLSListWrapper(void *papszList)
+{
+    CPLCleanupTLSList(static_cast<void **>(papszList));
+}
+
 static void CPLMake_key()
 
 {
-    if (pthread_key_create(&oTLSKey, reinterpret_cast<void (*)(void *)>(
-                                         CPLCleanupTLSList)) != 0)
+    if (pthread_key_create(&oTLSKey, CPLCleanupTLSListWrapper) != 0)
     {
         CPLError(CE_Fatal, CPLE_AppDefined, "pthread_key_create() failed!");
     }
@@ -2596,7 +2533,6 @@ void CPLReleaseLock(CPLLock *psLock)
     if (psLock->bDebugPerf && CPLAtomicDec(&(psLock->nCurrentHolders)) == 0)
     {
         const GUIntBig nStopTime = CPLrdtscp();
-        // coverity[missing_lock:FALSE]
         const GIntBig nDiffTime =
             static_cast<GIntBig>(nStopTime - psLock->nStartTime);
         if (nDiffTime > psLock->nMaxDiff)

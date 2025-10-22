@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Defines OGRLMutexedDataSource class
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGRMUTEXEDDATASOURCELAYER_H_INCLUDED
@@ -37,22 +20,22 @@
 #include "ogrmutexedlayer.h"
 #include <map>
 
-/** OGRMutexedDataSource class protects all virtual methods of OGRDataSource
- *  with a mutex.
+/** OGRMutexedDataSource class protects all virtual methods of GDALDataset,
+ *  related to vector layers, with a mutex.
  *  If the passed mutex is NULL, then no locking will be done.
  *
  *  Note that the constructors and destructors are not explicitly protected
  *  by the mutex.
  */
-class CPL_DLL OGRMutexedDataSource : public OGRDataSource
+class CPL_DLL OGRMutexedDataSource final : public GDALDataset
 {
     CPL_DISALLOW_COPY_ASSIGN(OGRMutexedDataSource)
 
   protected:
-    OGRDataSource *m_poBaseDataSource;
-    int m_bHasOwnership;
-    CPLMutex *m_hGlobalMutex;
-    int m_bWrapLayersInMutexedLayer;
+    GDALDataset *m_poBaseDataSource = nullptr;
+    int m_bHasOwnership = false;
+    CPLMutex *m_hGlobalMutex = nullptr;
+    int m_bWrapLayersInMutexedLayer = false;
     std::map<OGRLayer *, OGRMutexedLayer *> m_oMapLayers{};
     std::map<OGRMutexedLayer *, OGRLayer *> m_oReverseMapLayers{};
 
@@ -60,26 +43,25 @@ class CPL_DLL OGRMutexedDataSource : public OGRDataSource
 
   public:
     /* The construction of the object isn't protected by the mutex */
-    OGRMutexedDataSource(OGRDataSource *poBaseDataSource, int bTakeOwnership,
+    OGRMutexedDataSource(GDALDataset *poBaseDataSource, int bTakeOwnership,
                          CPLMutex *hMutexIn, int bWrapLayersInMutexedLayer);
 
     /* The destruction of the object isn't protected by the mutex */
-    virtual ~OGRMutexedDataSource() override;
+    ~OGRMutexedDataSource() override;
 
-    OGRDataSource *GetBaseDataSource()
+    GDALDataset *GetBaseDataSource()
     {
         return m_poBaseDataSource;
     }
 
-    virtual const char *GetName() override;
+    int GetLayerCount() const override;
+    using GDALDataset::GetLayer;
+    const OGRLayer *GetLayer(int) const override;
+    OGRLayer *GetLayerByName(const char *) override;
+    OGRErr DeleteLayer(int) override;
+    bool IsLayerPrivate(int iLayer) const override;
 
-    virtual int GetLayerCount() override;
-    virtual OGRLayer *GetLayer(int) override;
-    virtual OGRLayer *GetLayerByName(const char *) override;
-    virtual OGRErr DeleteLayer(int) override;
-    virtual bool IsLayerPrivate(int iLayer) const override;
-
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     virtual OGRLayer *ICreateLayer(const char *pszName,
                                    const OGRGeomFieldDefn *poGeomFieldDefn,
@@ -87,29 +69,28 @@ class CPL_DLL OGRMutexedDataSource : public OGRDataSource
     virtual OGRLayer *CopyLayer(OGRLayer *poSrcLayer, const char *pszNewName,
                                 char **papszOptions = nullptr) override;
 
-    virtual OGRStyleTable *GetStyleTable() override;
-    virtual void SetStyleTableDirectly(OGRStyleTable *poStyleTable) override;
+    OGRStyleTable *GetStyleTable() override;
+    void SetStyleTableDirectly(OGRStyleTable *poStyleTable) override;
 
-    virtual void SetStyleTable(OGRStyleTable *poStyleTable) override;
+    void SetStyleTable(OGRStyleTable *poStyleTable) override;
 
-    virtual OGRLayer *ExecuteSQL(const char *pszStatement,
-                                 OGRGeometry *poSpatialFilter,
-                                 const char *pszDialect) override;
-    virtual void ReleaseResultSet(OGRLayer *poResultsSet) override;
+    OGRLayer *ExecuteSQL(const char *pszStatement, OGRGeometry *poSpatialFilter,
+                         const char *pszDialect) override;
+    void ReleaseResultSet(OGRLayer *poResultsSet) override;
 
-    virtual CPLErr FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
-    virtual OGRErr StartTransaction(int bForce = FALSE) override;
-    virtual OGRErr CommitTransaction() override;
-    virtual OGRErr RollbackTransaction() override;
+    OGRErr StartTransaction(int bForce = FALSE) override;
+    OGRErr CommitTransaction() override;
+    OGRErr RollbackTransaction() override;
 
-    virtual char **GetMetadata(const char *pszDomain = "") override;
-    virtual CPLErr SetMetadata(char **papszMetadata,
-                               const char *pszDomain = "") override;
+    char **GetMetadata(const char *pszDomain = "") override;
+    CPLErr SetMetadata(char **papszMetadata,
+                       const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
-    virtual CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
-                                   const char *pszDomain = "") override;
+    CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
+                           const char *pszDomain = "") override;
 
     virtual std::vector<std::string>
     GetFieldDomainNames(CSLConstList papszOptions = nullptr) const override;
@@ -129,7 +110,7 @@ class CPL_DLL OGRMutexedDataSource : public OGRDataSource
     const GDALRelationship *
     GetRelationship(const std::string &name) const override;
 
-    virtual std::shared_ptr<GDALGroup> GetRootGroup() const override;
+    std::shared_ptr<GDALGroup> GetRootGroup() const override;
 };
 
 #endif /* #ifndef DOXYGEN_SKIP */

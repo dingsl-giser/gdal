@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -100,11 +84,21 @@ CPLErr OGRSQLiteViewLayer::Initialize(const char *pszViewNameIn,
 /*                           GetLayerDefn()                             */
 /************************************************************************/
 
-OGRFeatureDefn *OGRSQLiteViewLayer::GetLayerDefn()
+const OGRFeatureDefn *OGRSQLiteViewLayer::GetLayerDefn() const
 {
-    if (m_poFeatureDefn)
-        return m_poFeatureDefn;
+    if (!m_poFeatureDefn)
+    {
+        const_cast<OGRSQLiteViewLayer *>(this)->BuildLayerDefn();
+    }
+    return m_poFeatureDefn;
+}
 
+/************************************************************************/
+/*                          BuildLayerDefn()                            */
+/************************************************************************/
+
+void OGRSQLiteViewLayer::BuildLayerDefn()
+{
     EstablishFeatureDefn();
 
     if (m_poFeatureDefn == nullptr)
@@ -114,8 +108,6 @@ OGRFeatureDefn *OGRSQLiteViewLayer::GetLayerDefn()
         m_poFeatureDefn = new OGRSQLiteFeatureDefn(m_pszViewName);
         m_poFeatureDefn->Reference();
     }
-
-    return m_poFeatureDefn;
 }
 
 /************************************************************************/
@@ -146,12 +138,13 @@ OGRSQLiteLayer *OGRSQLiteViewLayer::GetUnderlyingLayer()
 /*                            GetGeomType()                             */
 /************************************************************************/
 
-OGRwkbGeometryType OGRSQLiteViewLayer::GetGeomType()
+OGRwkbGeometryType OGRSQLiteViewLayer::GetGeomType() const
 {
     if (m_poFeatureDefn)
         return m_poFeatureDefn->GetGeomType();
 
-    OGRSQLiteLayer *l_m_poUnderlyingLayer = GetUnderlyingLayer();
+    OGRSQLiteLayer *l_m_poUnderlyingLayer =
+        const_cast<OGRSQLiteViewLayer *>(this)->GetUnderlyingLayer();
     if (l_m_poUnderlyingLayer)
         return l_m_poUnderlyingLayer->GetGeomType();
 
@@ -376,10 +369,10 @@ OGRErr OGRSQLiteViewLayer::SetAttributeFilter(const char *pszQuery)
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                         ISetSpatialFilter()                          */
 /************************************************************************/
 
-void OGRSQLiteViewLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
+OGRErr OGRSQLiteViewLayer::ISetSpatialFilter(int, const OGRGeometry *poGeomIn)
 
 {
     if (InstallFilter(poGeomIn))
@@ -388,6 +381,7 @@ void OGRSQLiteViewLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
 
         ResetReading();
     }
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -513,7 +507,7 @@ void OGRSQLiteViewLayer::BuildWhere()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRSQLiteViewLayer::TestCapability(const char *pszCap)
+int OGRSQLiteViewLayer::TestCapability(const char *pszCap) const
 
 {
     if (HasLayerDefnError())

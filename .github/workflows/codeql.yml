@@ -4,12 +4,14 @@ on:
     push:
         paths-ignore:
             - 'doc/**'
+            - 'docker/**'
         branches-ignore:
           - 'backport**'
           - 'dependabot**'
     pull_request:
         paths-ignore:
             - 'doc/**'
+            - 'docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -44,7 +46,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
     - name: Install dependencies
       run: |
@@ -72,7 +74,6 @@ jobs:
             liblzma-dev \
             libmysqlclient-dev \
             libnetcdf-dev \
-            libogdi-dev \
             libopenexr-dev \
             libopenjp2-7-dev \
             libpcre3-dev \
@@ -92,7 +93,7 @@ jobs:
             unixodbc-dev
 
     - name: Install latest ninja
-      run: pip install ninja
+      run: PYTHON_CMD=python3 && $PYTHON_CMD -m pip install ninja
 
     - name: Configure
       if: matrix.language == 'c-cpp'
@@ -107,7 +108,7 @@ jobs:
     # We do that after running CMake to avoid CodeQL to trigger during CMake time,
     # in particular during HDF5 detection which is terribly slow (https://github.com/OSGeo/gdal/issues/9549)
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@4dd16135b69a43b6c8efb853346f8437d92d3c93 # v3.26.6
+      uses: github/codeql-action/init@3599b3baa15b485a2e49ef411a7a4bb2452e7f93 # v3.29.5
       with:
         languages: ${{ matrix.language }}
         # If you wish to specify custom queries, you can do so here or in a config file.
@@ -127,6 +128,6 @@ jobs:
         cmake --build build -j$(nproc)
 
     - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@4dd16135b69a43b6c8efb853346f8437d92d3c93 # v3.26.6
+      uses: github/codeql-action/analyze@3599b3baa15b485a2e49ef411a7a4bb2452e7f93 # v3.29.5
       with:
         category: "/language:${{matrix.language}}"

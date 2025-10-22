@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Hierarchical Data Format Release 5 (HDF5)
  * Purpose:  Header file for HDF5 HDFEOS parser
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef HDF5EOSPARSER_H_INCLUDED
@@ -33,6 +16,7 @@
 #include "hdf5_api.h"
 
 #include "cpl_json.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 
 #include <map>
@@ -69,8 +53,8 @@ class HDF5EOSParser
     struct GridMetadata
     {
         std::string osGridName{};
-        std::vector<Dimension> aoDimensions;  // all dimensions of the grid
-        std::string osProjection{};           // e.g HE5_GCTP_SNSOID
+        std::vector<Dimension> aoDimensions{};  // all dimensions of the grid
+        std::string osProjection{};             // e.g HE5_GCTP_SNSOID
         int nProjCode = -1;          // GTCP numeric value for osProjection
         std::string osGridOrigin{};  // e.g HE5_HDFE_GD_UL
         std::vector<double>
@@ -82,7 +66,7 @@ class HDF5EOSParser
         std::vector<double>
             adfLowerRightPointMeters{};  // e.g (0.000000,4447802.078667)
 
-        bool GetGeoTransform(double adfGeoTransform[6]) const;
+        bool GetGeoTransform(GDALGeoTransform &gt) const;
         std::unique_ptr<OGRSpatialReference> GetSRS() const;
     };
 
@@ -114,8 +98,8 @@ class HDF5EOSParser
         int iYDim = -1;
         int iOtherDim = -1;
 
-        std::string osLongitudeSubdataset;
-        std::string osLatitudeSubdataset;
+        std::string osLongitudeSubdataset{};
+        std::string osLatitudeSubdataset{};
         int nLineOffset = 0;
         int nLineStep = 0;
         int nPixelOffset = 0;

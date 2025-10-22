@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_PARQUET_H
@@ -35,9 +19,13 @@
 
 #include <functional>
 #include <map>
+#include <set>
 
 #include "../arrow_common/ogr_arrow.h"
 #include "ogr_include_parquet.h"
+
+constexpr int DEFAULT_COMPRESSION_LEVEL = -1;
+constexpr int OGR_PARQUET_ZSTD_DEFAULT_COMPRESSION_LEVEL = 9;
 
 /************************************************************************/
 /*                       OGRParquetLayerBase                            */
@@ -59,13 +47,18 @@ class OGRParquetLayerBase CPL_NON_FINAL : public OGRArrowLayer
     CPLStringList m_aosGeomPossibleNames{};
     std::string m_osCRS{};
 
-    static int GetNumCPUs();
+#if PARQUET_VERSION_MAJOR >= 21
+    std::set<int>
+        m_geoStatsWithBBOXAvailable{};  // key is index of OGR geometry column
+#endif
 
     void LoadGeoMetadata(
         const std::shared_ptr<const arrow::KeyValueMetadata> &kv_metadata);
     bool DealWithGeometryColumn(
         int iFieldIdx, const std::shared_ptr<arrow::Field> &field,
-        std::function<OGRwkbGeometryType(void)> computeGeometryTypeFun);
+        std::function<OGRwkbGeometryType(void)> computeGeometryTypeFun,
+        const parquet::ColumnDescriptor *parquetColumn,
+        const parquet::FileMetaData *metadata, int iColumn);
 
     void InvalidateCachedBatches() override;
 
@@ -77,11 +70,13 @@ class OGRParquetLayerBase CPL_NON_FINAL : public OGRArrowLayer
                                             std::string &osYMax);
 
   public:
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     void ResetReading() override;
 
     GDALDataset *GetDataset() override;
+
+    static int GetNumCPUs();
 };
 
 /************************************************************************/
@@ -126,6 +121,9 @@ class OGRParquetLayer final : public OGRParquetLayerBase
     std::map<int, GeomColBBOXParquet>
         m_oMapGeomFieldIndexToGeomColBBOXParquet{};
 
+    //! GDAL creation options that were used to create the file (if done by GDAL)
+    CPLStringList m_aosCreationOptions{};
+
     void EstablishFeatureDefn();
     void ProcessGeometryColumnCovering(
         const std::shared_ptr<arrow::Field> &field,
@@ -149,7 +147,7 @@ class OGRParquetLayer final : public OGRParquetLayerBase
     OGRFeature *GetFeatureExplicitFID(GIntBig nFID);
     OGRFeature *GetFeatureByIndex(GIntBig nFID);
 
-    virtual std::string GetDriverUCName() const override
+    std::string GetDriverUCName() const override
     {
         return "PARQUET";
     }
@@ -166,7 +164,7 @@ class OGRParquetLayer final : public OGRParquetLayerBase
     void ResetReading() override;
     OGRFeature *GetFeature(GIntBig nFID) override;
     GIntBig GetFeatureCount(int bForce) override;
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     OGRErr SetIgnoredFields(CSLConstList papszFields) override;
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain = "") override;
@@ -198,6 +196,11 @@ class OGRParquetLayer final : public OGRParquetLayerBase
     int GetFIDParquetColumn() const
     {
         return m_iFIDParquetColumn;
+    }
+
+    const CPLStringList &GetCreationOptions() const
+    {
+        return m_aosCreationOptions;
     }
 
     static constexpr int OGR_FID_INDEX = -2;
@@ -270,22 +273,17 @@ class OGRParquetDatasetLayer final : public OGRParquetLayerBase
     OGRFeature *GetNextFeature() override;
 
     GIntBig GetFeatureCount(int bForce) override;
-    OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
-    OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                     int bForce = TRUE) override;
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    void SetSpatialFilter(OGRGeometry *poGeom) override
-    {
-        SetSpatialFilter(0, poGeom);
-    }
-
-    void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override;
+    OGRErr ISetSpatialFilter(int iGeomField,
+                             const OGRGeometry *poGeom) override;
 
     OGRErr SetAttributeFilter(const char *pszFilter) override;
 
     OGRErr SetIgnoredFields(CSLConstList papszFields) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     // TODO
     std::unique_ptr<OGRFieldDomain>
@@ -304,16 +302,29 @@ class OGRParquetDatasetLayer final : public OGRParquetLayerBase
 
 class OGRParquetDataset final : public OGRArrowDataset
 {
+    std::shared_ptr<arrow::fs::FileSystem> m_poFS{};
+
   public:
-    explicit OGRParquetDataset(
-        const std::shared_ptr<arrow::MemoryPool> &poMemoryPool);
+    explicit OGRParquetDataset();
+    ~OGRParquetDataset() override;
+
+    CPLErr Close() override;
 
     OGRLayer *ExecuteSQL(const char *pszSQLCommand,
                          OGRGeometry *poSpatialFilter,
                          const char *pszDialect) override;
     void ReleaseResultSet(OGRLayer *poResultsSet) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
+
+    void SetFileSystem(const std::shared_ptr<arrow::fs::FileSystem> &fs)
+    {
+        m_poFS = fs;
+    }
+
+    std::unique_ptr<OGRParquetLayer>
+    CreateReaderLayer(const std::string &osFilename, VSILFILE *&fpIn,
+                      CSLConstList papszOpenOptionsIn);
 };
 
 /************************************************************************/
@@ -331,7 +342,6 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
     std::unique_ptr<parquet::arrow::FileWriter> m_poFileWriter{};
     std::shared_ptr<const arrow::KeyValueMetadata> m_poKeyValueMetadata{};
     bool m_bForceCounterClockwiseOrientation = false;
-    bool m_bEdgesSpherical = false;
     parquet::WriterProperties::Builder m_oWriterPropertiesBuilder{};
 
     //! Temporary GeoPackage dataset. Only used in SORT_BY_BBOX mode
@@ -341,20 +351,25 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
     //! Number of features written by ICreateFeature(). Only used in SORT_BY_BBOX mode
     GIntBig m_nTmpFeatureCount = 0;
 
-    virtual bool IsFileWriterCreated() const override
+    //! Whether to write "geo" footer metadata;
+    bool m_bWriteGeoMetadata = true;
+
+    CPLStringList m_aosCreationOptions{};
+
+    bool IsFileWriterCreated() const override
     {
         return m_poFileWriter != nullptr;
     }
 
-    virtual void CreateWriter() override;
-    virtual bool CloseFileWriter() override;
+    void CreateWriter() override;
+    bool CloseFileWriter() override;
 
-    virtual void CreateSchema() override;
-    virtual void PerformStepsBeforeFinalFlushGroup() override;
+    void CreateSchema() override;
+    void PerformStepsBeforeFinalFlushGroup() override;
 
-    virtual bool FlushGroup() override;
+    bool FlushGroup() override;
 
-    virtual std::string GetDriverUCName() const override
+    std::string GetDriverUCName() const override
     {
         return "PARQUET";
     }
@@ -364,9 +379,9 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
 
     virtual void FixupWKBGeometryBeforeWriting(GByte *pabyWKB,
                                                size_t nLen) override;
-    virtual void FixupGeometryBeforeWriting(OGRGeometry *poGeom) override;
+    void FixupGeometryBeforeWriting(OGRGeometry *poGeom) override;
 
-    virtual bool IsSRSRequired() const override
+    bool IsSRSRequired() const override
     {
         return false;
     }
@@ -384,14 +399,13 @@ class OGRParquetWriterLayer final : public OGRArrowWriterLayer
 
     CPLErr SetMetadata(char **papszMetadata, const char *pszDomain) override;
 
-    bool SetOptions(CSLConstList papszOptions,
-                    const OGRSpatialReference *poSpatialRef,
-                    OGRwkbGeometryType eGType);
+    bool SetOptions(const OGRGeomFieldDefn *poSrcGeomFieldDefn,
+                    CSLConstList papszOptions);
 
     OGRErr CreateGeomField(const OGRGeomFieldDefn *poField,
                            int bApproxOK = TRUE) override;
 
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 #if PARQUET_VERSION_MAJOR <= 10
     // Parquet <= 10 doesn't support the WriteRecordBatch() API
     bool IsArrowSchemaSupported(const struct ArrowSchema *schema,
@@ -450,6 +464,8 @@ class OGRParquetWriterDataset final : public GDALPamDataset
     explicit OGRParquetWriterDataset(
         const std::shared_ptr<arrow::io::OutputStream> &poOutputStream);
 
+    ~OGRParquetWriterDataset() override;
+
     arrow::MemoryPool *GetMemoryPool() const
     {
         return m_poMemoryPool.get();
@@ -457,9 +473,9 @@ class OGRParquetWriterDataset final : public GDALPamDataset
 
     CPLErr Close() override;
 
-    int GetLayerCount() override;
-    OGRLayer *GetLayer(int idx) override;
-    int TestCapability(const char *pszCap) override;
+    int GetLayerCount() const override;
+    const OGRLayer *GetLayer(int idx) const override;
+    int TestCapability(const char *pszCap) const override;
     std::vector<std::string> GetFieldDomainNames(
         CSLConstList /*papszOptions*/ = nullptr) const override;
     const OGRFieldDomain *

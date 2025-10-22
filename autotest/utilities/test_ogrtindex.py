@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  ogrtindex testing
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -165,7 +148,7 @@ def test_ogrtindex_3(ogrtindex_path, tmp_path, src_srs_format, expected_srss):
     if src_srs_format == "-src_srs_format WKT":
         if ogr.GetDriverByName("SQLite") is None:
             pytest.skip("SQLite driver not available")
-        output_filename = str(tmp_path / "tileindex.shp")
+        output_filename = str(tmp_path / "tileindex.db")
         output_format = " -f SQLite"
 
     (_, err) = gdaltest.runexternal_out_and_err(
@@ -198,3 +181,21 @@ def test_ogrtindex_3(ogrtindex_path, tmp_path, src_srs_format, expected_srss):
         ogrtest.check_feature_geometry(feat, expected_wkts[i], context=f"i={i}")
 
     ds = None
+
+
+###############################################################################
+# More options
+
+
+@pytest.mark.require_driver("GPKG")
+def test_ogrtindex_options(ogrtindex_path, tmp_path):
+
+    (_, err) = gdaltest.runexternal_out_and_err(
+        f"{ogrtindex_path} -f GPKG -lnum 0 -lname poly -tileindex my_loc -accept_different_schemas {tmp_path}/out.gpkg ../ogr/data/poly.shp"
+    )
+    assert err is None or err == ""
+    ds = ogr.Open(tmp_path / "out.gpkg")
+    lyr = ds.GetLayer(0)
+    assert lyr.GetName() == "tileindex"
+    f = lyr.GetNextFeature()
+    assert f["my_loc"] == "../ogr/data/poly.shp,0"

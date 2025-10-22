@@ -8,23 +8,7 @@
  * Copyright (c) 2011, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2011-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -32,9 +16,6 @@
 
 #include <cstddef>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 
 #include <algorithm>
 #include <limits>
@@ -128,22 +109,30 @@ class VSICachedFile final : public VSIVirtualHandle
 
 static size_t GetCacheMax(size_t nCacheSize)
 {
-    return nCacheSize ? nCacheSize
-                      : static_cast<size_t>(std::min(
-                            static_cast<GUIntBig>(
-                                std::numeric_limits<size_t>::max() / 2),
-                            CPLScanUIntBig(CPLGetConfigOption("VSI_CACHE_SIZE",
-                                                              "25000000"),
-                                           40)));
-}
+    if (nCacheSize)
+    {
+        return nCacheSize;
+    }
 
-/************************************************************************/
-/*                           DIV_ROUND_UP()                             */
-/************************************************************************/
+    const char *pszCacheSize = CPLGetConfigOption("VSI_CACHE_SIZE", "25000000");
+    GIntBig nMemorySize;
+    bool bUnitSpecified;
+    if (CPLParseMemorySize(pszCacheSize, &nMemorySize, &bUnitSpecified) !=
+        CE_None)
+    {
+        CPLError(
+            CE_Failure, CPLE_IllegalArg,
+            "Failed to parse value of VSI_CACHE_SIZE. Using default of 25MB");
+        nMemorySize = 25000000;
+    }
+    else if (static_cast<size_t>(nMemorySize) >
+             std::numeric_limits<size_t>::max() / 2)
+    {
+        nMemorySize =
+            static_cast<GIntBig>(std::numeric_limits<size_t>::max() / 2);
+    }
 
-template <class T> inline T DIV_ROUND_UP(T a, T b)
-{
-    return a / b + (((a % b) == 0) ? 0 : 1);
+    return static_cast<size_t>(nMemorySize);
 }
 
 /************************************************************************/
@@ -154,7 +143,7 @@ VSICachedFile::VSICachedFile(VSIVirtualHandle *poBaseHandle, size_t nChunkSize,
                              size_t nCacheSize)
     : m_poBase(poBaseHandle),
       m_nChunkSize(nChunkSize ? nChunkSize : VSI_CACHED_DEFAULT_CHUNK_SIZE),
-      m_oCache{DIV_ROUND_UP(GetCacheMax(nCacheSize), m_nChunkSize), 0}
+      m_oCache{cpl::div_round_up(GetCacheMax(nCacheSize), m_nChunkSize), 0}
 {
     m_poBase->Seek(0, SEEK_END);
     m_nFileSize = m_poBase->Tell();
@@ -305,7 +294,7 @@ bool VSICachedFile::LoadBlocks(vsi_l_offset nStartBlock, size_t nBlockCount,
     bool ret = true;
     if (nToRead > nDataRead + m_nChunkSize - 1)
     {
-        size_t nNewBlockCount = (nDataRead + m_nChunkSize - 1) / m_nChunkSize;
+        size_t nNewBlockCount = cpl::div_round_up(nDataRead, m_nChunkSize);
         if (nNewBlockCount < nBlockCount)
         {
             nBlockCount = nNewBlockCount;
@@ -516,8 +505,9 @@ class VSICachedFilesystemHandler final : public VSIFilesystemHandler
                                 size_t &nChunkSize, size_t &nCacheSize);
 
   public:
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList papszOptions) override;
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
@@ -649,10 +639,9 @@ bool VSICachedFilesystemHandler::AnalyzeFilename(
 /*                               Open()                                 */
 /************************************************************************/
 
-VSIVirtualHandle *VSICachedFilesystemHandler::Open(const char *pszFilename,
-                                                   const char *pszAccess,
-                                                   bool bSetError,
-                                                   CSLConstList papszOptions)
+VSIVirtualHandleUniquePtr
+VSICachedFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
+                                 bool bSetError, CSLConstList papszOptions)
 {
     std::string osUnderlyingFilename;
     size_t nChunkSize = 0;
@@ -670,11 +659,12 @@ VSIVirtualHandle *VSICachedFilesystemHandler::Open(const char *pszFilename,
         return nullptr;
     }
 
-    auto fp = VSIFOpenEx2L(osUnderlyingFilename.c_str(), pszAccess, bSetError,
-                           papszOptions);
+    auto fp = VSIFilesystemHandler::OpenStatic(
+        osUnderlyingFilename.c_str(), pszAccess, bSetError, papszOptions);
     if (!fp)
         return nullptr;
-    return VSICreateCachedFile(fp, nChunkSize, nCacheSize);
+    return VSIVirtualHandleUniquePtr(
+        VSICreateCachedFile(fp.release(), nChunkSize, nCacheSize));
 }
 
 /************************************************************************/

@@ -10,23 +10,7 @@
  * Copyright (c) 2015, European Union (European Environment Agency)
  * Copyright (c) 2023, Grok Image Compression Inc.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #pragma once
@@ -89,7 +73,7 @@ struct JP2DatasetBase
         return nThreads;
     }
 
-    std::string m_osFilename;
+    std::string m_osFilename{};
     VSILFILE *fp_ = nullptr; /* Large FILE API */
     vsi_l_offset nCodeStreamStart = 0;
     vsi_l_offset nCodeStreamLength = 0;
@@ -118,6 +102,8 @@ struct JP2DatasetBase
     int m_nY0 = 0;
     uint32_t m_nTileWidth = 0;
     uint32_t m_nTileHeight = 0;
+
+    virtual ~JP2DatasetBase();
 };
 
 /************************************************************************/
@@ -133,14 +119,17 @@ class JP2OPJLikeDataset final : public GDALJP2AbstractDataset, public BASE
     friend class JP2OPJLikeRasterBand<CODEC, BASE>;
     JP2OPJLikeDataset **papoOverviewDS = nullptr;
 
+    JP2OPJLikeDataset(const JP2OPJLikeDataset &) = delete;
+    JP2OPJLikeDataset &operator=(const JP2OPJLikeDataset &) = delete;
+
   protected:
-    virtual int CloseDependentDatasets() override;
-    virtual VSILFILE *GetFileHandle() override;
+    int CloseDependentDatasets() override;
+    VSILFILE *GetFileHandle() override;
     CPLErr Close() override;
 
   public:
     JP2OPJLikeDataset();
-    virtual ~JP2OPJLikeDataset();
+    ~JP2OPJLikeDataset() override;
 
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *);
@@ -152,25 +141,24 @@ class JP2OPJLikeDataset final : public GDALJP2AbstractDataset, public BASE
 
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual CPLErr SetGeoTransform(double *) override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
     CPLErr SetGCPs(int nGCPCountIn, const GDAL_GCP *pasGCPListIn,
                    const OGRSpatialReference *poSRS) override;
 
-    virtual CPLErr SetMetadata(char **papszMetadata,
-                               const char *pszDomain = "") override;
-    virtual CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
-                                   const char *pszDomain = "") override;
+    CPLErr SetMetadata(char **papszMetadata,
+                       const char *pszDomain = "") override;
+    CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
+                           const char *pszDomain = "") override;
 
-    virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                             int nXSize, int nYSize, void *pData, int nBufXSize,
-                             int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, BANDMAP_TYPE panBandMap,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GSpacing nBandSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
+                     int nYSize, void *pData, int nBufXSize, int nBufYSize,
+                     GDALDataType eBufType, int nBandCount,
+                     BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
-    virtual GIntBig GetEstimatedRAMUsage() override;
+    GIntBig GetEstimatedRAMUsage() override;
 
     CPLErr IBuildOverviews(const char *pszResampling, int nOverviews,
                            const int *panOverviewList, int nListBands,
@@ -205,30 +193,33 @@ template <typename CODEC, typename BASE>
 class JP2OPJLikeRasterBand final : public GDALPamRasterBand
 {
     friend class JP2OPJLikeDataset<CODEC, BASE>;
-    int bPromoteTo8Bit;
-    GDALColorTable *poCT;
+    int bPromoteTo8Bit = false;
+    GDALColorTable *poCT = nullptr;
+
+    JP2OPJLikeRasterBand(const JP2OPJLikeRasterBand &) = delete;
+    JP2OPJLikeRasterBand &operator=(const JP2OPJLikeRasterBand &) = delete;
 
   public:
     JP2OPJLikeRasterBand(JP2OPJLikeDataset<CODEC, BASE> *poDSIn, int nBandIn,
                          GDALDataType eDataTypeIn, int nBits,
                          int bPromoteTo8BitIn, int nBlockXSizeIn,
                          int nBlockYSizeIn);
-    virtual ~JP2OPJLikeRasterBand();
+    ~JP2OPJLikeRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                             int nXSize, int nYSize, void *pData, int nBufXSize,
-                             int nBufYSize, GDALDataType eBufType,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
+                     int nYSize, void *pData, int nBufXSize, int nBufYSize,
+                     GDALDataType eBufType, GSpacing nPixelSpace,
+                     GSpacing nLineSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
-    virtual GDALColorInterp GetColorInterpretation() override;
-    virtual GDALColorTable *GetColorTable() override;
+    GDALColorInterp GetColorInterpretation() override;
+    GDALColorTable *GetColorTable() override;
 
-    virtual int GetOverviewCount() override;
-    virtual GDALRasterBand *GetOverview(int iOvrLevel) override;
+    int GetOverviewCount() override;
+    GDALRasterBand *GetOverview(int iOvrLevel) override;
 
-    virtual int HasArbitraryOverviews() override;
+    int HasArbitraryOverviews() override;
 };
 
 #ifdef unused

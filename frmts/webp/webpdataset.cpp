@@ -7,26 +7,11 @@
  ******************************************************************************
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
+#include "cpl_vsi_virtual.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
 
@@ -55,18 +40,27 @@ class WEBPDataset final : public GDALPamDataset
 
     int bHasReadXMPMetadata;
 
+    CPL_DISALLOW_COPY_ASSIGN(WEBPDataset)
+
+    CPLErr GetGeoTransform(GDALGeoTransform &gt,
+                           std::string &osWorldFilename) const;
+
   public:
     WEBPDataset();
-    virtual ~WEBPDataset();
+    ~WEBPDataset() override;
 
-    virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, BANDMAP_TYPE,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GSpacing nBandSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr Close() override;
 
-    virtual char **GetMetadataDomainList() override;
-    virtual char **GetMetadata(const char *pszDomain = "") override;
+    char **GetFileList() override;
+
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
+
+    char **GetMetadataDomainList() override;
+    char **GetMetadata(const char *pszDomain = "") override;
 
     CPLStringList GetCompressionFormats(int nXOff, int nYOff, int nXSize,
                                         int nYSize, int nBandCount,
@@ -99,8 +93,8 @@ class WEBPRasterBand final : public GDALPamRasterBand
   public:
     WEBPRasterBand(WEBPDataset *, int);
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual GDALColorInterp GetColorInterpretation() override;
+    CPLErr IReadBlock(int, int, void *) override;
+    GDALColorInterp GetColorInterpretation() override;
 };
 
 /************************************************************************/
@@ -124,7 +118,7 @@ WEBPRasterBand::WEBPRasterBand(WEBPDataset *poDSIn, int)
 CPLErr WEBPRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
                                   void *pImage)
 {
-    WEBPDataset *poGDS = reinterpret_cast<WEBPDataset *>(poDS);
+    WEBPDataset *poGDS = cpl::down_cast<WEBPDataset *>(poDS);
 
     if (poGDS->Uncompress() != CE_None)
         return CE_Failure;
@@ -181,10 +175,77 @@ WEBPDataset::WEBPDataset()
 WEBPDataset::~WEBPDataset()
 
 {
-    FlushCache(true);
-    if (fpImage)
-        VSIFCloseL(fpImage);
+    WEBPDataset::Close();
     VSIFree(pabyUncompressed);
+}
+
+/************************************************************************/
+/*                                Close()                               */
+/************************************************************************/
+
+CPLErr WEBPDataset::Close()
+{
+    CPLErr eErr = CE_None;
+
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        eErr = WEBPDataset::FlushCache(true);
+
+        if (fpImage != nullptr && VSIFCloseL(fpImage) != 0)
+            eErr = CE_Failure;
+        fpImage = nullptr;
+
+        eErr = GDAL::Combine(eErr, GDALPamDataset::Close());
+    }
+    return eErr;
+}
+
+/************************************************************************/
+/*                               GetFileList()                          */
+/************************************************************************/
+
+char **WEBPDataset::GetFileList()
+{
+    char **papszFileList = GDALPamDataset::GetFileList();
+    GDALGeoTransform gt;
+    std::string osWorldFilename;
+    CPL_IGNORE_RET_VAL(GetGeoTransform(gt, osWorldFilename));
+    if (!osWorldFilename.empty())
+    {
+        papszFileList = CSLAddString(papszFileList, osWorldFilename.c_str());
+    }
+    return papszFileList;
+}
+
+/************************************************************************/
+/*                            GetGeoTransform()                         */
+/************************************************************************/
+
+CPLErr WEBPDataset::GetGeoTransform(GDALGeoTransform &gt) const
+{
+    std::string osWorldFilename;
+    return GetGeoTransform(gt, osWorldFilename);
+}
+
+CPLErr WEBPDataset::GetGeoTransform(GDALGeoTransform &gt,
+                                    std::string &osWorldFilename) const
+{
+    bool bGeoTransformValid = GDALPamDataset::GetGeoTransform(gt) == CE_None;
+    if (!bGeoTransformValid)
+    {
+        char *pszWldFilename = nullptr;
+        bGeoTransformValid =
+            GDALReadWorldFile2(GetDescription(), ".wld", gt,
+                               oOvManager.GetSiblingFiles(), &pszWldFilename) ||
+            GDALReadWorldFile2(GetDescription(), ".wpw", gt,
+                               oOvManager.GetSiblingFiles(), &pszWldFilename) ||
+            GDALReadWorldFile2(GetDescription(), ".webpw", gt,
+                               oOvManager.GetSiblingFiles(), &pszWldFilename);
+        if (bGeoTransformValid)
+            osWorldFilename = pszWldFilename;
+        CPLFree(pszWldFilename);
+    }
+    return bGeoTransformValid ? CE_None : CE_Failure;
 }
 
 /************************************************************************/
@@ -263,6 +324,7 @@ char **WEBPDataset::GetMetadata(const char *pszDomain)
                 char *apszMDList[2] = {pszXMP, nullptr};
                 SetMetadata(apszMDList, "xml:XMP");
 
+                // cppcheck-suppress redundantAssignment
                 nPamFlags = nOldPamFlags;
 
                 VSIFree(pszXMP);
@@ -354,9 +416,8 @@ CPLErr WEBPDataset::IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
     if ((eRWFlag == GF_Read) && (nBandCount == nBands) && (nXOff == 0) &&
         (nYOff == 0) && (nXSize == nBufXSize) && (nXSize == nRasterXSize) &&
         (nYSize == nBufYSize) && (nYSize == nRasterYSize) &&
-        (eBufType == GDT_Byte) && (pData != nullptr) && (panBandMap[0] == 1) &&
-        (panBandMap[1] == 2) && (panBandMap[2] == 3) &&
-        (nBands == 3 || panBandMap[3] == 4))
+        (eBufType == GDT_Byte) && (pData != nullptr) &&
+        IsAllBands(nBandCount, panBandMap))
     {
         if (Uncompress() != CE_None)
             return CE_Failure;
@@ -550,7 +611,9 @@ GDALPamDataset *WEBPDataset::OpenPAM(GDALOpenInfo *poOpenInfo)
         config.input.format == 2 ? "LOSSLESS" : "LOSSY", "IMAGE_STRUCTURE");
 #endif
 
-    if (config.input.has_alpha)
+    if (config.input.has_alpha ||
+        CPLTestBool(CSLFetchNameValueDef(poOpenInfo->papszOpenOptions,
+                                         "FORCE_4BANDS", "NO")))
         nBands = 4;
 
     WebPFreeDecBuffer(&config.output);
@@ -562,9 +625,7 @@ GDALPamDataset *WEBPDataset::OpenPAM(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The WEBP driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("WEBP");
         return nullptr;
     }
 
@@ -710,7 +771,14 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
 
             if (!abyData.empty())
             {
-                VSILFILE *fpImage = VSIFOpenL(pszFilename, "wb");
+                auto fpImage(
+                    CPLTestBool(CSLFetchNameValueDef(
+                        papszOptions, "@CREATE_ONLY_VISIBLE_AT_CLOSE_TIME",
+                        "NO"))
+                        ? VSIFileManager::GetHandler(pszFilename)
+                              ->CreateOnlyVisibleAtCloseTime(pszFilename, true,
+                                                             nullptr)
+                        : VSIFilesystemHandler::OpenStatic(pszFilename, "wb"));
                 if (fpImage == nullptr)
                 {
                     CPLError(CE_Failure, CPLE_OpenFailed,
@@ -718,18 +786,20 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
 
                     return nullptr;
                 }
-                if (VSIFWriteL(abyData.data(), 1, abyData.size(), fpImage) !=
+                if (fpImage->Write(abyData.data(), 1, abyData.size()) !=
                     abyData.size())
                 {
                     CPLError(CE_Failure, CPLE_FileIO,
                              "Failure writing data: %s", VSIStrerror(errno));
-                    VSIFCloseL(fpImage);
+                    fpImage->CancelCreation();
                     return nullptr;
                 }
-                if (VSIFCloseL(fpImage) != 0)
+
+                if (fpImage->Close() != 0)
                 {
                     CPLError(CE_Failure, CPLE_FileIO,
-                             "Failure writing data: %s", VSIStrerror(errno));
+                             "Error at file closing of '%s': %s", pszFilename,
+                             VSIStrerror(errno));
                     return nullptr;
                 }
 
@@ -924,7 +994,7 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
     /*      Allocate memory                                                 */
     /* -------------------------------------------------------------------- */
     GByte *pabyBuffer =
-        reinterpret_cast<GByte *>(VSI_MALLOC3_VERBOSE(nBands, nXSize, nYSize));
+        static_cast<GByte *>(VSI_MALLOC3_VERBOSE(nBands, nXSize, nYSize));
     if (pabyBuffer == nullptr)
     {
         return nullptr;
@@ -933,7 +1003,12 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Create the dataset.                                             */
     /* -------------------------------------------------------------------- */
-    VSILFILE *fpImage = VSIFOpenL(pszFilename, "wb");
+    auto fpImage(
+        CPLTestBool(CSLFetchNameValueDef(
+            papszOptions, "@CREATE_ONLY_VISIBLE_AT_CLOSE_TIME", "NO"))
+            ? VSIFileManager::GetHandler(pszFilename)
+                  ->CreateOnlyVisibleAtCloseTime(pszFilename, true, nullptr)
+            : VSIFilesystemHandler::OpenStatic(pszFilename, "wb"));
     if (fpImage == nullptr)
     {
         CPLError(CE_Failure, CPLE_OpenFailed,
@@ -943,7 +1018,7 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
     }
 
     WebPUserData sUserData;
-    sUserData.fp = fpImage;
+    sUserData.fp = fpImage.get();
     sUserData.pfnProgress = pfnProgress ? pfnProgress : GDALDummyProgress;
     sUserData.pProgressData = pProgressData;
 
@@ -962,7 +1037,7 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
     {
         CPLError(CE_Failure, CPLE_AppDefined, "WebPPictureAlloc() failed");
         VSIFree(pabyBuffer);
-        VSIFCloseL(fpImage);
+        fpImage->CancelCreation();
         return nullptr;
     }
 
@@ -995,6 +1070,9 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
         CPLError(CE_Failure, CPLE_AppDefined, "WebPPictureImportRGB() failed");
         eErr = CE_Failure;
     }
+
+    if (pfnProgress)
+        pfnProgress(0.5, "", pProgressData);
 
     if (eErr == CE_None && !WebPEncode(&sConfig, &sPicture))
     {
@@ -1055,7 +1133,21 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
 
     WebPPictureFree(&sPicture);
 
-    VSIFCloseL(fpImage);
+    if (eErr == CE_None)
+    {
+        if (fpImage->Close() != 0)
+        {
+            CPLError(CE_Failure, CPLE_FileIO,
+                     "Error at file closing of '%s': %s", pszFilename,
+                     VSIStrerror(errno));
+            eErr = CE_Failure;
+        }
+    }
+    else
+    {
+        fpImage->CancelCreation();
+        fpImage.reset();
+    }
 
     if (pfnProgress)
         pfnProgress(1.0, "", pProgressData);
@@ -1064,6 +1156,14 @@ GDALDataset *WEBPDataset::CreateCopy(const char *pszFilename,
     {
         VSIUnlink(pszFilename);
         return nullptr;
+    }
+
+    // Do we need a world file?
+    if (CPLFetchBool(papszOptions, "WORLDFILE", false))
+    {
+        GDALGeoTransform gt;
+        poSrcDS->GetGeoTransform(gt);
+        GDALWriteWorldFile(pszFilename, "wld", gt.data());
     }
 
     /* -------------------------------------------------------------------- */

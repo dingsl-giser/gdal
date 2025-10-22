@@ -10,23 +10,7 @@
  * Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
  * Copyright (c) 2017, Alan Thomas <alant@outlook.com.au>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
@@ -52,10 +36,9 @@ OGRDXFFeature *OGRDXFLayer::TranslateHATCH()
     int nCode = 0;
     OGRDXFFeature *poFeature = new OGRDXFFeature(poFeatureDefn);
 
-    CPLString osHatchPattern;
     double dfElevation = 0.0;  // Z value to be used for EVERY point
-    /* int nFillFlag = 0; */
     OGRGeometryCollection oGC;
+    std::string osExtendedData;
 
     while ((nCode = poDS->ReadValue(szLineBuf, sizeof(szLineBuf))) > 0)
     {
@@ -67,12 +50,15 @@ OGRDXFFeature *OGRDXFLayer::TranslateHATCH()
                 break;
 
             case 70:
-                /* nFillFlag = atoi(szLineBuf); */
+            {
+                const int nFillFlag = atoi(szLineBuf);
+                poFeature->oStyleProperties["FillFlag"] =
+                    nFillFlag ? "Filled" : "Pattern";
                 break;
+            }
 
-            case 2:
-                osHatchPattern = szLineBuf;
-                poFeature->SetField("Text", osHatchPattern.c_str());
+            case 2:  // Hatch pattern name
+                poFeature->SetField("Text", szLineBuf);
                 break;
 
             case 91:
@@ -87,6 +73,32 @@ OGRDXFFeature *OGRDXFLayer::TranslateHATCH()
                 }
             }
             break;
+
+            case 52:
+            {
+                poFeature->oStyleProperties["HatchPatternRotation"] = szLineBuf;
+                break;
+            }
+
+            case 41:
+            {
+                poFeature->oStyleProperties["HatchPatternScale"] = szLineBuf;
+                break;
+            }
+
+            case 1001:
+            {
+                osExtendedData = szLineBuf;
+                break;
+            }
+
+            case 1071:
+            {
+                if (osExtendedData == "HATCHBACKGROUNDCOLOR")
+                    poFeature->oStyleProperties["HatchBackgroundColor"] =
+                        szLineBuf;
+                break;
+            }
 
             default:
                 TranslateGenericProperty(poFeature, nCode, szLineBuf);
@@ -123,19 +135,19 @@ OGRDXFFeature *OGRDXFLayer::TranslateHATCH()
     /* -------------------------------------------------------------------- */
     OGRErr eErr;
 
-    OGRGeometry *poFinalGeom = (OGRGeometry *)OGRBuildPolygonFromEdges(
-        (OGRGeometryH)&oGC, TRUE, TRUE, dfTolerance, &eErr);
+    auto poFinalGeom = std::unique_ptr<OGRGeometry>(
+        OGRGeometry::FromHandle(OGRBuildPolygonFromEdges(
+            OGRGeometry::ToHandle(&oGC), TRUE, TRUE, dfTolerance, &eErr)));
     if (eErr != OGRERR_NONE)
     {
-        delete poFinalGeom;
-        OGRMultiLineString *poMLS = new OGRMultiLineString();
+        auto poMLS = std::make_unique<OGRMultiLineString>();
         for (int i = 0; i < oGC.getNumGeometries(); i++)
             poMLS->addGeometry(oGC.getGeometryRef(i));
-        poFinalGeom = poMLS;
+        poFinalGeom = std::move(poMLS);
     }
 
-    poFeature->ApplyOCSTransformer(poFinalGeom);
-    poFeature->SetGeometryDirectly(poFinalGeom);
+    poFeature->ApplyOCSTransformer(poFinalGeom.get());
+    poFeature->SetGeometry(std::move(poFinalGeom));
 
     PrepareBrushStyle(poFeature);
 
@@ -479,7 +491,7 @@ OGRErr OGRDXFLayer::CollectBoundaryPath(OGRGeometryCollection *poGC,
             else
                 break;
 
-            std::vector<double> adfKnots(1, 0.0);
+            std::vector<double> adfKnots(FORTRAN_INDEXING, 0.0);
 
             nCode = poDS->ReadValue(szLineBuf, sizeof(szLineBuf));
             if (nCode != 40)
@@ -491,8 +503,8 @@ OGRErr OGRDXFLayer::CollectBoundaryPath(OGRGeometryCollection *poGC,
                 nCode = poDS->ReadValue(szLineBuf, sizeof(szLineBuf));
             }
 
-            std::vector<double> adfControlPoints(1, 0.0);
-            std::vector<double> adfWeights(1, 0.0);
+            std::vector<double> adfControlPoints(FORTRAN_INDEXING, 0.0);
+            std::vector<double> adfWeights(FORTRAN_INDEXING, 0.0);
 
             if (nCode != 10)
                 break;
@@ -532,9 +544,10 @@ OGRErr OGRDXFLayer::CollectBoundaryPath(OGRGeometryCollection *poGC,
             if (nCode > 0)
                 poDS->UnreadValue();
 
-            auto poLS = InsertSplineWithChecks(nDegree, adfControlPoints,
-                                               nControlPoints, adfKnots, nKnots,
-                                               adfWeights);
+            auto poLS =
+                InsertSplineWithChecks(nDegree, adfControlPoints,
+                                       /* bHaZ = */ false, nControlPoints,
+                                       adfKnots, nKnots, adfWeights);
 
             if (!poLS)
             {

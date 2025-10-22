@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018-2020, Björn Harrtell <bjorn at wololo dot org>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_FLATGEOBUF_H_INCLUDED
@@ -33,9 +17,18 @@
 #include "ogr_p.h"
 #include "ogreditablelayer.h"
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
+
 #include "header_generated.h"
 #include "feature_generated.h"
 #include "packedrtree.h"
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #include <deque>
 #include <limits>
@@ -158,7 +151,7 @@ class OGRFlatGeobufLayer final : public OGRLayer,
     CPLErr Close() override;
 
   public:
-    virtual ~OGRFlatGeobufLayer();
+    ~OGRFlatGeobufLayer() override;
 
     static OGRFlatGeobufLayer *Open(const FlatGeobuf::Header *,
                                     GByte *headerBuf, const char *pszFilename,
@@ -170,28 +163,23 @@ class OGRFlatGeobufLayer final : public OGRLayer,
            const OGRSpatialReference *poSpatialRef, OGRwkbGeometryType eGType,
            bool bCreateSpatialIndexAtClose, CSLConstList papszOptions);
 
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
-    virtual OGRFeature *GetNextFeature() override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetNextFeature() override;
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = true) override;
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    virtual int TestCapability(const char *) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    int TestCapability(const char *) const override;
 
-    virtual void ResetReading() override;
+    void ResetReading() override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
 
-    virtual GIntBig GetFeatureCount(int bForce) override;
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    GIntBig GetFeatureCount(int bForce) override;
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
     void VerifyBuffers(int bFlag)
     {
@@ -233,7 +221,7 @@ class OGRFlatGeobufEditableLayer final : public OGREditableLayer,
     OGRFlatGeobufEditableLayer(OGRFlatGeobufLayer *poFlatGeobufLayer,
                                char **papszOpenOptions);
 
-    virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
+    GIntBig GetFeatureCount(int bForce = TRUE) override;
 
     const std::string &GetFilename() const override
     {
@@ -246,7 +234,7 @@ class OGRFlatGeobufEditableLayer final : public OGREditableLayer,
         return this;
     }
 
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 
     CPLErr Close() override
     {
@@ -269,21 +257,22 @@ class OGRFlatGeobufDataset final : public GDALDataset
   public:
     OGRFlatGeobufDataset(const char *pszName, bool bIsDir, bool bCreate,
                          bool bUpdate);
-    ~OGRFlatGeobufDataset();
+    ~OGRFlatGeobufDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static GDALDataset *Create(const char *pszName, CPL_UNUSED int nBands,
                                CPL_UNUSED int nXSize, CPL_UNUSED int nYSize,
                                CPL_UNUSED GDALDataType eDT,
                                char **papszOptions);
-    virtual OGRLayer *GetLayer(int) override;
-    int TestCapability(const char *pszCap) override;
+    using GDALDataset::GetLayer;
+    const OGRLayer *GetLayer(int) const override;
+    int TestCapability(const char *pszCap) const override;
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    virtual int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }

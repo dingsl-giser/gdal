@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2018, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "mvtutils.h"
@@ -76,6 +60,27 @@ void OGRMVTInitFields(OGRFeatureDefn *poFeatureDefn,
                                      eMaxType == CPLJSONObject::Type::Long)
                             {
                                 oFieldDefn.SetType(OFTInteger64);
+                            }
+                            if (oFieldDefn.GetType() != OFTReal)
+                            {
+                                const auto oValues =
+                                    oAttributesFromTileStats[i].GetObj(
+                                        "values");
+                                if (oValues.GetType() ==
+                                    CPLJSONObject::Type::Array)
+                                {
+                                    const auto oValuesArray = oValues.ToArray();
+                                    for (int iVal = 0;
+                                         iVal < oValuesArray.Size(); ++iVal)
+                                    {
+                                        if (oValuesArray[iVal].GetType() ==
+                                            CPLJSONObject::Type::Double)
+                                        {
+                                            oFieldDefn.SetType(OFTReal);
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             break;
                         }
@@ -188,7 +193,8 @@ OGRMVTFindAttributesFromTileStat(const CPLJSONArray &oTileStatLayers,
 
 OGRFeature *OGRMVTCreateFeatureFrom(OGRFeature *poSrcFeature,
                                     OGRFeatureDefn *poTargetFeatureDefn,
-                                    bool bJsonField, OGRSpatialReference *poSRS)
+                                    bool bJsonField,
+                                    const OGRSpatialReference *poSRS)
 {
     OGRFeature *poFeature = new OGRFeature(poTargetFeatureDefn);
     if (bJsonField)
@@ -200,7 +206,7 @@ OGRFeature *OGRMVTCreateFeatureFrom(OGRFeature *poSrcFeature,
             if (poSrcFeature->IsFieldSet(i))
             {
                 bEmpty = false;
-                OGRFieldDefn *poFDefn = poSrcFeature->GetFieldDefnRef(i);
+                const OGRFieldDefn *poFDefn = poSrcFeature->GetFieldDefnRef(i);
                 if (poSrcFeature->IsFieldNull(i))
                 {
                     oProperties.AddNull(poFDefn->GetNameRef());

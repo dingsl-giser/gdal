@@ -8,27 +8,12 @@
  ******************************************************************************
  * Copyright (c) 2010, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_srs_api.h"
 #include "rawdataset.h"
 
@@ -82,7 +67,7 @@ class LOSLASDataset final : public RawDataset
     int nRecordLength;
 
     OGRSpatialReference m_oSRS{};
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     CPL_DISALLOW_COPY_ASSIGN(LOSLASDataset)
 
@@ -92,7 +77,7 @@ class LOSLASDataset final : public RawDataset
     LOSLASDataset();
     ~LOSLASDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -117,8 +102,6 @@ LOSLASDataset::LOSLASDataset() : fpImage(nullptr), nRecordLength(0)
 {
     m_oSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-
-    memset(adfGeoTransform, 0, sizeof(adfGeoTransform));
 }
 
 /************************************************************************/
@@ -169,13 +152,17 @@ int LOSLASDataset::Identify(GDALOpenInfo *poOpenInfo)
         return FALSE;
 
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-    const char *pszExt = CPLGetExtension(poOpenInfo->pszFilename);
+    const char *pszExt = poOpenInfo->osExtension.c_str();
     if (!EQUAL(pszExt, "las") && !EQUAL(pszExt, "los") && !EQUAL(pszExt, "geo"))
         return FALSE;
 #endif
 
-    if (!STARTS_WITH_CI((const char *)poOpenInfo->pabyHeader + 56, "NADGRD") &&
-        !STARTS_WITH_CI((const char *)poOpenInfo->pabyHeader + 56, "GEOGRD"))
+    if (!STARTS_WITH_CI(reinterpret_cast<const char *>(poOpenInfo->pabyHeader) +
+                            56,
+                        "NADGRD") &&
+        !STARTS_WITH_CI(reinterpret_cast<const char *>(poOpenInfo->pabyHeader) +
+                            56,
+                        "GEOGRD"))
         return FALSE;
 
     return TRUE;
@@ -196,9 +183,7 @@ GDALDataset *LOSLASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The LOSLAS driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("LOSLAS");
         return nullptr;
     }
 
@@ -258,17 +243,17 @@ GDALDataset *LOSLASDataset::Open(GDALOpenInfo *poOpenInfo)
         return nullptr;
     poDS->SetBand(1, std::move(poBand));
 
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "las"))
+    if (poOpenInfo->IsExtensionEqualToCI("las"))
     {
         poDS->GetRasterBand(1)->SetDescription("Latitude Offset (arc seconds)");
     }
-    else if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "los"))
+    else if (poOpenInfo->IsExtensionEqualToCI("los"))
     {
         poDS->GetRasterBand(1)->SetDescription(
             "Longitude Offset (arc seconds)");
         poDS->GetRasterBand(1)->SetMetadataItem("positive_value", "west");
     }
-    else if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "geo"))
+    else if (poOpenInfo->IsExtensionEqualToCI("geo"))
     {
         poDS->GetRasterBand(1)->SetDescription("Geoid undulation (meters)");
     }
@@ -276,12 +261,12 @@ GDALDataset *LOSLASDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Setup georeferencing.                                           */
     /* -------------------------------------------------------------------- */
-    poDS->adfGeoTransform[0] = min_lon - delta_lon * 0.5;
-    poDS->adfGeoTransform[1] = delta_lon;
-    poDS->adfGeoTransform[2] = 0.0;
-    poDS->adfGeoTransform[3] = min_lat + (poDS->nRasterYSize - 0.5) * delta_lat;
-    poDS->adfGeoTransform[4] = 0.0;
-    poDS->adfGeoTransform[5] = -1.0 * delta_lat;
+    poDS->m_gt[0] = min_lon - delta_lon * 0.5;
+    poDS->m_gt[1] = delta_lon;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[3] = min_lat + (poDS->nRasterYSize - 0.5) * delta_lat;
+    poDS->m_gt[4] = 0.0;
+    poDS->m_gt[5] = -1.0 * delta_lat;
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -301,10 +286,10 @@ GDALDataset *LOSLASDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr LOSLASDataset::GetGeoTransform(double *padfTransform)
+CPLErr LOSLASDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 

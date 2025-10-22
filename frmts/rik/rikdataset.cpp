@@ -8,29 +8,18 @@
  * Copyright (c) 2005, Daniel Wallner <daniel.wallner@bredband.net>
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <cfloat>
 #include <zlib.h>
 #include "gdal_frmts.h"
+#include "gdal_colortable.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <cmath>
 
@@ -121,7 +110,7 @@ class RIKDataset final : public GDALPamDataset
     VSILFILE *fp;
 
     OGRSpatialReference m_oSRS{};
-    double adfTransform[6];
+    GDALGeoTransform m_gt{};
 
     GUInt32 nBlockXSize;
     GUInt32 nBlockYSize;
@@ -135,12 +124,12 @@ class RIKDataset final : public GDALPamDataset
 
   public:
     RIKDataset();
-    ~RIKDataset();
+    ~RIKDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -157,9 +146,9 @@ class RIKRasterBand final : public GDALPamRasterBand
   public:
     RIKRasterBand(RIKDataset *, int);
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual GDALColorInterp GetColorInterpretation() override;
-    virtual GDALColorTable *GetColorTable() override;
+    CPLErr IReadBlock(int, int, void *) override;
+    GDALColorInterp GetColorInterpretation() override;
+    GDALColorTable *GetColorTable() override;
 };
 
 /************************************************************************/
@@ -269,7 +258,7 @@ static void OutputPixel(GByte pixel, void *image, GUInt32 imageWidth,
 CPLErr RIKRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
 
 {
-    RIKDataset *poRDS = reinterpret_cast<RIKDataset *>(poDS);
+    RIKDataset *poRDS = cpl::down_cast<RIKDataset *>(poDS);
 
     const GUInt32 blocks = poRDS->nHorBlocks * poRDS->nVertBlocks;
     const GUInt32 nBlockIndex = nBlockXOff + nBlockYOff * poRDS->nHorBlocks;
@@ -311,8 +300,7 @@ CPLErr RIKRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pImage)
     }
 
     // Read block to memory
-    GByte *blockData =
-        reinterpret_cast<GByte *>(VSI_MALLOC_VERBOSE(nBlockSize));
+    GByte *blockData = static_cast<GByte *>(VSI_MALLOC_VERBOSE(nBlockSize));
     if (blockData == nullptr)
         return CE_Failure;
     if (VSIFReadL(blockData, 1, nBlockSize, poRDS->fp) != nBlockSize)
@@ -595,7 +583,7 @@ GDALColorInterp RIKRasterBand::GetColorInterpretation()
 GDALColorTable *RIKRasterBand::GetColorTable()
 
 {
-    RIKDataset *poRDS = reinterpret_cast<RIKDataset *>(poDS);
+    RIKDataset *poRDS = cpl::down_cast<RIKDataset *>(poDS);
 
     return poRDS->poColorTable;
 }
@@ -631,7 +619,6 @@ RIKDataset::RIKDataset()
         "PARAMETER[\"scale_factor\",1],PARAMETER[\"false_easting\",1500000],"
         "PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY[\"EPSG\","
         "\"9001\"]],AUTHORITY[\"EPSG\",\"3021\"]]");
-    memset(adfTransform, 0, sizeof(adfTransform));
 }
 
 /************************************************************************/
@@ -652,11 +639,10 @@ RIKDataset::~RIKDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr RIKDataset::GetGeoTransform(double *padfTransform)
+CPLErr RIKDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, &adfTransform, sizeof(double) * 6);
-
+    gt = m_gt;
     return CE_None;
 }
 
@@ -730,7 +716,7 @@ int RIKDataset::Identify(GDALOpenInfo *poOpenInfo)
                 return FALSE;
         }
 
-        if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "rik"))
+        if (poOpenInfo->IsExtensionEqualToCI("rik"))
             return TRUE;
 
         // We really need Open to be able to conclude
@@ -1224,12 +1210,12 @@ GDALDataset *RIKDataset::Open(GDALOpenInfo *poOpenInfo)
     poDS->fp = poOpenInfo->fpL;
     poOpenInfo->fpL = nullptr;
 
-    poDS->adfTransform[0] = header.fWest - metersPerPixel / 2.0;
-    poDS->adfTransform[1] = metersPerPixel;
-    poDS->adfTransform[2] = 0.0;
-    poDS->adfTransform[3] = header.fNorth + metersPerPixel / 2.0;
-    poDS->adfTransform[4] = 0.0;
-    poDS->adfTransform[5] = -metersPerPixel;
+    poDS->m_gt[0] = header.fWest - metersPerPixel / 2.0;
+    poDS->m_gt[1] = metersPerPixel;
+    poDS->m_gt[2] = 0.0;
+    poDS->m_gt[3] = header.fNorth + metersPerPixel / 2.0;
+    poDS->m_gt[4] = 0.0;
+    poDS->m_gt[5] = -metersPerPixel;
 
     poDS->nBlockXSize = header.iBlockWidth;
     poDS->nBlockYSize = header.iBlockHeight;
@@ -1281,9 +1267,7 @@ GDALDataset *RIKDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         delete poDS;
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The RIK driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("RIK");
         return nullptr;
     }
 

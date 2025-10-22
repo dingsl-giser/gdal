@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Mateusz Loskot
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrgeojsonutils.h"
@@ -38,11 +22,12 @@
 #include <algorithm>
 #include <memory>
 
-const char szESRIJSonFeaturesGeometryRings[] =
-    "{\"features\":[{\"geometry\":{\"rings\":[";
+constexpr const char szESRIJSonFeaturesGeometryRings[] =
+    "\"features\":[{\"geometry\":{\"rings\":[";
 
 // Cf https://github.com/OSGeo/gdal/issues/9996#issuecomment-2129845692
-const char szESRIJSonFeaturesAttributes[] = "{\"features\":[{\"attributes\":{";
+constexpr const char szESRIJSonFeaturesAttributes[] =
+    "\"features\":[{\"attributes\":{";
 
 /************************************************************************/
 /*                           SkipUTF8BOM()                              */
@@ -106,21 +91,20 @@ static std::string GetTopLevelType(const char *pszText)
         bool m_bInTopLevelType = false;
         std::string m_osTopLevelTypeValue{};
 
-        void StartObjectMember(const char *pszKey, size_t nLength) override
+        void StartObjectMember(std::string_view sKey) override
         {
             m_bInTopLevelType = false;
-            if (nLength == strlen("type") && strcmp(pszKey, "type") == 0 &&
-                m_osLevel == "{")
+            if (sKey == "type" && m_osLevel == "{")
             {
                 m_bInTopLevelType = true;
             }
         }
 
-        void String(const char *pszValue, size_t nLength) override
+        void String(std::string_view sValue) override
         {
             if (m_bInTopLevelType)
             {
-                m_osTopLevelTypeValue.assign(pszValue, nLength);
+                m_osTopLevelTypeValue = sValue;
                 StopParsing();
             }
         }
@@ -153,7 +137,7 @@ static std::string GetTopLevelType(const char *pszText)
     };
 
     MyParser oParser;
-    oParser.Parse(pszText, strlen(pszText), true);
+    oParser.Parse(std::string_view(pszText), true);
     return oParser.m_osTopLevelTypeValue;
 }
 
@@ -243,8 +227,9 @@ static bool IsGeoJSONLikeObject(const char *pszText, bool &bMightBeSequence,
 
     const std::string osWithoutSpace = GetCompactJSon(pszText, strlen(pszText));
     if (osWithoutSpace.find("{\"features\":[") == 0 &&
-        osWithoutSpace.find(szESRIJSonFeaturesGeometryRings) != 0 &&
-        osWithoutSpace.find(szESRIJSonFeaturesAttributes) != 0)
+        osWithoutSpace.find(szESRIJSonFeaturesGeometryRings) ==
+            std::string::npos &&
+        osWithoutSpace.find(szESRIJSonFeaturesAttributes) == std::string::npos)
     {
         return true;
     }
@@ -263,7 +248,24 @@ static bool IsGeoJSONLikeObject(const char *pszText, bool &bMightBeSequence,
     // See https://github.com/OSGeo/gdal/issues/2720
     if (osWithoutSpace.find("{\"coordinates\":[") == 0 ||
         // and https://github.com/OSGeo/gdal/issues/2787
-        osWithoutSpace.find("{\"geometry\":{\"coordinates\":[") == 0)
+        osWithoutSpace.find("{\"geometry\":{\"coordinates\":[") == 0 ||
+        // and https://github.com/qgis/QGIS/issues/61266
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"Point\",\"coordinates\":[") == 0 ||
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"LineString\",\"coordinates\":[") == 0 ||
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[") == 0 ||
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"MultiPoint\",\"coordinates\":[") == 0 ||
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"MultiLineString\",\"coordinates\":[") ==
+            0 ||
+        osWithoutSpace.find(
+            "{\"geometry\":{\"type\":\"MultiPolygon\",\"coordinates\":[") ==
+            0 ||
+        osWithoutSpace.find("{\"geometry\":{\"type\":\"GeometryCollection\","
+                            "\"geometries\":[") == 0)
     {
         return true;
     }
@@ -328,8 +330,10 @@ bool ESRIJSONIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
     }
 
     const std::string osWithoutSpace = GetCompactJSon(pszText, strlen(pszText));
-    if (osWithoutSpace.find(szESRIJSonFeaturesGeometryRings) == 0 ||
-        osWithoutSpace.find(szESRIJSonFeaturesAttributes) == 0 ||
+    if (osWithoutSpace.find(szESRIJSonFeaturesGeometryRings) !=
+            std::string::npos ||
+        osWithoutSpace.find(szESRIJSonFeaturesAttributes) !=
+            std::string::npos ||
         osWithoutSpace.find("\"spatialReference\":{\"wkid\":") !=
             std::string::npos)
     {
@@ -616,24 +620,16 @@ bool JSONFGIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
     const std::string osWithoutSpace = GetCompactJSon(pszText, strlen(pszText));
 
     // In theory, conformsTo should be required, but let be lax...
+    if (osWithoutSpace.find("conformsTo") != std::string::npos)
     {
-        const auto nPos = osWithoutSpace.find("\"conformsTo\":[");
-        if (nPos != std::string::npos)
+        if (osWithoutSpace.find("\"[ogc-json-fg-1-") != std::string::npos ||
+            osWithoutSpace.find("\"http://www.opengis.net/spec/json-fg-1/") !=
+                std::string::npos ||
+            osWithoutSpace.find(
+                "\"http:\\/\\/www.opengis.net\\/spec\\/json-fg-1\\/") !=
+                std::string::npos)
         {
-            for (const char *pszVersion : {"0.1", "0.2", "0.3"})
-            {
-                if (osWithoutSpace.find(
-                        CPLSPrintf("\"[ogc-json-fg-1-%s:core]\"", pszVersion),
-                        nPos) != std::string::npos ||
-                    osWithoutSpace.find(
-                        CPLSPrintf(
-                            "\"http://www.opengis.net/spec/json-fg-1/%s\"",
-                            pszVersion),
-                        nPos) != std::string::npos)
-                {
-                    return true;
-                }
-            }
+            return true;
         }
     }
 
@@ -642,7 +638,14 @@ bool JSONFGIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
             std::string::npos ||
         osWithoutSpace.find("\"time\":{\"date\":") != std::string::npos ||
         osWithoutSpace.find("\"time\":{\"timestamp\":") != std::string::npos ||
-        osWithoutSpace.find("\"time\":{\"interval\":") != std::string::npos)
+        osWithoutSpace.find("\"time\":{\"interval\":") != std::string::npos ||
+        osWithoutSpace.find("\"type\":\"CircularString\"") !=
+            std::string::npos ||
+        osWithoutSpace.find("\"type\":\"CompoundCurve\"") !=
+            std::string::npos ||
+        osWithoutSpace.find("\"type\":\"CurvePolygon\"") != std::string::npos ||
+        osWithoutSpace.find("\"type\":\"MultiCurve\"") != std::string::npos ||
+        osWithoutSpace.find("\"type\":\"MultiSurface\"") != std::string::npos)
     {
         return true;
     }
@@ -658,10 +661,9 @@ bool JSONFGIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
             bool m_bFoundJSONFGCoordrefSys = false;
             std::string m_osLevel{};
 
-            void StartObjectMember(const char *pszKey, size_t nLength) override
+            void StartObjectMember(std::string_view sKey) override
             {
-                if (nLength == strlen("featureType") &&
-                    strcmp(pszKey, "featureType") == 0)
+                if (sKey == "featureType")
                 {
                     m_bFoundJSONFGFeatureType =
                         (m_osLevel == "{" ||   // At FeatureCollection level
@@ -669,8 +671,7 @@ bool JSONFGIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
                     if (m_bFoundJSONFGFeatureType)
                         StopParsing();
                 }
-                else if (nLength == strlen("coordRefSys") &&
-                         strcmp(pszKey, "coordRefSys") == 0)
+                else if (sKey == "coordRefSys")
                 {
                     m_bFoundJSONFGCoordrefSys =
                         (m_osLevel == "{" ||   // At FeatureCollection level
@@ -704,7 +705,7 @@ bool JSONFGIsObject(const char *pszText, GDALOpenInfo *poOpenInfo)
         };
 
         MyParser oParser;
-        oParser.Parse(pszText, strlen(pszText), true);
+        oParser.Parse(std::string_view(pszText), true);
         if (oParser.m_bFoundJSONFGFeatureType ||
             oParser.m_bFoundJSONFGCoordrefSys)
         {
@@ -1030,163 +1031,6 @@ GeoJSONSourceType JSONFGDriverGetSourceType(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                           GeoJSONPropertyToFieldType()               */
-/************************************************************************/
-
-constexpr GIntBig MY_INT64_MAX = (((GIntBig)0x7FFFFFFF) << 32) | 0xFFFFFFFF;
-constexpr GIntBig MY_INT64_MIN = ((GIntBig)0x80000000) << 32;
-
-OGRFieldType GeoJSONPropertyToFieldType(json_object *poObject,
-                                        OGRFieldSubType &eSubType,
-                                        bool bArrayAsString)
-{
-    eSubType = OFSTNone;
-
-    if (poObject == nullptr)
-    {
-        return OFTString;
-    }
-
-    json_type type = json_object_get_type(poObject);
-
-    if (json_type_boolean == type)
-    {
-        eSubType = OFSTBoolean;
-        return OFTInteger;
-    }
-    else if (json_type_double == type)
-        return OFTReal;
-    else if (json_type_int == type)
-    {
-        GIntBig nVal = json_object_get_int64(poObject);
-        if (!CPL_INT64_FITS_ON_INT32(nVal))
-        {
-            if (nVal == MY_INT64_MIN || nVal == MY_INT64_MAX)
-            {
-                static bool bWarned = false;
-                if (!bWarned)
-                {
-                    bWarned = true;
-                    CPLError(
-                        CE_Warning, CPLE_AppDefined,
-                        "Integer values probably ranging out of 64bit integer "
-                        "range have been found. Will be clamped to "
-                        "INT64_MIN/INT64_MAX");
-                }
-            }
-            return OFTInteger64;
-        }
-        else
-        {
-            return OFTInteger;
-        }
-    }
-    else if (json_type_string == type)
-        return OFTString;
-    else if (json_type_array == type)
-    {
-        if (bArrayAsString)
-        {
-            eSubType = OFSTJSON;
-            return OFTString;
-        }
-        const auto nSize = json_object_array_length(poObject);
-        if (nSize == 0)
-        {
-            eSubType = OFSTJSON;
-            return OFTString;
-        }
-        OGRFieldType eType = OFTIntegerList;
-        for (auto i = decltype(nSize){0}; i < nSize; i++)
-        {
-            json_object *poRow = json_object_array_get_idx(poObject, i);
-            if (poRow != nullptr)
-            {
-                type = json_object_get_type(poRow);
-                if (type == json_type_string)
-                {
-                    if (i == 0 || eType == OFTStringList)
-                    {
-                        eType = OFTStringList;
-                    }
-                    else
-                    {
-                        eSubType = OFSTJSON;
-                        return OFTString;
-                    }
-                }
-                else if (type == json_type_double)
-                {
-                    if (eSubType == OFSTNone &&
-                        (i == 0 || eType == OFTRealList ||
-                         eType == OFTIntegerList || eType == OFTInteger64List))
-                    {
-                        eType = OFTRealList;
-                    }
-                    else
-                    {
-                        eSubType = OFSTJSON;
-                        return OFTString;
-                    }
-                }
-                else if (type == json_type_int)
-                {
-                    if (eSubType == OFSTNone && eType == OFTIntegerList)
-                    {
-                        GIntBig nVal = json_object_get_int64(poRow);
-                        if (!CPL_INT64_FITS_ON_INT32(nVal))
-                            eType = OFTInteger64List;
-                    }
-                    else if (eSubType == OFSTNone &&
-                             (eType == OFTInteger64List ||
-                              eType == OFTRealList))
-                    {
-                        // ok
-                    }
-                    else
-                    {
-                        eSubType = OFSTJSON;
-                        return OFTString;
-                    }
-                }
-                else if (type == json_type_boolean)
-                {
-                    if (i == 0 ||
-                        (eType == OFTIntegerList && eSubType == OFSTBoolean))
-                    {
-                        eSubType = OFSTBoolean;
-                    }
-                    else
-                    {
-                        eSubType = OFSTJSON;
-                        return OFTString;
-                    }
-                }
-                else
-                {
-                    eSubType = OFSTJSON;
-                    return OFTString;
-                }
-            }
-            else
-            {
-                eSubType = OFSTJSON;
-                return OFTString;
-            }
-        }
-
-        return eType;
-    }
-    else if (json_type_object == type)
-    {
-        eSubType = OFSTJSON;
-        return OFTString;
-    }
-
-    return OFTString;  // null
-}
-
-/************************************************************************/
 /*                        GeoJSONStringPropertyToFieldType()            */
 /************************************************************************/
 
@@ -1223,29 +1067,75 @@ OGRFieldType GeoJSONStringPropertyToFieldType(json_object *poObject,
 }
 
 /************************************************************************/
-/*                           OGRGeoJSONGetGeometryName()                */
+/*                   GeoJSONHTTPFetchWithContentTypeHeader()            */
 /************************************************************************/
 
-const char *OGRGeoJSONGetGeometryName(OGRGeometry const *poGeometry)
+CPLHTTPResult *GeoJSONHTTPFetchWithContentTypeHeader(const char *pszURL)
 {
-    CPLAssert(nullptr != poGeometry);
+    std::string osHeaders;
+    const char *pszGDAL_HTTP_HEADERS =
+        CPLGetConfigOption("GDAL_HTTP_HEADERS", nullptr);
+    bool bFoundAcceptHeader = false;
+    if (pszGDAL_HTTP_HEADERS)
+    {
+        bool bHeadersDone = false;
+        // Compatibility hack for "HEADERS=Accept: text/plain, application/json"
+        if (strstr(pszGDAL_HTTP_HEADERS, "\r\n") == nullptr)
+        {
+            const char *pszComma = strchr(pszGDAL_HTTP_HEADERS, ',');
+            if (pszComma != nullptr && strchr(pszComma, ':') == nullptr)
+            {
+                osHeaders = pszGDAL_HTTP_HEADERS;
+                bFoundAcceptHeader =
+                    STARTS_WITH_CI(pszGDAL_HTTP_HEADERS, "Accept:");
+                bHeadersDone = true;
+            }
+        }
+        if (!bHeadersDone)
+        {
+            // We accept both raw headers with \r\n as a separator, or as
+            // a comma separated list of foo: bar values.
+            const CPLStringList aosTokens(
+                strstr(pszGDAL_HTTP_HEADERS, "\r\n")
+                    ? CSLTokenizeString2(pszGDAL_HTTP_HEADERS, "\r\n", 0)
+                    : CSLTokenizeString2(pszGDAL_HTTP_HEADERS, ",",
+                                         CSLT_HONOURSTRINGS));
+            for (int i = 0; i < aosTokens.size(); ++i)
+            {
+                if (!osHeaders.empty())
+                    osHeaders += "\r\n";
+                if (!bFoundAcceptHeader)
+                    bFoundAcceptHeader =
+                        STARTS_WITH_CI(aosTokens[i], "Accept:");
+                osHeaders += aosTokens[i];
+            }
+        }
+    }
+    if (!bFoundAcceptHeader)
+    {
+        if (!osHeaders.empty())
+            osHeaders += "\r\n";
+        osHeaders += "Accept: text/plain, application/json";
+    }
 
-    const OGRwkbGeometryType eType = wkbFlatten(poGeometry->getGeometryType());
+    CPLStringList aosOptions;
+    aosOptions.SetNameValue("HEADERS", osHeaders.c_str());
+    CPLHTTPResult *pResult = CPLHTTPFetch(pszURL, aosOptions.List());
 
-    if (wkbPoint == eType)
-        return "Point";
-    else if (wkbLineString == eType)
-        return "LineString";
-    else if (wkbPolygon == eType)
-        return "Polygon";
-    else if (wkbMultiPoint == eType)
-        return "MultiPoint";
-    else if (wkbMultiLineString == eType)
-        return "MultiLineString";
-    else if (wkbMultiPolygon == eType)
-        return "MultiPolygon";
-    else if (wkbGeometryCollection == eType)
-        return "GeometryCollection";
+    if (nullptr == pResult || 0 == pResult->nDataLen ||
+        0 != CPLGetLastErrorNo())
+    {
+        CPLHTTPDestroyResult(pResult);
+        return nullptr;
+    }
 
-    return "Unknown";
+    if (0 != pResult->nStatus)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Curl reports error: %d: %s",
+                 pResult->nStatus, pResult->pszErrBuf);
+        CPLHTTPDestroyResult(pResult);
+        return nullptr;
+    }
+
+    return pResult;
 }

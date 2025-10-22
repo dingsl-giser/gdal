@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     gdalmultidim_gridded.cpp
  * Project:  GDAL Core
@@ -9,30 +8,15 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_alg.h"
 #include "gdalgrid.h"
 #include "gdal_priv.h"
-#include "gdal_pam.h"
+#include "gdal_pam_multidim.h"
 #include "ogrsf_frmts.h"
+#include "memdataset.h"
 
 #include <algorithm>
 #include <cassert>
@@ -654,30 +638,25 @@ GDALMDArray::GetGridded(const std::string &osGridOptions,
         if (!poDrv)
         {
             pszExt = "mem";
-            poDrv = GetGDALDriverManager()->GetDriverByName("Memory");
-            if (!poDrv)
-            {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Cannot get driver FlatGeoBuf, GPKG or Memory");
-                return nullptr;
-            }
         }
     }
 
     // Create a in-memory vector layer with (X,Y) points
-    CPLString osTmpFilename;
-    osTmpFilename.Printf("/vsimem/GDALMDArray::GetGridded_%p_%p.%s", this,
-                         pOptions, pszExt);
+    const std::string osTmpFilename(VSIMemGenerateHiddenFilename(
+        std::string("tmp.").append(pszExt).c_str()));
     auto poDS = std::unique_ptr<GDALDataset>(
-        poDrv->Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown, nullptr));
+        poDrv ? poDrv->Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown,
+                              nullptr)
+              : MEMDataset::Create(osTmpFilename.c_str(), 0, 0, 0, GDT_Unknown,
+                                   nullptr));
     if (!poDS)
         return nullptr;
     auto poLyr = poDS->CreateLayer("layer", nullptr, wkbPoint);
     if (!poLyr)
         return nullptr;
     OGRFieldDefn oFieldDefn("IDX", OFTInteger64);
-    poLyr->CreateField(&oFieldDefn);
-    if (poLyr->StartTransaction() != OGRERR_NONE)
+    if (poLyr->CreateField(&oFieldDefn) != OGRERR_NONE ||
+        poLyr->StartTransaction() != OGRERR_NONE)
         return nullptr;
     OGRFeature oFeat(poLyr->GetLayerDefn());
     for (size_t i = 0; i < adfXVals.size(); ++i)

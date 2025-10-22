@@ -7,28 +7,18 @@
  ******************************************************************************
  * Copyright (c) 2017, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_plscenes.h"
-#include "ogrgeojsonreader.h"
+#include "ogrlibjsonutils.h"
+#include "ogrgeojsongeometry.h"
+#include "ogrgeojsonwriter.h"
 #include <algorithm>
+
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
+#endif
 
 /************************************************************************/
 /*                           GetFieldCount()                            */
@@ -88,7 +78,7 @@ OGRPLScenesDataV1Layer::~OGRPLScenesDataV1Layer()
 /*                             GetLayerDefn()                           */
 /************************************************************************/
 
-OGRFeatureDefn *OGRPLScenesDataV1Layer::GetLayerDefn()
+const OGRFeatureDefn *OGRPLScenesDataV1Layer::GetLayerDefn() const
 {
     return m_poFeatureDefn;
 }
@@ -120,21 +110,39 @@ void OGRPLScenesDataV1Layer::EstablishLayerDefn()
         return;
     m_bFeatureDefnEstablished = true;
 
-    const char *pszConfFile = CPLFindFile("gdal", "plscenesconf.json");
+    const char *pzText = nullptr;
+    const char *pszConfFile = nullptr;
+#if !defined(USE_ONLY_EMBEDDED_RESOURCE_FILES)
+    pszConfFile = CPLFindFile("gdal", "plscenesconf.json");
     if (pszConfFile == nullptr)
+#endif
     {
+#ifdef EMBED_RESOURCE_FILES
+        static const bool bOnce [[maybe_unused]] = []()
+        {
+            CPLDebug("PLScenes", "Using embedded plscenes.conf");
+            return true;
+        }();
+        pzText = PLScenesGetConfJson();
+#else
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot find plscenesconf.json");
         return;
+#endif
     }
 
     GByte *pabyRet = nullptr;
-    if (!VSIIngestFile(nullptr, pszConfFile, &pabyRet, nullptr, -1))
+#ifdef EMBED_RESOURCE_FILES
+    if (!pzText)
+#endif
     {
-        return;
+        if (!VSIIngestFile(nullptr, pszConfFile, &pabyRet, nullptr, -1))
+        {
+            return;
+        }
+        pzText = reinterpret_cast<char *>(pabyRet);
     }
 
     json_object *poRoot = nullptr;
-    const char *pzText = reinterpret_cast<char *>(pabyRet);
     if (!OGRJSonParse(pzText, &poRoot))
     {
         VSIFree(pabyRet);
@@ -480,10 +488,11 @@ void OGRPLScenesDataV1Layer::ResetReading()
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                         */
 /************************************************************************/
 
-void OGRPLScenesDataV1Layer::SetSpatialFilter(OGRGeometry *poGeomIn)
+OGRErr OGRPLScenesDataV1Layer::ISetSpatialFilter(int /*iGeomField*/,
+                                                 const OGRGeometry *poGeomIn)
 {
     m_poFeatures = nullptr;
 
@@ -504,6 +513,8 @@ void OGRPLScenesDataV1Layer::SetSpatialFilter(OGRGeometry *poGeomIn)
         InstallFilter(poGeomIn);
 
     ResetReading();
+
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
@@ -998,17 +1009,19 @@ OGRFeature *OGRPLScenesDataV1Layer::GetNextRawFeature()
     if (poJSonGeom != nullptr &&
         json_object_get_type(poJSonGeom) == json_type_object)
     {
-        OGRGeometry *poGeom = OGRGeoJSONReadGeometry(poJSonGeom);
+        auto poGeom =
+            OGRGeoJSONReadGeometry(poJSonGeom, /* bHasM = */ false,
+                                   /* OGRSpatialReference* = */ nullptr);
         if (poGeom != nullptr)
         {
             if (poGeom->getGeometryType() == wkbPolygon)
             {
-                OGRMultiPolygon *poMP = new OGRMultiPolygon();
-                poMP->addGeometryDirectly(poGeom);
-                poGeom = poMP;
+                auto poMP = std::make_unique<OGRMultiPolygon>();
+                poMP->addGeometry(std::move(poGeom));
+                poGeom = std::move(poMP);
             }
             poGeom->assignSpatialReference(m_poSRS);
-            poFeature->SetGeometryDirectly(poGeom);
+            poFeature->SetGeometry(std::move(poGeom));
         }
     }
 
@@ -1082,7 +1095,7 @@ OGRFeature *OGRPLScenesDataV1Layer::GetNextRawFeature()
                                  "in configuration",
                                  osPrefixedJSonFieldName.c_str());
                         m_oSetUnregisteredFields.insert(
-                            osPrefixedJSonFieldName);
+                            std::move(osPrefixedJSonFieldName));
                     }
                 }
             }
@@ -1329,15 +1342,16 @@ GIntBig OGRPLScenesDataV1Layer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                                GetExtent()                           */
+/*                             IGetExtent()                             */
 /************************************************************************/
 
-OGRErr OGRPLScenesDataV1Layer::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr OGRPLScenesDataV1Layer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                          bool bForce)
 {
     if (m_poFilterGeom != nullptr)
     {
         m_bInFeatureCountOrGetExtent = true;
-        OGRErr eErr = OGRLayer::GetExtentInternal(0, psExtent, bForce);
+        OGRErr eErr = OGRLayer::IGetExtent(iGeomField, psExtent, bForce);
         m_bInFeatureCountOrGetExtent = false;
         return eErr;
     }
@@ -1353,7 +1367,7 @@ OGRErr OGRPLScenesDataV1Layer::GetExtent(OGREnvelope *psExtent, int bForce)
 /*                              TestCapability()                        */
 /************************************************************************/
 
-int OGRPLScenesDataV1Layer::TestCapability(const char *pszCap)
+int OGRPLScenesDataV1Layer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCFastFeatureCount))
         return !m_bFilterMustBeClientSideEvaluated;

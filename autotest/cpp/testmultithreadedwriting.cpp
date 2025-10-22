@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_multiproc.h"
@@ -75,40 +59,42 @@ TEST(testmultithreadedwriting, test)
     if (poDriver == nullptr)
     {
         GTEST_SKIP() << "ENVI driver missing";
-        return;
     }
-    GDALDataset *poDS =
-        poDriver->Create("/vsimem/test_ref", 100, 2000, 1, GDT_Byte, nullptr);
-    GDALClose(poDS);
-
-    int counter = 0;
-    const int nloops = bEndlessLoop ? 2 * 1000 * 1000 * 1000 : 1;
-    for (int i = 0; i < nloops; ++i)
+    else
     {
-        ++i;
-        if ((i % 20) == 0)
-            printf("%d\n", counter);
+        GDALDataset *poDS = poDriver->Create("/vsimem/test_ref", 100, 2000, 1,
+                                             GDT_Byte, nullptr);
+        GDALClose(poDS);
 
-        hThread1 = CPLCreateJoinableThread(thread_func, &one);
-        hThread2 = CPLCreateJoinableThread(thread_func, &two);
+        int counter = 0;
+        const int nloops = bEndlessLoop ? 2 * 1000 * 1000 * 1000 : 1;
+        for (int i = 0; i < nloops; ++i)
+        {
+            ++i;
+            if ((i % 20) == 0)
+                printf("%d\n", counter);
 
-        CPLJoinThread(hThread1);
-        CPLJoinThread(hThread2);
+            hThread1 = CPLCreateJoinableThread(thread_func, &one);
+            hThread2 = CPLCreateJoinableThread(thread_func, &two);
 
-        GDALDataset *poDSRef =
-            (GDALDataset *)GDALOpen("/vsimem/test1", GA_ReadOnly);
-        const int cs =
-            GDALChecksumImage(poDSRef->GetRasterBand(1), 0, 0, 100, 2000);
-        EXPECT_EQ(cs, 29689);
-        GDALClose(poDSRef);
+            CPLJoinThread(hThread1);
+            CPLJoinThread(hThread2);
 
-        poDriver->Delete("/vsimem/test1");
-        poDriver->Delete("/vsimem/test2");
+            GDALDataset *poDSRef =
+                (GDALDataset *)GDALOpen("/vsimem/test1", GA_ReadOnly);
+            const int cs =
+                GDALChecksumImage(poDSRef->GetRasterBand(1), 0, 0, 100, 2000);
+            EXPECT_EQ(cs, 29689);
+            GDALClose(poDSRef);
+
+            poDriver->Delete("/vsimem/test1");
+            poDriver->Delete("/vsimem/test2");
+        }
+
+        poDriver->Delete("/vsimem/test_ref");
+
+        GDALDestroyDriverManager();
     }
-
-    poDriver->Delete("/vsimem/test_ref");
-
-    GDALDestroyDriverManager();
 }
 
 }  // namespace

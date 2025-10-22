@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -85,7 +69,7 @@ class GDALOverviewDataset final : public GDALDataset
     ~GDALOverviewDataset() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
@@ -385,23 +369,17 @@ const OGRSpatialReference *GDALOverviewDataset::GetSpatialRef() const
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GDALOverviewDataset::GetGeoTransform(double *padfTransform)
+CPLErr GDALOverviewDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    double adfGeoTransform[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-    if (poMainDS->GetGeoTransform(adfGeoTransform) != CE_None)
+    if (poMainDS->GetGeoTransform(gt) != CE_None)
         return CE_Failure;
 
-    adfGeoTransform[1] *=
+    const double dfOvrXRatio =
         static_cast<double>(poMainDS->GetRasterXSize()) / nRasterXSize;
-    adfGeoTransform[2] *=
+    const double dfOvrYRatio =
         static_cast<double>(poMainDS->GetRasterYSize()) / nRasterYSize;
-    adfGeoTransform[4] *=
-        static_cast<double>(poMainDS->GetRasterXSize()) / nRasterXSize;
-    adfGeoTransform[5] *=
-        static_cast<double>(poMainDS->GetRasterYSize()) / nRasterYSize;
-
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt.Rescale(dfOvrXRatio, dfOvrYRatio);
 
     return CE_None;
 }

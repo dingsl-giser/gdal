@@ -8,25 +8,7 @@
  * Copyright (c) 2009-2013, Martin Landa <landa.martin gmail.com>
  * Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <ctime>
@@ -702,7 +684,8 @@ VFKFeature *VFKDataBlock::GetFeature(int idx, GUIntBig value,
     {
         for (int i = 0; i < m_nFeatureCount; i++)
         {
-            VFKFeature *poVfkFeature = (VFKFeature *)GetFeatureByIndex(i);
+            VFKFeature *poVfkFeature =
+                cpl::down_cast<VFKFeature *>(GetFeatureByIndex(i));
             const GUIntBig iPropertyValue = strtoul(
                 poVfkFeature->GetProperty(idx)->GetValueS(), nullptr, 0);
             if (iPropertyValue == value)
@@ -730,7 +713,8 @@ VFKFeatureList VFKDataBlock::GetFeatures(int idx, GUIntBig value)
 
     for (int i = 0; i < m_nFeatureCount; i++)
     {
-        VFKFeature *poVfkFeature = (VFKFeature *)GetFeatureByIndex(i);
+        VFKFeature *poVfkFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(i));
         const GUIntBig iPropertyValue =
             strtoul(poVfkFeature->GetProperty(idx)->GetValueS(), nullptr, 0);
         if (iPropertyValue == value)
@@ -757,7 +741,8 @@ VFKFeatureList VFKDataBlock::GetFeatures(int idx1, int idx2, GUIntBig value)
 
     for (int i = 0; i < m_nFeatureCount; i++)
     {
-        VFKFeature *poVfkFeature = (VFKFeature *)GetFeatureByIndex(i);
+        VFKFeature *poVfkFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(i));
         const GUIntBig iPropertyValue1 =
             strtoul(poVfkFeature->GetProperty(idx1)->GetValueS(), nullptr, 0);
         if (idx2 < 0)
@@ -798,8 +783,8 @@ GIntBig VFKDataBlock::GetFeatureCount(const char *pszName, const char *pszValue)
     int nfeatures = 0;
     for (int i = 0; i < ((IVFKDataBlock *)this)->GetFeatureCount(); i++)
     {
-        VFKFeature *poVFKFeature =
-            (VFKFeature *)((IVFKDataBlock *)this)->GetFeature(i);
+        VFKFeature *poVFKFeature = cpl::down_cast<VFKFeature *>(
+            ((IVFKDataBlock *)this)->GetFeature(i));
         if (!poVFKFeature)
             return -1;
         if (EQUAL(poVFKFeature->GetProperty(propIdx)->GetValueS(), pszValue))
@@ -828,7 +813,8 @@ int VFKDataBlock::LoadGeometryPoint()
 
     for (int j = 0; j < ((IVFKDataBlock *)this)->GetFeatureCount(); j++)
     {
-        VFKFeature *poFeature = (VFKFeature *)GetFeatureByIndex(j);
+        VFKFeature *poFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(j));
         double x = -1.0 * poFeature->GetProperty(i_idxY)->GetValueD();
         double y = -1.0 * poFeature->GetProperty(i_idxX)->GetValueD();
         OGRPoint pt(x, y);
@@ -847,7 +833,7 @@ int VFKDataBlock::LoadGeometryPoint()
 int VFKDataBlock::LoadGeometryLineStringSBP()
 {
     VFKDataBlock *poDataBlockPoints =
-        (VFKDataBlock *)m_poReader->GetDataBlock("SOBR");
+        cpl::down_cast<VFKDataBlock *>(m_poReader->GetDataBlock("SOBR"));
     if (nullptr == poDataBlockPoints)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "Data block %s not found.\n",
@@ -872,7 +858,8 @@ int VFKDataBlock::LoadGeometryLineStringSBP()
 
     for (int j = 0; j < ((IVFKDataBlock *)this)->GetFeatureCount(); j++)
     {
-        VFKFeature *poFeature = (VFKFeature *)GetFeatureByIndex(j);
+        VFKFeature *poFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(j));
         CPLAssert(nullptr != poFeature);
 
         poFeature->SetGeometry(nullptr);
@@ -923,7 +910,7 @@ int VFKDataBlock::LoadGeometryLineStringHP()
     int nInvalid = 0;
 
     VFKDataBlock *poDataBlockLines =
-        (VFKDataBlock *)m_poReader->GetDataBlock("SBP");
+        cpl::down_cast<VFKDataBlock *>(m_poReader->GetDataBlock("SBP"));
     if (nullptr == poDataBlockLines)
     {
         CPLError(CE_Failure, CPLE_NotSupported, "Data block %s not found.\n",
@@ -949,7 +936,8 @@ int VFKDataBlock::LoadGeometryLineStringHP()
     VFKFeatureList poLineList = poDataBlockLines->GetFeatures(idxPCB, 1);
     for (int i = 0; i < ((IVFKDataBlock *)this)->GetFeatureCount(); i++)
     {
-        VFKFeature *poFeature = (VFKFeature *)GetFeatureByIndex(i);
+        VFKFeature *poFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(i));
         CPLAssert(nullptr != poFeature);
         GUIntBig id =
             strtoul(poFeature->GetProperty(idxId)->GetValueS(), nullptr, 0);
@@ -978,14 +966,17 @@ int VFKDataBlock::LoadGeometryPolygon()
     bool bIsPar = false;
     if (EQUAL(m_pszName, "PAR"))
     {
-        poDataBlockLines1 = (VFKDataBlock *)m_poReader->GetDataBlock("HP");
+        poDataBlockLines1 =
+            cpl::down_cast<VFKDataBlock *>(m_poReader->GetDataBlock("HP"));
         poDataBlockLines2 = poDataBlockLines1;
         bIsPar = true;
     }
     else
     {
-        poDataBlockLines1 = (VFKDataBlock *)m_poReader->GetDataBlock("OB");
-        poDataBlockLines2 = (VFKDataBlock *)m_poReader->GetDataBlock("SBP");
+        poDataBlockLines1 =
+            cpl::down_cast<VFKDataBlock *>(m_poReader->GetDataBlock("OB"));
+        poDataBlockLines2 =
+            cpl::down_cast<VFKDataBlock *>(m_poReader->GetDataBlock("SBP"));
         bIsPar = false;
     }
 
@@ -1043,7 +1034,8 @@ int VFKDataBlock::LoadGeometryPolygon()
 
     for (int i = 0; i < ((IVFKDataBlock *)this)->GetFeatureCount(); i++)
     {
-        VFKFeature *poFeature = (VFKFeature *)GetFeatureByIndex(i);
+        VFKFeature *poFeature =
+            cpl::down_cast<VFKFeature *>(GetFeatureByIndex(i));
         CPLAssert(nullptr != poFeature);
         const GUIntBig id =
             strtoul(poFeature->GetProperty(idxId)->GetValueS(), nullptr, 0);

@@ -8,23 +8,7 @@
  * Copyright (c) 2000, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -45,6 +29,7 @@
 #include "ogr_core.h"
 #include "ogr_srs_api.h"
 #include "ogr_proj_p.h"
+#include "ogrct_priv.h"
 
 #include "proj.h"
 #include "proj_experimental.h"
@@ -261,20 +246,30 @@ static char *GetTextRepresentation(const OGRSpatialReference *poSRS)
         CPLTestBool(
             CPLGetConfigOption("OGR_CT_PREFER_OFFICIAL_SRS_DEF", "YES")))
     {
+        CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+
         CPLString osAuthCode(pszAuth);
         osAuthCode += ':';
         osAuthCode += pszCode;
         OGRSpatialReference oTmpSRS;
-        oTmpSRS.SetFromUserInput(osAuthCode);
-        oTmpSRS.SetDataAxisToSRSAxisMapping(
-            poSRS->GetDataAxisToSRSAxisMapping());
-        const char *const apszOptionsIsSame[] = {"CRITERION=EQUIVALENT",
-                                                 nullptr};
-        if (oTmpSRS.IsSame(poSRS, apszOptionsIsSame))
+        if (oTmpSRS.SetFromUserInput(osAuthCode) == OGRERR_NONE)
         {
-            if (CanUseAuthorityDef(poSRS, &oTmpSRS, pszAuth))
+            const char *pszAuthAfter = oTmpSRS.GetAuthorityName(nullptr);
+            const char *pszCodeAfter = oTmpSRS.GetAuthorityCode(nullptr);
+            if (pszAuthAfter && pszCodeAfter && EQUAL(pszAuthAfter, pszAuth) &&
+                EQUAL(pszCodeAfter, pszCode))
             {
-                pszText = CPLStrdup(osAuthCode);
+                oTmpSRS.SetDataAxisToSRSAxisMapping(
+                    poSRS->GetDataAxisToSRSAxisMapping());
+                const char *const apszOptionsIsSame[] = {"CRITERION=EQUIVALENT",
+                                                         nullptr};
+                if (oTmpSRS.IsSame(poSRS, apszOptionsIsSame))
+                {
+                    if (CanUseAuthorityDef(poSRS, &oTmpSRS, pszAuth))
+                    {
+                        pszText = CPLStrdup(osAuthCode);
+                    }
+                }
             }
         }
     }
@@ -618,7 +613,7 @@ int OCTCoordinateTransformationOptionsSetBallparkAllowed(
  * operations that are not the "best" if resources (typically grids) needed
  * to use them are missing. It will then fallback to other coordinate operations
  * that have a lesser accuracy, for example using Helmert transformations,
- * or in the absence of such operations, to ones with potential very rought
+ * or in the absence of such operations, to ones with potential very rough
  * accuracy, using "ballpark" transformations
  * (see https://proj.org/glossary.html).
  *
@@ -667,8 +662,15 @@ int OCTCoordinateTransformationOptionsSetOnlyBest(
 /************************************************************************/
 
 //! @cond Doxygen_Suppress
-class OGRProjCT : public OGRCoordinateTransformation
+class OGRProjCT final : public OGRCoordinateTransformation
 {
+    friend void
+    OGRProjCTDifferentOperationsStart(OGRCoordinateTransformation *poCT);
+    friend void
+    OGRProjCTDifferentOperationsStop(OGRCoordinateTransformation *poCT);
+    friend bool
+    OGRProjCTDifferentOperationsUsed(OGRCoordinateTransformation *poCT);
+
     class PjPtr
     {
         PJ *m_pj = nullptr;
@@ -809,6 +811,10 @@ class OGRProjCT : public OGRCoordinateTransformation
     int m_iCurTransformation = -1;
     OGRCoordinateTransformationOptions m_options{};
 
+    bool m_recordDifferentOperationsUsed = false;
+    std::string m_lastPjUsedPROJString{};
+    bool m_differentOperationsUsed = false;
+
     void ComputeThreshold();
     void DetectWebMercatorToWGS84();
 
@@ -871,7 +877,73 @@ class OGRProjCT : public OGRCoordinateTransformation
                   const OGRCoordinateTransformationOptions &options);
 };
 
+/************************************************************************/
+/*                   OGRProjCTDifferentOperationsStart()                */
+/************************************************************************/
+
+void OGRProjCTDifferentOperationsStart(OGRCoordinateTransformation *poCT)
+{
+    auto poOGRCT = dynamic_cast<OGRProjCT *>(poCT);
+    if (poOGRCT)
+    {
+        poOGRCT->m_recordDifferentOperationsUsed = true;
+        poOGRCT->m_differentOperationsUsed = false;
+        poOGRCT->m_lastPjUsedPROJString.clear();
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRProjCTDifferentOperationsStart() called with a non "
+                 "OGRProjCT instance");
+    }
+}
+
+/************************************************************************/
+/*                   OGRProjCTDifferentOperationsStop()                 */
+/************************************************************************/
+
+void OGRProjCTDifferentOperationsStop(OGRCoordinateTransformation *poCT)
+{
+    auto poOGRCT = dynamic_cast<OGRProjCT *>(poCT);
+    if (poOGRCT)
+    {
+        poOGRCT->m_recordDifferentOperationsUsed = false;
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRProjCTDifferentOperationsStop() called with a non "
+                 "OGRProjCT instance");
+    }
+}
+
+/************************************************************************/
+/*                   OGRProjCTDifferentOperationsUsed()                 */
+/************************************************************************/
+
+bool OGRProjCTDifferentOperationsUsed(OGRCoordinateTransformation *poCT)
+{
+    auto poOGRCT = dynamic_cast<OGRProjCT *>(poCT);
+    if (poOGRCT)
+    {
+        return poOGRCT->m_differentOperationsUsed;
+    }
+    else
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRProjCTDifferentOperationsReset() called with a non "
+                 "OGRProjCT instance");
+        return false;
+    }
+}
+
 //! @endcond
+
+/************************************************************************/
+/*                    ~OGRCoordinateTransformation()                    */
+/************************************************************************/
+
+OGRCoordinateTransformation::~OGRCoordinateTransformation() = default;
 
 /************************************************************************/
 /*                 OCTDestroyCoordinateTransformation()                 */
@@ -911,7 +983,6 @@ OCTDestroyCoordinateTransformation(OGRCoordinateTransformationH hCT)
  *
  * @param poCT the object to delete
  *
- * @since GDAL 1.7.0
  */
 
 void OGRCoordinateTransformation::DestroyCT(OGRCoordinateTransformation *poCT)
@@ -1282,7 +1353,8 @@ OGRProjCT::OGRProjCT(const OGRProjCT &other)
       m_eStrategy(other.m_eStrategy),
       m_oTransformations(other.m_oTransformations),
       m_iCurTransformation(other.m_iCurTransformation),
-      m_options(other.m_options)
+      m_options(other.m_options), m_recordDifferentOperationsUsed(false),
+      m_lastPjUsedPROJString(std::string()), m_differentOperationsUsed(false)
 {
 }
 
@@ -1775,15 +1847,10 @@ static PJ *op_to_pj(PJ_CONTEXT *ctx, PJ *op,
     const char *pszUseETMERC = CPLGetConfigOption("OSR_USE_ETMERC", nullptr);
     if (pszUseETMERC && pszUseETMERC[0])
     {
-        static bool bHasWarned = false;
-        if (!bHasWarned)
-        {
-            CPLError(CE_Warning, CPLE_AppDefined,
+        CPLErrorOnce(CE_Warning, CPLE_AppDefined,
                      "OSR_USE_ETMERC is a legacy configuration option, which "
                      "now has only effect when set to NO (YES is the default). "
                      "Use OSR_USE_APPROX_TMERC=YES instead");
-            bHasWarned = true;
-        }
         bForceApproxTMerc = !CPLTestBool(pszUseETMERC);
     }
     else
@@ -2204,22 +2271,12 @@ int OGRCoordinateTransformation::Transform(size_t nCount, double *x, double *y,
     if (!pabSuccess)
         return FALSE;
 
-    bool bOverallSuccess =
-        CPL_TO_BOOL(Transform(nCount, x, y, z, nullptr, pabSuccess));
-
-    for (size_t i = 0; i < nCount; i++)
-    {
-        if (!pabSuccess[i])
-        {
-            bOverallSuccess = false;
-            break;
-        }
-    }
+    const int bRet = Transform(nCount, x, y, z, nullptr, pabSuccess);
 
     if (pabSuccess != pabSuccessIn)
         CPLFree(pabSuccess);
 
-    return bOverallSuccess;
+    return bRet;
 }
 
 /************************************************************************/
@@ -2232,6 +2289,17 @@ int OGRCoordinateTransformation::TransformWithErrorCodes(size_t nCount,
                                                          int *panErrorCodes)
 
 {
+    if (nCount == 1)
+    {
+        int nSuccess = 0;
+        const int bRet = Transform(nCount, x, y, z, t, &nSuccess);
+        if (panErrorCodes)
+        {
+            panErrorCodes[0] = nSuccess ? 0 : -1;
+        }
+        return bRet;
+    }
+
     std::vector<int> abSuccess;
     try
     {
@@ -2244,8 +2312,7 @@ int OGRCoordinateTransformation::TransformWithErrorCodes(size_t nCount,
         return FALSE;
     }
 
-    const bool bOverallSuccess =
-        CPL_TO_BOOL(Transform(nCount, x, y, z, t, abSuccess.data()));
+    const int bRet = Transform(nCount, x, y, z, t, abSuccess.data());
 
     if (panErrorCodes)
     {
@@ -2255,7 +2322,7 @@ int OGRCoordinateTransformation::TransformWithErrorCodes(size_t nCount,
         }
     }
 
-    return bOverallSuccess;
+    return bRet;
 }
 
 /************************************************************************/
@@ -2266,8 +2333,7 @@ int OGRProjCT::Transform(size_t nCount, double *x, double *y, double *z,
                          double *t, int *pabSuccess)
 
 {
-    bool bOverallSuccess =
-        CPL_TO_BOOL(TransformWithErrorCodes(nCount, x, y, z, t, pabSuccess));
+    const int bRet = TransformWithErrorCodes(nCount, x, y, z, t, pabSuccess);
 
     if (pabSuccess)
     {
@@ -2277,7 +2343,7 @@ int OGRProjCT::Transform(size_t nCount, double *x, double *y, double *z,
         }
     }
 
-    return bOverallSuccess;
+    return bRet;
 }
 
 /************************************************************************/
@@ -2409,6 +2475,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
     /*      Optimized transform from WebMercator to WGS84                   */
     /* -------------------------------------------------------------------- */
     bool bTransformDone = false;
+    int bRet = TRUE;
     if (bWebMercatorToWGS84LongLat)
     {
         constexpr double REVERSE_SPHERE_RADIUS = 1.0 / 6378137.0;
@@ -2421,7 +2488,11 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
         double y0 = y[0];
         for (size_t i = 0; i < nCount; i++)
         {
-            if (x[i] != HUGE_VAL)
+            if (x[i] == HUGE_VAL)
+            {
+                bRet = FALSE;
+            }
+            else
             {
                 x[i] = x[i] * REVERSE_SPHERE_RADIUS;
                 if (x[i] > M_PI)
@@ -2533,6 +2604,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
     /*      needed.                                                         */
     /* -------------------------------------------------------------------- */
     auto ctx = OSRGetProjTLSContext();
+
     PJ *pj = m_pj;
     if (!bTransformDone && !pj)
     {
@@ -2693,6 +2765,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
             const double yIn = y[i];
             if (!std::isfinite(xIn))
             {
+                bRet = FALSE;
                 x[i] = HUGE_VAL;
                 y[i] = HUGE_VAL;
                 if (panErrorCodes)
@@ -2721,6 +2794,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
             int err = 0;
             if (std::isnan(coord.xyzt.x))
             {
+                bRet = FALSE;
                 // This shouldn't normally happen if PROJ projections behave
                 // correctly, but e.g inverse laea before PROJ 8.1.1 could
                 // do that for points out of domain.
@@ -2728,40 +2802,69 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
                 x[i] = HUGE_VAL;
                 y[i] = HUGE_VAL;
                 err = PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN;
-                static bool bHasWarned = false;
-                if (!bHasWarned)
-                {
+
 #ifdef DEBUG
-                    CPLError(CE_Warning, CPLE_AppDefined,
+                CPLErrorOnce(CE_Warning, CPLE_AppDefined,
                              "PROJ returned a NaN value. It should be fixed");
 #else
-                    CPLDebug("OGR_CT",
+                CPLDebugOnce("OGR_CT",
                              "PROJ returned a NaN value. It should be fixed");
 #endif
-                    bHasWarned = true;
-                }
             }
             else if (coord.xyzt.x == HUGE_VAL)
             {
+                bRet = FALSE;
                 err = proj_errno(pj);
                 // PROJ should normally emit an error, but in case it does not
-                // (e.g PROJ 6.3 with the +ortho projection), synthetize one
+                // (e.g PROJ 6.3 with the +ortho projection), synthesize one
                 if (err == 0)
                     err = PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN;
             }
-            else if (m_options.d->bCheckWithInvertProj)
+            else
             {
-                // For some projections, we cannot detect if we are trying to
-                // reproject coordinates outside the validity area of the
-                // projection. So let's do the reverse reprojection and compare
-                // with the source coordinates.
-                coord = proj_trans(pj, m_bReversePj ? PJ_FWD : PJ_INV, coord);
-                if (fabs(coord.xyzt.x - xIn) > dfThreshold ||
-                    fabs(coord.xyzt.y - yIn) > dfThreshold)
+                if (m_recordDifferentOperationsUsed &&
+                    !m_differentOperationsUsed)
                 {
-                    err = PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN;
-                    x[i] = HUGE_VAL;
-                    y[i] = HUGE_VAL;
+#if PROJ_VERSION_MAJOR > 9 ||                                                  \
+    (PROJ_VERSION_MAJOR == 9 && PROJ_VERSION_MINOR >= 1)
+
+                    PJ *lastOp = proj_trans_get_last_used_operation(pj);
+                    if (lastOp)
+                    {
+                        const char *projString = proj_as_proj_string(
+                            ctx, lastOp, PJ_PROJ_5, nullptr);
+                        if (projString)
+                        {
+                            if (m_lastPjUsedPROJString.empty())
+                            {
+                                m_lastPjUsedPROJString = projString;
+                            }
+                            else if (m_lastPjUsedPROJString != projString)
+                            {
+                                m_differentOperationsUsed = true;
+                            }
+                        }
+                        proj_destroy(lastOp);
+                    }
+#endif
+                }
+
+                if (m_options.d->bCheckWithInvertProj)
+                {
+                    // For some projections, we cannot detect if we are trying to
+                    // reproject coordinates outside the validity area of the
+                    // projection. So let's do the reverse reprojection and compare
+                    // with the source coordinates.
+                    coord =
+                        proj_trans(pj, m_bReversePj ? PJ_FWD : PJ_INV, coord);
+                    if (fabs(coord.xyzt.x - xIn) > dfThreshold ||
+                        fabs(coord.xyzt.y - yIn) > dfThreshold)
+                    {
+                        bRet = FALSE;
+                        err = PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN;
+                        x[i] = HUGE_VAL;
+                        y[i] = HUGE_VAL;
+                    }
                 }
             }
 
@@ -2936,7 +3039,7 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
     //          static_cast<int>(delay * 1000));
 #endif
 
-    return TRUE;
+    return bRet;
 }
 
 /************************************************************************/
@@ -2944,39 +3047,42 @@ int OGRProjCT::TransformWithErrorCodes(size_t nCount, double *x, double *y,
 /************************************************************************/
 
 // ---------------------------------------------------------------------------
-static double simple_min(const double *data, const int arr_len)
+static double simple_min(const double *data, const int *panErrorCodes,
+                         const int arr_len)
 {
-    double min_value = data[0];
-    for (int iii = 1; iii < arr_len; iii++)
+    double min_value = HUGE_VAL;
+    for (int iii = 0; iii < arr_len; iii++)
     {
-        if (data[iii] < min_value)
+        if ((data[iii] < min_value || min_value == HUGE_VAL) &&
+            panErrorCodes[iii] == 0)
             min_value = data[iii];
     }
     return min_value;
 }
 
 // ---------------------------------------------------------------------------
-static double simple_max(const double *data, const int arr_len)
+static double simple_max(const double *data, const int *panErrorCodes,
+                         const int arr_len)
 {
-    double max_value = data[0];
-    for (int iii = 1; iii < arr_len; iii++)
+    double max_value = HUGE_VAL;
+    for (int iii = 0; iii < arr_len; iii++)
     {
         if ((data[iii] > max_value || max_value == HUGE_VAL) &&
-            data[iii] != HUGE_VAL)
+            panErrorCodes[iii] == 0)
             max_value = data[iii];
     }
     return max_value;
 }
 
 // ---------------------------------------------------------------------------
-static int _find_previous_index(const int iii, const double *data,
+static int _find_previous_index(const int iii, const int *panErrorCodes,
                                 const int arr_len)
 {
     // find index of nearest valid previous value if exists
     int prev_iii = iii - 1;
     if (prev_iii == -1)  // handle wraparound
         prev_iii = arr_len - 1;
-    while (data[prev_iii] == HUGE_VAL && prev_iii != iii)
+    while (panErrorCodes[prev_iii] != 0 && prev_iii != iii)
     {
         prev_iii--;
         if (prev_iii == -1)  // handle wraparound
@@ -3033,7 +3139,8 @@ but smalller than 240 to account for possible irregularities in distances
 when re-projecting. Also, 200 ensures latitudes are ignored for axis order
 handling.
 ******************************************************************************/
-static double antimeridian_min(const double *data, const int arr_len)
+static double antimeridian_min(const double *data, const int *panErrorCodes,
+                               const int arr_len)
 {
     double positive_min = HUGE_VAL;
     double min_value = HUGE_VAL;
@@ -3042,9 +3149,9 @@ static double antimeridian_min(const double *data, const int arr_len)
 
     for (int iii = 0; iii < arr_len; iii++)
     {
-        if (data[iii] == HUGE_VAL)
+        if (panErrorCodes[iii])
             continue;
-        int prev_iii = _find_previous_index(iii, data, arr_len);
+        int prev_iii = _find_previous_index(iii, panErrorCodes, arr_len);
         // check if crossed meridian
         double delta = data[prev_iii] - data[iii];
         // 180 -> -180
@@ -3086,7 +3193,8 @@ static double antimeridian_min(const double *data, const int arr_len)
 // Note: This requires a densified ring with at least 2 additional
 //       points per edge to correctly handle global extents.
 // See antimeridian_min docstring for reasoning.
-static double antimeridian_max(const double *data, const int arr_len)
+static double antimeridian_max(const double *data, const int *panErrorCodes,
+                               const int arr_len)
 {
     double negative_max = -HUGE_VAL;
     double max_value = -HUGE_VAL;
@@ -3095,9 +3203,9 @@ static double antimeridian_max(const double *data, const int arr_len)
 
     for (int iii = 0; iii < arr_len; iii++)
     {
-        if (data[iii] == HUGE_VAL)
+        if (panErrorCodes[iii])
             continue;
-        int prev_iii = _find_previous_index(iii, data, arr_len);
+        int prev_iii = _find_previous_index(iii, panErrorCodes, arr_len);
         // check if crossed meridian
         double delta = data[prev_iii] - data[iii];
         // 180 -> -180
@@ -3119,11 +3227,11 @@ static double antimeridian_max(const double *data, const int arr_len)
         // negative meridian side max
         if (negative_meridian &&
             (data[iii] > negative_max || negative_max == HUGE_VAL) &&
-            data[iii] != HUGE_VAL)
+            panErrorCodes[iii] == 0)
             negative_max = data[iii];
         // track general max value
         if ((data[iii] > max_value || max_value == HUGE_VAL) &&
-            data[iii] != HUGE_VAL)
+            panErrorCodes[iii] == 0)
             max_value = data[iii];
     }
     if (crossed_meridian_count == 2)
@@ -3149,17 +3257,14 @@ bool OGRProjCT::ContainsNorthPole(const double xmin, const double ymin,
         pole_y = 0;
         pole_x = 90;
     }
-    auto inverseCT = GetInverse();
+    auto inverseCT = std::unique_ptr<OGRCoordinateTransformation>(GetInverse());
     if (!inverseCT)
         return false;
-    bool success = inverseCT->TransformWithErrorCodes(
+    CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+    const bool success = inverseCT->TransformWithErrorCodes(
         1, &pole_x, &pole_y, nullptr, nullptr, nullptr);
-    if (success && CPLGetLastErrorType() != CE_None)
-        CPLErrorReset();
-    delete inverseCT;
-    if (xmin < pole_x && pole_x < xmax && ymax > pole_y && pole_y > ymin)
-        return true;
-    return false;
+    return success && xmin < pole_x && pole_x < xmax && ymax > pole_y &&
+           pole_y > ymin;
 }
 
 // ---------------------------------------------------------------------------
@@ -3177,17 +3282,14 @@ bool OGRProjCT::ContainsSouthPole(const double xmin, const double ymin,
         pole_y = 0;
         pole_x = -90;
     }
-    auto inverseCT = GetInverse();
+    auto inverseCT = std::unique_ptr<OGRCoordinateTransformation>(GetInverse());
     if (!inverseCT)
         return false;
-    bool success = inverseCT->TransformWithErrorCodes(
+    CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+    const bool success = inverseCT->TransformWithErrorCodes(
         1, &pole_x, &pole_y, nullptr, nullptr, nullptr);
-    if (success && CPLGetLastErrorType() != CE_None)
-        CPLErrorReset();
-    delete inverseCT;
-    if (xmin < pole_x && pole_x < xmax && ymax > pole_y && pole_y > ymin)
-        return true;
-    return false;
+    return success && xmin < pole_x && pole_x < xmax && ymax > pole_y &&
+           pole_y > ymin;
 }
 
 int OGRProjCT::TransformBounds(const double xmin, const double ymin,
@@ -3196,8 +3298,6 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
                                double *out_xmax, double *out_ymax,
                                const int densify_pts)
 {
-    CPLErrorReset();
-
     if (bNoTransform)
     {
         *out_xmin = xmin;
@@ -3268,10 +3368,12 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
     const int boundary_len = side_pts * 4;
     std::vector<double> x_boundary_array;
     std::vector<double> y_boundary_array;
+    std::vector<int> anErrorCodes;
     try
     {
         x_boundary_array.resize(boundary_len);
         y_boundary_array.resize(boundary_len);
+        anErrorCodes.resize(boundary_len);
     }
     catch (const std::exception &e)  // memory allocation failure
     {
@@ -3284,20 +3386,10 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
     bool south_pole_in_bounds = false;
     if (degree_output)
     {
-        CPLErrorHandlerPusher oErrorHandlerPusher(CPLQuietErrorHandler);
-
         north_pole_in_bounds =
             ContainsNorthPole(xmin, ymin, xmax, ymax, output_lon_lat_order);
-        if (CPLGetLastErrorType() != CE_None)
-        {
-            return false;
-        }
         south_pole_in_bounds =
             ContainsSouthPole(xmin, ymin, xmax, ymax, output_lon_lat_order);
-        if (CPLGetLastErrorType() != CE_None)
-        {
-            return false;
-        }
     }
 
     if (degree_input && xmax < xmin)
@@ -3350,26 +3442,35 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
     }
 
     {
-        CPLErrorHandlerPusher oErrorHandlerPusher(CPLQuietErrorHandler);
+        CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
         bool success = TransformWithErrorCodes(
             boundary_len, &x_boundary_array[0], &y_boundary_array[0], nullptr,
-            nullptr, nullptr);
-        if (success && CPLGetLastErrorType() != CE_None)
+            nullptr, anErrorCodes.data());
+        if (!success)
         {
-            CPLErrorReset();
-        }
-        else if (!success)
-        {
-            return false;
+            for (int i = 0; i < boundary_len; ++i)
+            {
+                if (anErrorCodes[i] == 0)
+                {
+                    success = true;
+                    break;
+                }
+            }
+            if (!success)
+                return false;
         }
     }
 
     if (!degree_output)
     {
-        *out_xmin = simple_min(&x_boundary_array[0], boundary_len);
-        *out_xmax = simple_max(&x_boundary_array[0], boundary_len);
-        *out_ymin = simple_min(&y_boundary_array[0], boundary_len);
-        *out_ymax = simple_max(&y_boundary_array[0], boundary_len);
+        *out_xmin =
+            simple_min(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_xmax =
+            simple_max(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_ymin =
+            simple_min(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_ymax =
+            simple_max(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
 
         if (poSRSTarget->IsProjected())
         {
@@ -3475,13 +3576,15 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
     else if (north_pole_in_bounds && output_lon_lat_order)
     {
         *out_xmin = -180;
-        *out_ymin = simple_min(&y_boundary_array[0], boundary_len);
+        *out_ymin =
+            simple_min(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
         *out_xmax = 180;
         *out_ymax = 90;
     }
     else if (north_pole_in_bounds)
     {
-        *out_xmin = simple_min(&x_boundary_array[0], boundary_len);
+        *out_xmin =
+            simple_min(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
         *out_ymin = -180;
         *out_xmax = 90;
         *out_ymax = 180;
@@ -3491,28 +3594,38 @@ int OGRProjCT::TransformBounds(const double xmin, const double ymin,
         *out_xmin = -180;
         *out_ymin = -90;
         *out_xmax = 180;
-        *out_ymax = simple_max(&y_boundary_array[0], boundary_len);
+        *out_ymax =
+            simple_max(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
     }
     else if (south_pole_in_bounds)
     {
         *out_xmin = -90;
         *out_ymin = -180;
-        *out_xmax = simple_max(&x_boundary_array[0], boundary_len);
+        *out_xmax =
+            simple_max(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
         *out_ymax = 180;
     }
     else if (output_lon_lat_order)
     {
-        *out_xmin = antimeridian_min(&x_boundary_array[0], boundary_len);
-        *out_xmax = antimeridian_max(&x_boundary_array[0], boundary_len);
-        *out_ymin = simple_min(&y_boundary_array[0], boundary_len);
-        *out_ymax = simple_max(&y_boundary_array[0], boundary_len);
+        *out_xmin = antimeridian_min(&x_boundary_array[0], anErrorCodes.data(),
+                                     boundary_len);
+        *out_xmax = antimeridian_max(&x_boundary_array[0], anErrorCodes.data(),
+                                     boundary_len);
+        *out_ymin =
+            simple_min(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_ymax =
+            simple_max(&y_boundary_array[0], anErrorCodes.data(), boundary_len);
     }
     else
     {
-        *out_xmin = simple_min(&x_boundary_array[0], boundary_len);
-        *out_xmax = simple_max(&x_boundary_array[0], boundary_len);
-        *out_ymin = antimeridian_min(&y_boundary_array[0], boundary_len);
-        *out_ymax = antimeridian_max(&y_boundary_array[0], boundary_len);
+        *out_xmin =
+            simple_min(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_xmax =
+            simple_max(&x_boundary_array[0], anErrorCodes.data(), boundary_len);
+        *out_ymin = antimeridian_min(&y_boundary_array[0], anErrorCodes.data(),
+                                     boundary_len);
+        *out_ymax = antimeridian_max(&y_boundary_array[0], anErrorCodes.data(),
+                                     boundary_len);
     }
 
     return *out_xmin != HUGE_VAL && *out_ymin != HUGE_VAL &&
@@ -3831,16 +3944,18 @@ int OCTTransform4DWithErrorCodes(OGRCoordinateTransformationH hTransform,
  * transformations along these edges and extracting the outermost bounds.
  *
  * If the destination CRS is geographic, the first axis is longitude,
- * and xmax < xmin then the bounds crossed the antimeridian.
+ * and *out_xmax < *out_xmin then the bounds crossed the antimeridian.
  * In this scenario there are two polygons, one on each side of the
- * antimeridian. The first polygon should be constructed with (xmin, ymin, 180,
- * ymax) and the second with (-180, ymin, xmax, ymax).
+ * antimeridian. The first polygon should be constructed with
+ * (*out_xmin, *out_ymin, 180, ymax) and the second with
+ * (-180, *out_ymin, *out_xmax, *out_ymax).
  *
  * If the destination CRS is geographic, the first axis is latitude,
- * and ymax < ymin then the bounds crossed the antimeridian.
+ * and *out_ymax < *out_ymin then the bounds crossed the antimeridian.
  * In this scenario there are two polygons, one on each side of the
- * antimeridian. The first polygon should be constructed with (ymin, xmin, ymax,
- * 180) and the second with (ymin, -180, ymax, xmax).
+ * antimeridian. The first polygon should be constructed with
+ * (*out_ymin, *out_xmin, *out_ymax, 180) and the second with
+ * (*out_ymin, -180, *out_ymax, *out_xmax).
  *
  * @param hTransform Transformation object
  * @param xmin Minimum bounding coordinate of the first axis in source CRS.

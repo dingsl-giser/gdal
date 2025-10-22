@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  JML .jml Translator
  * Purpose:  Definition of classes for OGR JML driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_JML_H_INCLUDED
@@ -119,9 +102,9 @@ class OGRJMLLayer final : public OGRLayer
 
   public:
     OGRJMLLayer(const char *pszLayerName, OGRJMLDataset *poDS, VSILFILE *fp);
-    ~OGRJMLLayer();
+    ~OGRJMLLayer() override;
 
-    const char *GetName() override
+    const char *GetName() const override
     {
         return poFeatureDefn->GetName();
     }
@@ -129,9 +112,9 @@ class OGRJMLLayer final : public OGRLayer
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
 
-    OGRFeatureDefn *GetLayerDefn() override;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     GDALDataset *GetDataset() override
     {
@@ -172,7 +155,7 @@ class OGRJMLWriterLayer final : public OGRLayer
     OGRJMLWriterLayer(const char *pszLayerName, OGRSpatialReference *poSRS,
                       OGRJMLDataset *poDSIn, VSILFILE *fp, bool bAddRGBField,
                       bool bAddOGRStyleField, bool bClassicGML);
-    ~OGRJMLWriterLayer();
+    ~OGRJMLWriterLayer() override;
 
     void ResetReading() override
     {
@@ -186,12 +169,12 @@ class OGRJMLWriterLayer final : public OGRLayer
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
     OGRErr CreateField(const OGRFieldDefn *poField, int bApproxOK) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     GDALDataset *GetDataset() override;
 };
@@ -209,20 +192,20 @@ class OGRJMLDataset final : public GDALDataset
 
   public:
     OGRJMLDataset();
-    ~OGRJMLDataset();
+    ~OGRJMLDataset() override;
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return poLayer != nullptr ? 1 : 0;
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);

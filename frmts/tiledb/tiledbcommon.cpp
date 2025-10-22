@@ -7,27 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2023, TileDB, Inc
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "tiledbheaders.h"
 #include "tiledbdrivercore.h"
+
+TileDBDataset::~TileDBDataset() = default;
 
 /************************************************************************/
 /*                      VSI_to_tiledb_uri()                             */
@@ -41,6 +27,8 @@ CPLString TileDBDataset::VSI_to_tiledb_uri(const char *pszUri)
         osUri.Printf("s3://%s", pszUri + 7);
     else if (STARTS_WITH_CI(pszUri, "/VSIGS/"))
         osUri.Printf("gcs://%s", pszUri + 7);
+    else if (STARTS_WITH_CI(pszUri, "/VSIAZ/"))
+        osUri.Printf("azure://%s", pszUri + 7);
     else
     {
         osUri = pszUri;
@@ -50,12 +38,22 @@ CPLString TileDBDataset::VSI_to_tiledb_uri(const char *pszUri)
         {
             char *pszCurDir = CPLGetCurrentDir();
             if (pszCurDir)
-                osUri = CPLFormFilename(pszCurDir, pszUri, nullptr);
+                osUri = CPLFormFilenameSafe(pszCurDir, pszUri, nullptr);
             CPLFree(pszCurDir);
         }
     }
 
     return osUri;
+}
+
+/************************************************************************/
+/*                      TileDBObjectExists()                            */
+/************************************************************************/
+bool TileDBDataset::TileDBObjectExists(const std::string &osArrayUri)
+{
+    tiledb::Context ctx;
+    const auto eType = tiledb::Object::object(ctx, osArrayUri).type();
+    return eType != tiledb::Object::Type::Invalid;
 }
 
 /************************************************************************/
@@ -118,54 +116,25 @@ CPLErr TileDBDataset::AddFilter(tiledb::Context &ctx,
 int TileDBDataset::Identify(GDALOpenInfo *poOpenInfo)
 
 {
-    if (STARTS_WITH_CI(poOpenInfo->pszFilename, "TILEDB:"))
+    int nRet = TileDBDriverIdentifySimplified(poOpenInfo);
+    if (nRet == GDAL_IDENTIFY_UNKNOWN)
     {
-        return TRUE;
-    }
-
-    if (poOpenInfo->IsSingleAllowedDriver("TileDB"))
-    {
-        return TRUE;
-    }
-
-    try
-    {
-        const char *pszConfig =
-            CSLFetchNameValue(poOpenInfo->papszOpenOptions, "TILEDB_CONFIG");
-
-        if (pszConfig != nullptr)
-        {
-            return TRUE;
-        }
-
-        const bool bIsS3OrGS =
-            STARTS_WITH_CI(poOpenInfo->pszFilename, "/VSIS3/") ||
-            STARTS_WITH_CI(poOpenInfo->pszFilename, "/VSIGS/");
-        // If this is a /vsi virtual file systems, bail out, except if it is S3 or GS.
-        if (!bIsS3OrGS && STARTS_WITH(poOpenInfo->pszFilename, "/vsi"))
-        {
-            return false;
-        }
-
-        if (poOpenInfo->bIsDirectory ||
-            (bIsS3OrGS &&
-             !EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "tif")))
+        try
         {
             tiledb::Context ctx;
             CPLString osArrayPath =
                 TileDBDataset::VSI_to_tiledb_uri(poOpenInfo->pszFilename);
-            const auto eType = tiledb::Object::object(ctx, osArrayPath).type();
-            if (eType == tiledb::Object::Type::Array ||
-                eType == tiledb::Object::Type::Group)
-                return true;
+            if (TileDBDataset::TileDBObjectExists(osArrayPath))
+                nRet = TRUE;
+            else
+                nRet = FALSE;
         }
-
-        return FALSE;
+        catch (...)
+        {
+            nRet = FALSE;
+        }
     }
-    catch (...)
-    {
-        return FALSE;
-    }
+    return nRet;
 }
 
 /************************************************************************/
@@ -218,6 +187,19 @@ GDALDataset *TileDBDataset::Open(GDALOpenInfo *poOpenInfo)
         }
         else
         {
+            const std::string osPath =
+                TileDBDataset::VSI_to_tiledb_uri(poOpenInfo->pszFilename);
+
+            // identify() identifies this as a request for a TileDB dataset but not whether it exists
+            if ((poOpenInfo->eAccess == GA_ReadOnly) &&
+                (!TileDBDataset::TileDBObjectExists(osPath)))
+            {
+                CPLError(CE_Failure, CPLE_OpenFailed,
+                         "Failed to open %s as an array or group.",
+                         poOpenInfo->pszFilename);
+                return nullptr;
+            }
+
             if ((poOpenInfo->nOpenFlags & GDAL_OF_MULTIDIM_RASTER) != 0)
             {
                 return TileDBDataset::OpenMultiDimensional(poOpenInfo);
@@ -238,8 +220,6 @@ GDALDataset *TileDBDataset::Open(GDALOpenInfo *poOpenInfo)
                 cfg["sm.enable_signal_handlers"] = "false";
                 oCtx = tiledb::Context(cfg);
             }
-            const std::string osPath =
-                TileDBDataset::VSI_to_tiledb_uri(poOpenInfo->pszFilename);
 
             const auto eType = tiledb::Object::object(oCtx, osPath).type();
             std::string osDatasetType;

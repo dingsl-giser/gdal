@@ -9,23 +9,7 @@
  * Copyright (c) 1999, Intergraph Corporation
  * Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -36,9 +20,6 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -519,7 +500,7 @@ CPLErr HFAField::SetInstValue(const char *pszField, int nIndexValue,
             nIntValue = INT_MAX;
         else if (dfDoubleValue < INT_MIN)
             nIntValue = INT_MIN;
-        else
+        else if (std::isfinite(dfDoubleValue))
             nIntValue = static_cast<int>(dfDoubleValue);
     }
     else if (chReqType == 'i')
@@ -832,7 +813,6 @@ CPLErr HFAField::SetInstValue(const char *pszField, int nIndexValue,
         default:
             CPLAssert(false);
             return CE_Failure;
-            break;
     }
 
     return CE_None;
@@ -1034,15 +1014,18 @@ bool HFAField::ExtractInstValue(const char *pszField, int nIndexValue,
             memcpy(&dfNumber, pabyData + nIndexValue * 8, 8);
             HFAStandard(8, &dfNumber);
             dfDoubleRet = dfNumber;
-            if (dfNumber > std::numeric_limits<int>::max() ||
-                dfNumber < std::numeric_limits<int>::min() ||
-                std::isnan(dfNumber))
+            if (chReqType == 'i')
             {
-                CPLError(CE_Failure, CPLE_AppDefined, "Too large for int: %f",
-                         dfNumber);
-                return false;
+                if (dfNumber > std::numeric_limits<int>::max() ||
+                    dfNumber < std::numeric_limits<int>::min() ||
+                    std::isnan(dfNumber))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Too large for int: %f", dfNumber);
+                    return false;
+                }
+                nIntRet = static_cast<int>(dfNumber);
             }
-            nIntRet = static_cast<int>(dfNumber);
         }
         break;
 
@@ -1238,25 +1221,28 @@ bool HFAField::ExtractInstValue(const char *pszField, int nIndexValue,
                 HFAStandard(8, &dfValue);
 
                 dfDoubleRet = dfValue;
-                const int nMax = std::numeric_limits<int>::max();
-                const int nMin = std::numeric_limits<int>::min();
-                if (dfDoubleRet >= nMax)
+                if (chReqType == 'i')
                 {
-                    nIntRet = nMax;
-                }
-                else if (dfDoubleRet <= nMin)
-                {
-                    nIntRet = nMin;
-                }
-                else if (std::isnan(dfDoubleRet))
-                {
-                    CPLError(CE_Warning, CPLE_AppDefined,
-                             "NaN converted to INT_MAX.");
-                    nIntRet = nMax;
-                }
-                else
-                {
-                    nIntRet = static_cast<int>(dfDoubleRet);
+                    const int nMax = std::numeric_limits<int>::max();
+                    const int nMin = std::numeric_limits<int>::min();
+                    if (dfDoubleRet >= nMax)
+                    {
+                        nIntRet = nMax;
+                    }
+                    else if (dfDoubleRet <= nMin)
+                    {
+                        nIntRet = nMin;
+                    }
+                    else if (std::isnan(dfDoubleRet))
+                    {
+                        CPLError(CE_Warning, CPLE_AppDefined,
+                                 "NaN converted to INT_MAX.");
+                        nIntRet = nMax;
+                    }
+                    else
+                    {
+                        nIntRet = static_cast<int>(dfDoubleRet);
+                    }
                 }
             }
             else
@@ -1328,7 +1314,6 @@ bool HFAField::ExtractInstValue(const char *pszField, int nIndexValue,
 
         default:
             return false;
-            break;
     }
 
     // Return the appropriate representation.

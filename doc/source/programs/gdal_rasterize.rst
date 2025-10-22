@@ -13,19 +13,7 @@ gdal_rasterize
 Synopsis
 --------
 
-.. code-block::
-
-    gdal_rasterize [--help] [--help-general]
-        [-b <band>]... [-i] [-at]
-        [-oo <NAME>=<VALUE>]...
-        {[-burn <value>]... | [-a <attribute_name>] | [-3d]} [-add]
-        [-l <layername>]... [-where <expression>] [-sql <select_statement>|@<filename>]
-        [-dialect <dialect>] [-of <format>] [-a_srs <srs_def>] [-to <NAME>=<VALUE>]...
-        [-co <NAME>=<VALUE>]... [-a_nodata <value>] [-init <value>]...
-        [-te <xmin> <ymin> <xmax> <ymax>] [-tr <xres> <yres>] [-tap] [-ts <width> <height>]
-        [-ot {Byte/Int8/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/
-             CInt16/CInt32/CFloat32/CFloat64}] [-optim {AUTO|VECTOR|RASTER}] [-q]
-        <src_datasource> <dst_filename>
+.. program-output:: gdal_rasterize --help-doc
 
 Description
 -----------
@@ -35,8 +23,8 @@ raster band(s) of a raster image.  Vectors are read from OGR supported vector
 formats. If the output raster already exists, the affected pixels are updated
 in-place.
 
-Note that on the fly reprojection of vector data to the coordinate system of the
-raster data is only supported since GDAL 2.1.0.
+On the fly reprojection of vector data to the coordinate system of the
+raster data is supported.
 
 .. program:: gdal_rasterize
 
@@ -90,7 +78,7 @@ raster data is only supported since GDAL 2.1.0.
 
     Indicates that a burn value should be extracted from the "Z" values of the
     feature. Works with points and lines (linear interpolation along each segment).
-    For polygons, works properly only if the are flat (same Z value for all
+    For polygons, works properly only if they are flat (same Z value for all
     vertices).
 
 .. option:: -add
@@ -126,8 +114,6 @@ raster data is only supported since GDAL 2.1.0.
     the native SQL of an RDBMS by passing OGRSQL. The
     "SQLITE" dialect can also be used with any datasource.
 
-    .. versionadded:: 2.1
-
 .. include:: options/of.rst
 
 .. option:: -a_nodata <value>
@@ -155,8 +141,6 @@ raster data is only supported since GDAL 2.1.0.
     option suitable to pass to :cpp:func:`GDALCreateGenImgProjTransformer2`. This is
     used when converting geometries coordinates to target raster pixel space. For
     example this can be used to specify RPC related transformer options.
-
-    .. versionadded:: 2.3
 
 .. include:: options/co.rst
 
@@ -191,13 +175,12 @@ raster data is only supported since GDAL 2.1.0.
 
 .. option:: -optim {AUTO|VECTOR|RASTER}
 
-    Force the algorithm used (results are identical). The raster mode is used in most cases and
-    optimise read/write operations. The vector mode is useful with a decent amount of input
-    features and optimise the CPU use. That mode have to be used with tiled images to be
-    efficient. The auto mode (the default) will chose the algorithm based on input and output
-    properties.
-
-    .. versionadded:: 2.3
+    Force the algorithm used (results are identical). Raster mode
+    is used in most cases and  optimizes read/write  operations.  The
+    vector mode is useful with a large amount of input features and
+    optimizes CPU use, provided that the output image is tiled.
+    Auto mode (the default) will choose the
+    algorithm based on input and output properties.
 
 .. option:: -oo <NAME>=<VALUE>
 
@@ -231,30 +214,33 @@ C API
 
 This utility is also callable from C with :cpp:func:`GDALRasterize`.
 
-.. versionadded:: 2.1
-
 Examples
 --------
 
-The following would burn all polygons from mask.shp into the RGB TIFF
-file work.tif with the color red (RGB = 255,0,0).
+.. example::
 
-.. code-block::
+   The following would burn all polygons from :file:`mask.shp` into the RGB TIFF
+   file :file:`work.tif` with the color red (RGB = 255,0,0).
 
-    gdal_rasterize -b 1 -b 2 -b 3 -burn 255 -burn 0 -burn 0 -l mask mask.shp work.tif
+   .. code-block:: bash
 
+       gdal_rasterize -b 1 -b 2 -b 3 -burn 255 -burn 0 -burn 0 -l mask mask.shp work.tif
 
-The following would burn all "class A" buildings into the output elevation
-file, pulling the top elevation from the ROOF_H attribute.
+.. example::
 
-.. code-block::
+   The following would burn all "class A" buildings into the output elevation
+   file, pulling the top elevation from the ROOF_H attribute.
 
-    gdal_rasterize -a ROOF_H -where "class='A'" -l footprints footprints.shp city_dem.tif
+   .. code-block:: bash
 
-The following would burn all polygons from footprint.shp into a new 1000x1000
-rgb TIFF as the color red.  Note that :option:`-b` is not used; the order of the :option:`-burn`
-options determines the bands of the output raster.
+       gdal_rasterize -a ROOF_H -where "class='A'" -l footprints footprints.shp city_dem.tif
 
-.. code-block::
+.. example::
 
-    gdal_rasterize -burn 255 -burn 0 -burn 0 -ot Byte -ts 1000 1000 -l footprints footprints.shp mask.tif
+   The following would burn all polygons from :file:`footprint.shp` into a new 1000x1000
+   rgb TIFF as the color red.  Note that :option:`-b` is not used; the order of the :option:`-burn`
+   options determines the bands of the output raster.
+
+   .. code-block:: bash
+
+       gdal_rasterize -burn 255 -burn 0 -burn 0 -ot Byte -ts 1000 1000 -l footprints footprints.shp mask.tif

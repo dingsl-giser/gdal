@@ -8,23 +8,7 @@
  * Copyright (c) 1999,  Les Technologies SoftMap Inc.
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -210,7 +194,6 @@ OGRFeatureDefn *OGRFeatureDefn::Clone() const
  * OGRLayer::Rename() instead.
  *
  * @param pszName feature definition name
- * @since GDAL 2.3
  */
 void OGRFeatureDefn::SetName(const char *pszName)
 {
@@ -341,7 +324,6 @@ OGRFieldDefn *OGRFeatureDefn::GetFieldDefn(int iField)
  * @return a pointer to an internal field definition object or NULL if invalid
  * index.  This object should not be modified or freed by the application.
  *
- * @since GDAL 2.3
  */
 
 const OGRFieldDefn *OGRFeatureDefn::GetFieldDefn(int iField) const
@@ -433,6 +415,30 @@ void OGRFeatureDefn::AddFieldDefn(const OGRFieldDefn *poNewDefn)
     apoFieldDefn.emplace_back(std::make_unique<OGRFieldDefn>(poNewDefn));
 }
 
+/**
+ * \brief Add a new field definition taking ownership of the passed field.
+ *
+ * To add a new field definition to a layer definition, do not use this
+ * function directly, but use OGRLayer::CreateField() instead.
+ *
+ * This method should only be called while there are no OGRFeature
+ * objects in existence based on this OGRFeatureDefn.
+ *
+ * @param poNewDefn the definition of the new field.
+ */
+
+void OGRFeatureDefn::AddFieldDefn(std::unique_ptr<OGRFieldDefn> &&poNewDefn)
+{
+    if (m_bSealed)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "OGRFeatureDefn::AddFieldDefn() not allowed on a sealed object");
+        return;
+    }
+    apoFieldDefn.push_back(std::move(poNewDefn));
+}
+
 /************************************************************************/
 /*                        OGR_FD_AddFieldDefn()                         */
 /************************************************************************/
@@ -478,7 +484,6 @@ void OGR_FD_AddFieldDefn(OGRFeatureDefnH hDefn, OGRFieldDefnH hNewField)
  *
  * @param iField the index of the field definition.
  * @return OGRERR_NONE in case of success.
- * @since OGR 1.9.0
  */
 
 OGRErr OGRFeatureDefn::DeleteFieldDefn(int iField)
@@ -499,6 +504,42 @@ OGRErr OGRFeatureDefn::DeleteFieldDefn(int iField)
 }
 
 /************************************************************************/
+/*                          StealGeomFieldDefn()                       */
+/************************************************************************/
+
+std::unique_ptr<OGRGeomFieldDefn> OGRFeatureDefn::StealGeomFieldDefn(int iField)
+{
+    if (m_bSealed)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "OGRFeatureDefn::StealGeomFieldDefn() not allowed on a sealed "
+                 "object");
+        return nullptr;
+    }
+    if (iField < 0 || iField >= GetGeomFieldCount())
+        return nullptr;
+
+    std::unique_ptr<OGRGeomFieldDefn> poFieldDef =
+        std::move(apoGeomFieldDefn.at(iField));
+    apoGeomFieldDefn.erase(apoGeomFieldDefn.begin() + iField);
+    return poFieldDef;
+}
+
+/************************************************************************/
+/*                          StealFieldDefn()                           */
+/************************************************************************/
+
+std::unique_ptr<OGRFieldDefn> OGRFeatureDefn::StealFieldDefn(int iField)
+{
+    if (iField < 0 || iField >= GetFieldCount())
+        return nullptr;
+
+    std::unique_ptr<OGRFieldDefn> poFDef = std::move(apoFieldDefn.at(iField));
+    apoFieldDefn.erase(apoFieldDefn.begin() + iField);
+    return poFDef;
+}
+
+/************************************************************************/
 /*                       OGR_FD_DeleteFieldDefn()                       */
 /************************************************************************/
 
@@ -516,7 +557,6 @@ OGRErr OGRFeatureDefn::DeleteFieldDefn(int iField)
  * @param hDefn handle to the feature definition.
  * @param iField the index of the field definition.
  * @return OGRERR_NONE in case of success.
- * @since OGR 1.9.0
  */
 
 OGRErr OGR_FD_DeleteFieldDefn(OGRFeatureDefnH hDefn, int iField)
@@ -545,11 +585,9 @@ OGRErr OGR_FD_DeleteFieldDefn(OGRFeatureDefnH hDefn, int iField)
  * for each field definition at position i after reordering,
  * its position before reordering was panMap[i].
  * @return OGRERR_NONE in case of success.
- * @since OGR 1.9.0
  */
 
 OGRErr OGRFeatureDefn::ReorderFieldDefns(const int *panMap)
-
 {
     if (m_bSealed)
     {
@@ -597,7 +635,6 @@ OGRErr OGRFeatureDefn::ReorderFieldDefns(const int *panMap)
  * for each field definition at position i after reordering,
  * its position before reordering was panMap[i].
  * @return OGRERR_NONE in case of success.
- * @since OGR 2.1.0
  */
 
 OGRErr OGR_FD_ReorderFieldDefns(OGRFeatureDefnH hDefn, const int *panMap)
@@ -618,7 +655,6 @@ OGRErr OGR_FD_ReorderFieldDefns(OGRFeatureDefnH hDefn, const int *panMap)
  * This method is the same as the C function OGR_FD_GetGeomFieldCount().
  * @return count of geometry fields.
  *
- * @since GDAL 1.11
  */
 int OGRFeatureDefn::GetGeomFieldCount() const
 {
@@ -637,7 +673,6 @@ int OGRFeatureDefn::GetGeomFieldCount() const
  * @param hDefn handle to the feature definition to get the fields count from.
  * @return count of geometry fields.
  *
- * @since GDAL 1.11
  */
 
 int OGR_FD_GetGeomFieldCount(OGRFeatureDefnH hDefn)
@@ -666,7 +701,6 @@ int OGR_FD_GetGeomFieldCount(OGRFeatureDefnH hDefn)
  * @return a pointer to an internal field definition object or NULL if invalid
  * index.  This object should not be modified or freed by the application.
  *
- * @since GDAL 1.11
  */
 
 OGRGeomFieldDefn *OGRFeatureDefn::GetGeomFieldDefn(int iGeomField)
@@ -692,7 +726,6 @@ OGRGeomFieldDefn *OGRFeatureDefn::GetGeomFieldDefn(int iGeomField)
  * @return a pointer to an internal field definition object or NULL if invalid
  * index.  This object should not be modified or freed by the application.
  *
- * @since GDAL 2.3
  */
 
 const OGRGeomFieldDefn *OGRFeatureDefn::GetGeomFieldDefn(int iGeomField) const
@@ -725,7 +758,6 @@ const OGRGeomFieldDefn *OGRFeatureDefn::GetGeomFieldDefn(int iGeomField) const
  * @return a handle to an internal field definition object or NULL if invalid
  * index.  This object should not be modified or freed by the application.
  *
- * @since GDAL 1.11
  */
 
 OGRGeomFieldDefnH OGR_FD_GetGeomFieldDefn(OGRFeatureDefnH hDefn, int iGeomField)
@@ -764,7 +796,6 @@ OGRGeomFieldDefnH OGR_FD_GetGeomFieldDefn(OGRFeatureDefnH hDefn, int iGeomField)
  *
  * @param poNewDefn the definition of the new geometry field.
  *
- * @since GDAL 1.11
  */
 
 void OGRFeatureDefn::AddGeomFieldDefn(const OGRGeomFieldDefn *poNewDefn)
@@ -823,7 +854,6 @@ void OGRFeatureDefn::AddGeomFieldDefn(
  * definition to.
  * @param hNewGeomField handle to the new field definition.
  *
- * @since GDAL 1.11
  */
 
 void OGR_FD_AddGeomFieldDefn(OGRFeatureDefnH hDefn,
@@ -852,7 +882,6 @@ void OGR_FD_AddGeomFieldDefn(OGRFeatureDefnH hDefn,
  * @param iGeomField the index of the geometry field definition.
  * @return OGRERR_NONE in case of success.
  *
- * @since GDAL 1.11
  */
 
 OGRErr OGRFeatureDefn::DeleteGeomFieldDefn(int iGeomField)
@@ -893,7 +922,6 @@ OGRErr OGRFeatureDefn::DeleteGeomFieldDefn(int iGeomField)
  * @param iGeomField the index of the geometry field definition.
  * @return OGRERR_NONE in case of success.
  *
- * @since GDAL 1.11
  */
 
 OGRErr OGR_FD_DeleteGeomFieldDefn(OGRFeatureDefnH hDefn, int iGeomField)
@@ -981,7 +1009,7 @@ int OGR_FD_GetGeomFieldIndex(OGRFeatureDefnH hDefn,
  * type as 25D even if some or all geometries are in fact 25D.  A few (broken)
  * drivers return wkbPolygon for layers that also include wkbMultiPolygon.
  *
- * Starting with GDAL 1.11, this method returns GetGeomFieldDefn(0)->GetType().
+ * This method returns GetGeomFieldDefn(0)->GetType().
  *
  * This method is the same as the C function OGR_FD_GetGeomType().
  *
@@ -1009,7 +1037,7 @@ OGRwkbGeometryType OGRFeatureDefn::GetGeomType() const
  *
  * This function is the same as the C++ method OGRFeatureDefn::GetGeomType().
  *
- * Starting with GDAL 1.11, this method returns GetGeomFieldDefn(0)->GetType().
+ * This method returns GetGeomFieldDefn(0)->GetType().
  *
  * @param hDefn handle to the feature definition to get the geometry type from.
  * @return the base type for all geometry related to this definition.
@@ -1045,7 +1073,7 @@ OGRwkbGeometryType OGR_FD_GetGeomType(OGRFeatureDefnH hDefn)
  *
  * This method is the same as the C function OGR_FD_SetGeomType().
  *
- * Starting with GDAL 1.11, this method calls GetGeomFieldDefn(0)->SetType().
+ * This method calls GetGeomFieldDefn(0)->SetType().
  *
  * @param eNewType the new type to assign.
  */
@@ -1090,7 +1118,7 @@ void OGRFeatureDefn::SetGeomType(OGRwkbGeometryType eNewType)
  *
  * This function is the same as the C++ method OGRFeatureDefn::SetGeomType().
  *
- * Starting with GDAL 1.11, this method calls GetGeomFieldDefn(0)->SetType().
+ * This method calls GetGeomFieldDefn(0)->SetType().
  *
  * @param hDefn handle to the layer or feature definition to set the geometry
  * type to.
@@ -1313,7 +1341,7 @@ int OGR_FD_GetFieldIndex(OGRFeatureDefnH hDefn, const char *pszFieldName)
  *
  * This method is the same as the C function OGR_FD_IsGeometryIgnored().
  *
- * Starting with GDAL 1.11, this method returns
+ * This method returns
  * GetGeomFieldDefn(0)->IsIgnored().
  *
  * @return ignore state
@@ -1339,7 +1367,7 @@ int OGRFeatureDefn::IsGeometryIgnored() const
  * This function is the same as the C++ method
  * OGRFeatureDefn::IsGeometryIgnored().
  *
- * Starting with GDAL 1.11, this method returns
+ * This method returns
  * GetGeomFieldDefn(0)->IsIgnored().
  *
  * @param hDefn handle to the feature definition on witch OGRFeature are
@@ -1363,7 +1391,7 @@ int OGR_FD_IsGeometryIgnored(OGRFeatureDefnH hDefn)
  *
  * This method is the same as the C function OGR_FD_SetGeometryIgnored().
  *
- * Starting with GDAL 1.11, this method calls GetGeomFieldDefn(0)->SetIgnored().
+ * This method calls GetGeomFieldDefn(0)->SetIgnored().
  *
  * @param bIgnore ignore state
  */
@@ -1388,7 +1416,7 @@ void OGRFeatureDefn::SetGeometryIgnored(int bIgnore)
  * This function is the same as the C++ method
  * OGRFeatureDefn::SetGeometryIgnored().
  *
- * Starting with GDAL 1.11, this method calls GetGeomFieldDefn(0)->SetIgnored().
+ * This method calls GetGeomFieldDefn(0)->SetIgnored().
  *
  * @param hDefn handle to the feature definition on witch OGRFeature are
  * based on.
@@ -1551,7 +1579,6 @@ int OGRFeatureDefn::IsSame(const OGRFeatureDefn *poOtherFeatureDefn) const
  * @param hOtherFDefn handle to the other feature definition to compare to.
  * @return TRUE if the feature definition is identical to the other one.
  *
- * @since OGR 1.11
  */
 
 int OGR_FD_IsSame(OGRFeatureDefnH hFDefn, OGRFeatureDefnH hOtherFDefn)
@@ -1581,7 +1608,6 @@ int OGR_FD_IsSame(OGRFeatureDefnH hFDefn, OGRFeatureDefnH hOtherFDefn)
  * or empty in case a source field definition was not found in the target layer
  * and bForgiving == true.
  *
- * @since GDAL 2.3
  */
 
 std::vector<int>

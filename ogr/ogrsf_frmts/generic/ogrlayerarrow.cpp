@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022-2023, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrsf_frmts.h"
@@ -40,12 +24,15 @@
 #include "cpl_float.h"
 #include "cpl_json.h"
 #include "cpl_time.h"
+
+#include <algorithm>
 #include <cassert>
 #include <cinttypes>
 #include <limits>
 #include <utility>
 #include <set>
 
+constexpr const char *MD_GDAL_OGR_TYPE = "GDAL:OGR:type";
 constexpr const char *MD_GDAL_OGR_ALTERNATIVE_NAME =
     "GDAL:OGR:alternative_name";
 constexpr const char *MD_GDAL_OGR_COMMENT = "GDAL:OGR:comment";
@@ -270,25 +257,29 @@ inline void UnsetBit(uint8_t *pabyData, size_t nIdx)
 /*                          DefaultReleaseSchema()                      */
 /************************************************************************/
 
-static void OGRLayerDefaultReleaseSchema(struct ArrowSchema *schema)
+static void OGRLayerReleaseSchema(struct ArrowSchema *schema,
+                                  bool bFullFreeFormat)
 {
     CPLAssert(schema->release != nullptr);
-    if (STARTS_WITH(schema->format, "w:") ||
+    if (bFullFreeFormat || STARTS_WITH(schema->format, "w:") ||
         STARTS_WITH(schema->format, "tsm:"))
     {
         CPLFree(const_cast<char *>(schema->format));
     }
     CPLFree(const_cast<char *>(schema->name));
     CPLFree(const_cast<char *>(schema->metadata));
-    for (int i = 0; i < static_cast<int>(schema->n_children); ++i)
+    if (schema->children)
     {
-        if (schema->children[i]->release)
+        for (int i = 0; i < static_cast<int>(schema->n_children); ++i)
         {
-            schema->children[i]->release(schema->children[i]);
-            CPLFree(schema->children[i]);
+            if (schema->children[i] && schema->children[i]->release)
+            {
+                schema->children[i]->release(schema->children[i]);
+                CPLFree(schema->children[i]);
+            }
         }
+        CPLFree(schema->children);
     }
-    CPLFree(schema->children);
     if (schema->dictionary)
     {
         if (schema->dictionary->release)
@@ -298,6 +289,16 @@ static void OGRLayerDefaultReleaseSchema(struct ArrowSchema *schema)
         }
     }
     schema->release = nullptr;
+}
+
+static void OGRLayerPartialReleaseSchema(struct ArrowSchema *schema)
+{
+    OGRLayerReleaseSchema(schema, /* bFullFreeFormat = */ false);
+}
+
+static void OGRLayerFullReleaseSchema(struct ArrowSchema *schema)
+{
+    OGRLayerReleaseSchema(schema, /* bFullFreeFormat = */ true);
 }
 
 /** Release a ArrowSchema.
@@ -311,7 +312,7 @@ static void OGRLayerDefaultReleaseSchema(struct ArrowSchema *schema)
 
 void OGRLayer::ReleaseSchema(struct ArrowSchema *schema)
 {
-    OGRLayerDefaultReleaseSchema(schema);
+    OGRLayerPartialReleaseSchema(schema);
 }
 
 /************************************************************************/
@@ -355,7 +356,7 @@ static void AddDictToSchema(struct ArrowSchema *psChild,
     auto psChildDict = static_cast<struct ArrowSchema *>(
         CPLCalloc(1, sizeof(struct ArrowSchema)));
     psChild->dictionary = psChildDict;
-    psChildDict->release = OGRLayerDefaultReleaseSchema;
+    psChildDict->release = OGRLayerPartialReleaseSchema;
     psChildDict->name = CPLStrdup(poCodedDomain->GetName().c_str());
     psChildDict->format = "u";
     if (nCountNull)
@@ -378,6 +379,8 @@ int OGRLayer::GetArrowSchema(struct ArrowArrayStream *,
 {
     const bool bIncludeFID = CPLTestBool(
         m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
+    const bool bDateTimeAsString = m_aosArrowArrayStreamOptions.FetchBool(
+        GAS_OPT_DATETIME_AS_STRING, false);
     memset(out_schema, 0, sizeof(*out_schema));
     out_schema->format = "+s";
     out_schema->name = CPLStrdup("");
@@ -525,7 +528,11 @@ int OGRLayer::GetArrowSchema(struct ArrowArrayStream *,
                 const char *pszPrefix = "tsm:";
                 const char *pszTZOverride =
                     m_aosArrowArrayStreamOptions.FetchNameValue("TIMEZONE");
-                if (pszTZOverride && EQUAL(pszTZOverride, "unknown"))
+                if (bDateTimeAsString)
+                {
+                    psChild->format = "u";
+                }
+                else if (pszTZOverride && EQUAL(pszTZOverride, "unknown"))
                 {
                     psChild->format = CPLStrdup(pszPrefix);
                 }
@@ -573,6 +580,13 @@ int OGRLayer::GetArrowSchema(struct ArrowArrayStream *,
         }
 
         std::vector<std::pair<std::string, std::string>> oMetadata;
+
+        if (eType == OFTDateTime && bDateTimeAsString)
+        {
+            oMetadata.emplace_back(
+                std::pair(MD_GDAL_OGR_TYPE, OGR_GetFieldTypeName(eType)));
+        }
+
         const char *pszAlternativeName = poFieldDefn->GetAlternativeNameRef();
         if (pszAlternativeName && pszAlternativeName[0])
             oMetadata.emplace_back(
@@ -1724,7 +1738,7 @@ static bool FillTimeArray(struct ArrowArray *psChild,
             panValues[iFeat] =
                 psRawField->Date.Hour * 3600000 +
                 psRawField->Date.Minute * 60000 +
-                static_cast<int>(psRawField->Date.Second * 1000 + 0.5);
+                static_cast<int>(psRawField->Date.Second * 1000 + 0.5f);
         }
         else if (bIsNullable)
         {
@@ -1781,18 +1795,10 @@ FillDateTimeArray(struct ArrowArray *psChild,
             brokenDown.tm_sec = static_cast<int>(psRawField->Date.Second);
             auto nVal =
                 CPLYMDHMSToUnixTime(&brokenDown) * 1000 +
-                (static_cast<int>(psRawField->Date.Second * 1000 + 0.5) % 1000);
-            if (nFieldTZFlag > OGR_TZFLAG_MIXED_TZ &&
+                (static_cast<int>(psRawField->Date.Second * 1000 + 0.5f) %
+                 1000);
+            if (nFieldTZFlag >= OGR_TZFLAG_MIXED_TZ &&
                 psRawField->Date.TZFlag > OGR_TZFLAG_MIXED_TZ)
-            {
-                // Convert for psRawField->Date.TZFlag to nFieldTZFlag
-                const int TZOffset =
-                    (psRawField->Date.TZFlag - nFieldTZFlag) * 15;
-                const int TZOffsetMS = TZOffset * 60 * 1000;
-                nVal -= TZOffsetMS;
-            }
-            else if (nFieldTZFlag == OGR_TZFLAG_MIXED_TZ &&
-                     psRawField->Date.TZFlag > OGR_TZFLAG_MIXED_TZ)
             {
                 // Convert for psRawField->Date.TZFlag to UTC
                 const int TZOffset =
@@ -1824,6 +1830,99 @@ FillDateTimeArray(struct ArrowArray *psChild,
 }
 
 /************************************************************************/
+/*                   FillDateTimeArrayAsString()                        */
+/************************************************************************/
+
+static size_t
+FillDateTimeArrayAsString(struct ArrowArray *psChild,
+                          std::deque<std::unique_ptr<OGRFeature>> &apoFeatures,
+                          const size_t nFeatureCountLimit,
+                          const bool bIsNullable, const int i,
+                          const size_t nMemLimit)
+{
+    psChild->n_buffers = 3;
+    psChild->buffers = static_cast<const void **>(CPLCalloc(3, sizeof(void *)));
+    uint8_t *pabyValidity = nullptr;
+    using T = uint32_t;
+    T *panOffsets = static_cast<T *>(
+        VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(T) * (1 + nFeatureCountLimit)));
+    if (panOffsets == nullptr)
+        return 0;
+    psChild->buffers[1] = panOffsets;
+
+    size_t nOffset = 0;
+    size_t nFeatCount = 0;
+    for (size_t iFeat = 0; iFeat < nFeatureCountLimit; ++iFeat, ++nFeatCount)
+    {
+        panOffsets[iFeat] = static_cast<T>(nOffset);
+        const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
+        if (IsValidField(psRawField))
+        {
+            size_t nLen = strlen("YYYY-MM-DDTHH:MM:SS");
+            if (fmodf(psRawField->Date.Second, 1.0f) != 0)
+                nLen += strlen(".sss");
+            if (psRawField->Date.TZFlag == OGR_TZFLAG_UTC)
+                nLen += 1;  // 'Z'
+            else if (psRawField->Date.TZFlag > OGR_TZFLAG_MIXED_TZ)
+                nLen += strlen("+hh:mm");
+            if (nLen > nMemLimit - nOffset)
+            {
+                if (nFeatCount == 0)
+                    return 0;
+                break;
+            }
+            nOffset += static_cast<T>(nLen);
+        }
+        else if (bIsNullable)
+        {
+            ++psChild->null_count;
+            if (pabyValidity == nullptr)
+            {
+                pabyValidity = AllocValidityBitmap(nFeatureCountLimit);
+                psChild->buffers[0] = pabyValidity;
+                if (pabyValidity == nullptr)
+                    return 0;
+            }
+            UnsetBit(pabyValidity, iFeat);
+        }
+    }
+    panOffsets[nFeatCount] = static_cast<T>(nOffset);
+
+    char *pachValues =
+        static_cast<char *>(VSI_MALLOC_ALIGNED_AUTO_VERBOSE(nOffset + 1));
+    if (pachValues == nullptr)
+        return 0;
+    psChild->buffers[2] = pachValues;
+
+    nOffset = 0;
+    char szBuffer[OGR_SIZEOF_ISO8601_DATETIME_BUFFER];
+    OGRISO8601Format sFormat;
+    sFormat.ePrecision = OGRISO8601Precision::AUTO;
+    for (size_t iFeat = 0; iFeat < nFeatCount; ++iFeat)
+    {
+        const int nLen =
+            static_cast<int>(panOffsets[iFeat + 1] - panOffsets[iFeat]);
+        if (nLen)
+        {
+            const auto psRawField = apoFeatures[iFeat]->GetRawFieldRef(i);
+            int nBufSize = OGRGetISO8601DateTime(psRawField, sFormat, szBuffer);
+            if (nBufSize)
+            {
+                memcpy(pachValues + nOffset, szBuffer,
+                       std::min(nLen, nBufSize));
+            }
+            if (nBufSize < nLen)
+            {
+                memset(pachValues + nOffset + nBufSize, 0, nLen - nBufSize);
+            }
+            nOffset += nLen;
+        }
+    }
+
+    return nFeatCount;
+}
+
+/************************************************************************/
 /*                          GetNextArrowArray()                         */
 /************************************************************************/
 
@@ -1843,6 +1942,8 @@ int OGRLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
     const bool bIncludeFID = CPLTestBool(
         m_aosArrowArrayStreamOptions.FetchNameValueDef("INCLUDE_FID", "YES"));
+    const bool bDateTimeAsString = m_aosArrowArrayStreamOptions.FetchBool(
+        GAS_OPT_DATETIME_AS_STRING, false);
     int nMaxBatchSize = atoi(m_aosArrowArrayStreamOptions.FetchNameValueDef(
         "MAX_FEATURES_IN_BATCH", "65536"));
     if (nMaxBatchSize <= 0)
@@ -2190,10 +2291,25 @@ int OGRLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
             case OFTDateTime:
             {
-                if (!FillDateTimeArray(psChild, oFeatureQueue, nFeatureCount,
-                                       bIsNullable, i,
-                                       poFieldDefn->GetTZFlag()))
-                    goto error;
+                if (bDateTimeAsString)
+                {
+                    const size_t nThisFeatureCount = FillDateTimeArrayAsString(
+                        psChild, oFeatureQueue, nFeatureCount, bIsNullable, i,
+                        nMemLimit);
+                    if (nThisFeatureCount == 0)
+                    {
+                        goto error_max_mem;
+                    }
+                    if (nThisFeatureCount < nFeatureCount)
+                        nFeatureCount = nThisFeatureCount;
+                }
+                else
+                {
+                    if (!FillDateTimeArray(psChild, oFeatureQueue,
+                                           nFeatureCount, bIsNullable, i,
+                                           poFieldDefn->GetTZFlag()))
+                        goto error;
+                }
                 break;
             }
         }
@@ -2365,6 +2481,9 @@ const char *OGRLayer::GetLastErrorArrowArrayStream(struct ArrowArrayStream *)
  * Starting with GDAL 3.8, the ArrowSchema::metadata field filled by the
  * get_schema() callback may be set with the potential following items:
  * <ul>
+ * <li>"GDAL:OGR:type": value of OGRFieldDefn::GetType(): (added in 3.11)
+ *      Only used for DateTime fields when the DATETIME_AS_STRING=YES option is
+ *      specified.</li>
  * <li>"GDAL:OGR:alternative_name": value of
  *     OGRFieldDefn::GetAlternativeNameRef()</li>
  * <li>"GDAL:OGR:comment": value of OGRFieldDefn::GetComment()</li>
@@ -2430,6 +2549,15 @@ From OGR using the Arrow C Stream data interface</a> tutorial.
  *     to UTC of a OGRField::Date is only done if both the timezone indicated by
  *     OGRField::Date::TZFlag and the one at the OGRFieldDefn level (or set by
  *     this TIMEZONE option) are not unknown.</li>
+ * <li>DATETIME_AS_STRING=YES/NO. Defaults to NO. Added in GDAL 3.11.
+ *     Whether DateTime fields should be returned as a (normally ISO-8601
+ *     formatted) string by drivers. The aim is to be able to handle mixed
+ *     timezones (or timezone naive values) in the same column.
+ *     All drivers must honour that option, and potentially fallback to the
+ *     OGRLayer generic implementation if they cannot (which is the case for the
+ *     Arrow, Parquet and ADBC drivers).
+ *     When DATETIME_AS_STRING=YES, the TIMEZONE option is ignored.
+ * </li>
  * <li>GEOMETRY_METADATA_ENCODING=OGC/GEOARROW (GDAL >= 3.8).
  *     The default is OGC, which will lead to setting
  *     the Arrow geometry column metadata to ARROW:extension:name=ogc.wkb.
@@ -2558,6 +2686,9 @@ bool OGRLayer::GetArrowStream(struct ArrowArrayStream *out_stream,
  * Starting with GDAL 3.8, the ArrowSchema::metadata field filled by the
  * get_schema() callback may be set with the potential following items:
  * <ul>
+ * <li>"GDAL:OGR:type": value of OGRFieldDefn::GetType(): (added in 3.11)
+ *      Only used for DateTime fields when the DATETIME_AS_STRING=YES option is
+ *      specified.</li>
  * <li>"GDAL:OGR:alternative_name": value of
  *     OGRFieldDefn::GetAlternativeNameRef()</li>
  * <li>"GDAL:OGR:comment": value of OGRFieldDefn::GetComment()</li>
@@ -2624,6 +2755,15 @@ YES.</li>
  *     to UTC of a OGRField::Date is only done if both the timezone indicated by
  *     OGRField::Date::TZFlag and the one at the OGRFieldDefn level (or set by
  *     this TIMEZONE option) are not unknown.</li>
+ * <li>DATETIME_AS_STRING=YES/NO. Defaults to NO. Added in GDAL 3.11.
+ *     Whether DateTime fields should be returned as a (normally ISO-8601
+ *     formatted) string by drivers. The aim is to be able to handle mixed
+ *     timezones (or timezone naive values) in the same column.
+ *     All drivers must honour that option, and potentially fallback to the
+ *     OGRLayer generic implementation if they cannot (which is the case for the
+ *     Arrow, Parquet and ADBC drivers).
+ *     When DATETIME_AS_STRING=YES, the TIMEZONE option is ignored.
+ * </li>
  * <li>GEOMETRY_METADATA_ENCODING=OGC/GEOARROW (GDAL >= 3.8).
  *     The default is OGC, which will lead to setting
  *     the Arrow geometry column metadata to ARROW:extension:name=ogc.wkb.
@@ -3743,7 +3883,7 @@ inline static void FillFieldListFromHalfFloat(
         const auto nFloat16AsUInt32 = CPLHalfToFloat(paValues[i]);
         float f;
         memcpy(&f, &nFloat16AsUInt32, sizeof(f));
-        aValues.push_back(f);
+        aValues.push_back(static_cast<double>(f));
     }
     oFeature.SetField(iOGRFieldIdx, static_cast<int>(aValues.size()),
                       aValues.data());
@@ -3966,9 +4106,9 @@ static void AddToArray(CPLJSONArray &oArray, const struct ArrowSchema *schema,
     else if (IsInt64(schema->format))
         oArray.Add(static_cast<GIntBig>(GetValue<int64_t>(array, nIdx)));
     else if (IsFloat16(schema->format))
-        oArray.Add(GetValueFloat16(array, nIdx));
+        oArray.Add(static_cast<double>(GetValueFloat16(array, nIdx)));
     else if (IsFloat32(schema->format))
-        oArray.Add(GetValue<float>(array, nIdx));
+        oArray.Add(static_cast<double>(GetValue<float>(array, nIdx)));
     else if (IsFloat64(schema->format))
         oArray.Add(GetValue<double>(array, nIdx));
     else if (IsString(schema->format))
@@ -4090,9 +4230,9 @@ static void AddToDict(CPLJSONObject &oDict, const std::string &osKey,
     else if (IsInt64(schema->format))
         oDict.Add(osKey, static_cast<GIntBig>(GetValue<int64_t>(array, nIdx)));
     else if (IsFloat16(schema->format))
-        oDict.Add(osKey, GetValueFloat16(array, nIdx));
+        oDict.Add(osKey, static_cast<double>(GetValueFloat16(array, nIdx)));
     else if (IsFloat32(schema->format))
-        oDict.Add(osKey, GetValue<float>(array, nIdx));
+        oDict.Add(osKey, static_cast<double>(GetValue<float>(array, nIdx)));
     else if (IsFloat64(schema->format))
         oDict.Add(osKey, GetValue<double>(array, nIdx));
     else if (IsString(schema->format))
@@ -4261,8 +4401,8 @@ static bool SetFieldForOtherFormats(OGRFeature &oFeature,
     {
         oFeature.SetField(
             iOGRFieldIndex,
-            GetValueFloat16(array, nOffsettedIndex -
-                                       static_cast<size_t>(array->offset)));
+            static_cast<double>(GetValueFloat16(
+                array, nOffsettedIndex - static_cast<size_t>(array->offset))));
     }
 
     else if (IsFixedWidthBinary(format))
@@ -4330,9 +4470,31 @@ static bool SetFieldForOtherFormats(OGRFeature &oFeature,
              (format[2] == 'u' ||  // time64 [microseconds]
               format[2] == 'n'))   // time64 [nanoseconds]
     {
-        oFeature.SetField(iOGRFieldIndex,
-                          static_cast<GIntBig>(static_cast<const int64_t *>(
-                              array->buffers[1])[nOffsettedIndex]));
+        int64_t value =
+            static_cast<const int64_t *>(array->buffers[1])[nOffsettedIndex];
+        if (oFeature.GetFieldDefnRef(iOGRFieldIndex)->GetType() == OFTInteger64)
+        {
+            oFeature.SetField(iOGRFieldIndex, static_cast<GIntBig>(value));
+        }
+        else
+        {
+            double floatingPart;
+            if (format[2] == 'u')
+            {
+                floatingPart = (value % (1000 * 1000)) / 1e6;
+                value /= 1000 * 1000;
+            }
+            else
+            {
+                floatingPart = (value % (1000 * 1000 * 1000)) / 1e9;
+                value /= 1000 * 1000 * 1000;
+            }
+            const int nHour = static_cast<int>(value / 3600);
+            const int nMinute = static_cast<int>((value / 60) % 60);
+            const int nSecond = static_cast<int>(value % 60);
+            oFeature.SetField(iOGRFieldIndex, 0, 0, 0, nHour, nMinute,
+                              static_cast<float>(nSecond + floatingPart));
+        }
     }
     else if (IsTimestampSeconds(format))
     {
@@ -4435,8 +4597,8 @@ static bool SetFieldForOtherFormats(OGRFeature &oFeature,
             std::vector<double> aValues;
             for (int i = 0; i < nItems; ++i)
             {
-                aValues.push_back(
-                    GetValueFloat16(childArray, nOffsettedIndex * nItems + i));
+                aValues.push_back(static_cast<double>(
+                    GetValueFloat16(childArray, nOffsettedIndex * nItems + i)));
             }
             oFeature.SetField(iOGRFieldIndex, static_cast<int>(aValues.size()),
                               aValues.data());
@@ -4721,7 +4883,7 @@ static size_t FillValidityArrayFromAttrQuery(
                 UsedFieldsInfo info;
                 info.iOGRFieldIndex = iOGRFieldIndex;
                 info.anArrowPath = oIter->second;
-                aoUsedFieldsInfo.push_back(info);
+                aoUsedFieldsInfo.push_back(std::move(info));
             }
             else
             {
@@ -4967,9 +5129,10 @@ static size_t FillValidityArrayFromAttrQuery(
             }
             else if (IsFloat32(format))
             {
-                oFeature.SetField(iOGRFieldIndex,
-                                  static_cast<const float *>(
-                                      psArray->buffers[1])[nOffsettedIndex]);
+                oFeature.SetField(
+                    iOGRFieldIndex,
+                    static_cast<double>(static_cast<const float *>(
+                        psArray->buffers[1])[nOffsettedIndex]));
             }
             else if (IsFloat64(format))
             {
@@ -5465,6 +5628,103 @@ bool OGRCloneArrowArray(const struct ArrowSchema *schema,
 }
 
 /************************************************************************/
+/*                     OGRCloneArrowMetadata()                          */
+/************************************************************************/
+
+static void *OGRCloneArrowMetadata(const void *pMetadata)
+{
+    if (!pMetadata)
+        return nullptr;
+    std::vector<GByte> abyOut;
+    const GByte *pabyMetadata = static_cast<const GByte *>(pMetadata);
+    int32_t nKVP;
+    abyOut.insert(abyOut.end(), pabyMetadata, pabyMetadata + sizeof(int32_t));
+    memcpy(&nKVP, pabyMetadata, sizeof(int32_t));
+    pabyMetadata += sizeof(int32_t);
+    for (int i = 0; i < nKVP; ++i)
+    {
+        int32_t nSizeKey;
+        abyOut.insert(abyOut.end(), pabyMetadata,
+                      pabyMetadata + sizeof(int32_t));
+        memcpy(&nSizeKey, pabyMetadata, sizeof(int32_t));
+        pabyMetadata += sizeof(int32_t);
+        abyOut.insert(abyOut.end(), pabyMetadata, pabyMetadata + nSizeKey);
+        pabyMetadata += nSizeKey;
+
+        int32_t nSizeValue;
+        abyOut.insert(abyOut.end(), pabyMetadata,
+                      pabyMetadata + sizeof(int32_t));
+        memcpy(&nSizeValue, pabyMetadata, sizeof(int32_t));
+        pabyMetadata += sizeof(int32_t);
+        abyOut.insert(abyOut.end(), pabyMetadata, pabyMetadata + nSizeValue);
+        pabyMetadata += nSizeValue;
+    }
+
+    GByte *pabyOut = static_cast<GByte *>(VSI_MALLOC_VERBOSE(abyOut.size()));
+    if (pabyOut)
+        memcpy(pabyOut, abyOut.data(), abyOut.size());
+    return pabyOut;
+}
+
+/************************************************************************/
+/*                          OGRCloneArrowSchema()                       */
+/************************************************************************/
+
+/** Full/deep copy of a schema.
+ *
+ * In case of failure, out_schema will be let in a released state.
+ *
+ * @param schema Schema to clone. Must *NOT* be NULL.
+ * @param out_schema Output schema.  Must *NOT* be NULL (but its content may be random)
+ * @return true if success.
+ */
+bool OGRCloneArrowSchema(const struct ArrowSchema *schema,
+                         struct ArrowSchema *out_schema)
+{
+    memset(out_schema, 0, sizeof(*out_schema));
+    out_schema->release = OGRLayerFullReleaseSchema;
+    out_schema->format = CPLStrdup(schema->format);
+    out_schema->name = CPLStrdup(schema->name);
+    out_schema->metadata = static_cast<const char *>(
+        const_cast<const void *>(OGRCloneArrowMetadata(schema->metadata)));
+    out_schema->flags = schema->flags;
+    if (schema->n_children)
+    {
+        out_schema->children =
+            static_cast<struct ArrowSchema **>(VSI_CALLOC_VERBOSE(
+                static_cast<int>(schema->n_children), sizeof(ArrowSchema *)));
+        if (!out_schema->children)
+        {
+            out_schema->release(out_schema);
+            return false;
+        }
+        out_schema->n_children = schema->n_children;
+        for (int i = 0; i < static_cast<int>(schema->n_children); ++i)
+        {
+            out_schema->children[i] = static_cast<struct ArrowSchema *>(
+                CPLMalloc(sizeof(ArrowSchema)));
+            if (!OGRCloneArrowSchema(schema->children[i],
+                                     out_schema->children[i]))
+            {
+                out_schema->release(out_schema);
+                return false;
+            }
+        }
+    }
+    if (schema->dictionary)
+    {
+        out_schema->dictionary =
+            static_cast<struct ArrowSchema *>(CPLMalloc(sizeof(ArrowSchema)));
+        if (!OGRCloneArrowSchema(schema->dictionary, out_schema->dictionary))
+        {
+            out_schema->release(out_schema);
+            return false;
+        }
+    }
+    return true;
+}
+
+/************************************************************************/
 /*                  OGRLayer::IsArrowSchemaSupported()                  */
 /************************************************************************/
 
@@ -5924,7 +6184,23 @@ bool OGRLayer::CreateFieldFromArrowSchemaInternal(
             const auto oMetadata = OGRParseArrowMetadata(schema->metadata);
             for (const auto &oIter : oMetadata)
             {
-                if (oIter.first == MD_GDAL_OGR_ALTERNATIVE_NAME)
+                if (oIter.first == MD_GDAL_OGR_TYPE)
+                {
+                    const auto &osType = oIter.second;
+                    for (auto eType = OFTInteger; eType <= OFTMaxType;)
+                    {
+                        if (OGRFieldDefn::GetFieldTypeName(eType) == osType)
+                        {
+                            oFieldDefn.SetType(eType);
+                            break;
+                        }
+                        if (eType == OFTMaxType)
+                            break;
+                        else
+                            eType = static_cast<OGRFieldType>(eType + 1);
+                    }
+                }
+                else if (oIter.first == MD_GDAL_OGR_ALTERNATIVE_NAME)
                     oFieldDefn.SetAlternativeName(oIter.second.c_str());
                 else if (oIter.first == MD_GDAL_OGR_COMMENT)
                     oFieldDefn.SetComment(oIter.second);
@@ -5962,9 +6238,16 @@ bool OGRLayer::CreateFieldFromArrowSchemaInternal(
                         oFieldDefn.SetDomainName(oIter.second);
                 }
                 else if (oIter.first == ARROW_EXTENSION_NAME_KEY &&
-                         oIter.second == EXTENSION_NAME_ARROW_JSON)
+                         (oIter.second == EXTENSION_NAME_ARROW_JSON ||
+                          // Used by BigQuery through ADBC driver
+                          oIter.second == "google:sqlType:json"))
                 {
                     oFieldDefn.SetSubType(OFSTJSON);
+                }
+                else if (oIter.first == ARROW_EXTENSION_NAME_KEY)
+                {
+                    CPLDebug("OGR", "Unknown Arrow extension: %s",
+                             oIter.second.c_str());
                 }
                 else
                 {
@@ -6375,6 +6658,13 @@ static bool BuildOGRFieldInfo(
                              sType.eType == OFTInteger)
                     {
                         // Non-lossy
+                        bFallbackTypesUsed = true;
+                        bTypeOK = true;
+                        break;
+                    }
+                    else if (eOGRType == OFTDateTime &&
+                             sType.eType == OFTString)
+                    {
                         bFallbackTypesUsed = true;
                         bTypeOK = true;
                         break;
@@ -7089,7 +7379,7 @@ static bool FillFeature(OGRLayer *poLayer, const struct ArrowSchema *schema,
     }
     else if (IsFloat32(format))
     {
-        FillField<float>(array, iOGRFieldIdx, iFeature, oFeature);
+        FillField<float, double>(array, iOGRFieldIdx, iFeature, oFeature);
         return true;
     }
     else if (IsFloat64(format))

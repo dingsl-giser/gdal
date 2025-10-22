@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, TileDB, Inc
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef TILEDBMULTIDIM_H_INCLUDED
@@ -93,7 +77,7 @@ class TileDBSharedResource
 /*                      TileDBAttributeHolder                           */
 /************************************************************************/
 
-class TileDBAttributeHolder
+class TileDBAttributeHolder /* non final */
 {
   private:
     mutable std::map<std::string, std::shared_ptr<GDALAttribute>>
@@ -125,7 +109,7 @@ class TileDBAttributeHolder
                     uint32_t value_num, const void *value);
 
   public:
-    virtual ~TileDBAttributeHolder() = 0;
+    virtual ~TileDBAttributeHolder();
 
     virtual bool IIsWritable() const = 0;
     virtual const std::string &IGetFullName() const = 0;
@@ -526,8 +510,8 @@ class TileDBArray final : public GDALMDArray, public TileDBAttributeHolder
 // in TileDB terminology maps to a TileDB metadata item.
 class TileDBAttribute final : public GDALAttribute
 {
-    std::shared_ptr<GDALAttribute> m_poMemAttribute;
-    std::weak_ptr<TileDBAttributeHolder> m_poParent;
+    std::shared_ptr<GDALAttribute> m_poMemAttribute{};
+    std::weak_ptr<TileDBAttributeHolder> m_poParent{};
 
     TileDBAttribute(const std::string &osParentName, const std::string &osName);
 
@@ -578,10 +562,7 @@ class TileDBDimension final : public GDALDimension
     {
     }
 
-    std::shared_ptr<GDALMDArray> GetIndexingVariable() const override
-    {
-        return m_poIndexingVariable;
-    }
+    std::shared_ptr<GDALMDArray> GetIndexingVariable() const override;
 
     void SetIndexingVariableOneTime(
         const std::shared_ptr<GDALMDArray> &poIndexingVariable)
@@ -633,10 +614,7 @@ class TileDBMultiDimDataset final : public GDALDataset
     {
     }
 
-    std::shared_ptr<GDALGroup> GetRootGroup() const override
-    {
-        return m_poRG;
-    }
+    std::shared_ptr<GDALGroup> GetRootGroup() const override;
 };
 
 #endif  // TILEDBMULTIDIM_H_INCLUDED

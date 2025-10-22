@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test SAP HANA driver functionality.
@@ -10,24 +9,9 @@
 ###############################################################################
 # Copyright (c) 2020, SAP SE
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
+from datetime import datetime, timedelta
 from os import environ
 
 import gdaltest
@@ -65,8 +49,11 @@ def setup_driver():
         conn,
         "SELECT REPLACE(CURRENT_UTCDATE, '-', '') || '_' || BINTOHEX(SYSUUID) FROM DUMMY;",
     )
-    gdaltest.hana_schema_name = "{}_{}".format("gdal_test", uid)
+    schema_prefix = "gdal_test"
 
+    drop_old_test_schemas(conn, schema_prefix)
+
+    gdaltest.hana_schema_name = f"{schema_prefix}_{uid}"
     execute_sql(conn, f'CREATE SCHEMA "{gdaltest.hana_schema_name}"')
 
     ds = open_datasource(1)
@@ -1390,6 +1377,24 @@ def execute_sql_scalar(conn, sql):
     cursor.close()
     conn.commit()
     return res
+
+
+def drop_old_test_schemas(conn, schema_prefix):
+    try:
+        assert conn
+        cursor = conn.cursor()
+        assert cursor
+        sql = f"""SELECT SCHEMA_NAME FROM SYS.SCHEMAS WHERE SCHEMA_NAME
+                  LIKE '{schema_prefix.replace('_', '__')}__%' ESCAPE '_' AND
+                  LOCALTOUTC(CREATE_TIME) < ?"""
+        cursor.execute(sql, datetime.now() - timedelta(days=1))
+        rows = cursor.fetchall()
+        cursor.close()
+        for row in rows:
+            execute_sql(conn, f'DROP SCHEMA "{row["SCHEMA_NAME"]}" CASCADE')
+    except Exception as ex:
+        print(f"Unable to drop old test schemas. Error: {ex}")
+        pass
 
 
 def open_datasource(update=0, open_opts=None):

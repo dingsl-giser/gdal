@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Geolocation warper.
@@ -10,27 +9,12 @@
 ###############################################################################
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
 import random
+import struct
 
 import gdaltest
 import pytest
@@ -41,6 +25,10 @@ from osgeo import gdal, osr
 # Verify warped result.
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_geoloc_1():
 
     tst = gdaltest.GDALTest("VRT", "warpsst.vrt", 1, 63034)
@@ -129,12 +117,13 @@ def test_geoloc_fill_line(use_temp_datasets):
     ds.SetMetadata(md, "GEOLOCATION")
     ds.GetRasterBand(1).Fill(1)
     with gdaltest.config_option("GDAL_GEOLOC_USE_TEMP_DATASETS", use_temp_datasets):
-        warped_ds = gdal.Warp("", ds, format="MEM")
+        warped_ds = gdal.Warp(
+            "",
+            ds,
+            format="MEM",
+        )
         assert warped_ds
-        assert warped_ds.GetRasterBand(1).Checksum() in (
-            22339,
-            22336,
-        )  # 22336 with Intel(R) oneAPI DPC++/C++ Compiler 2022.1.0
+        assert warped_ds.GetRasterBand(1).Checksum() == 20177
 
 
 ###############################################################################
@@ -615,3 +604,26 @@ def test_geoloc_warnings_inconsistent_size(
         else:
             assert gdal.GetLastErrorMsg() == ""
         assert tr
+
+
+###############################################################################
+# Test effect of normalizing longitude from geolocation arrays
+
+
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
+def test_geoloc_normalize_longitude():
+    vrt = "../gcore/data/geolocation_arrays_lon180_lon360.vrt"
+    warped_ds = gdal.Warp(
+        "",
+        vrt,
+        format="MEM",
+        outputBounds=(-180, -90, 180, 90),
+        width=6,
+        height=3,
+        dstSRS="EPSG:4326",
+        transformerOptions=["GEOLOC_NORMALIZE_LONGITUDE_MINUS_180_PLUS_180=YES"],
+    )
+    assert struct.unpack("f", warped_ds.ReadRaster(2, 0, 1, 1)) == (12.0,)

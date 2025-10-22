@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef DOXYGEN_SKIP
@@ -41,12 +25,16 @@ OGRWarpedLayer::OGRWarpedLayer(OGRLayer *poDecoratedLayer, int iGeomField,
                                OGRCoordinateTransformation *poCT,
                                OGRCoordinateTransformation *poReversedCT)
     : OGRLayerDecorator(poDecoratedLayer, bTakeOwnership),
-      m_poFeatureDefn(nullptr), m_iGeomField(iGeomField), m_poCT(poCT),
-      m_poReversedCT(poReversedCT),
+      m_poFeatureDefn(poDecoratedLayer->GetLayerDefn()->Clone()),
+      m_iGeomField(iGeomField), m_poCT(poCT), m_poReversedCT(poReversedCT),
       m_poSRS(const_cast<OGRSpatialReference *>(m_poCT->GetTargetCS()))
 {
     CPLAssert(poCT != nullptr);
     SetDescription(poDecoratedLayer->GetDescription());
+
+    m_poFeatureDefn->Reference();
+    if (m_poFeatureDefn->GetGeomFieldCount() > 0)
+        m_poFeatureDefn->GetGeomFieldDefn(m_iGeomField)->SetSpatialRef(m_poSRS);
 
     if (m_poSRS != nullptr)
     {
@@ -69,36 +57,12 @@ OGRWarpedLayer::~OGRWarpedLayer()
 }
 
 /************************************************************************/
-/*                         SetSpatialFilter()                           */
+/*                         ISetSpatialFilter()                          */
 /************************************************************************/
 
-void OGRWarpedLayer::SetSpatialFilter(OGRGeometry *poGeom)
+OGRErr OGRWarpedLayer::ISetSpatialFilter(int iGeomField,
+                                         const OGRGeometry *poGeom)
 {
-    SetSpatialFilter(0, poGeom);
-}
-
-/************************************************************************/
-/*                          SetSpatialFilterRect()                      */
-/************************************************************************/
-
-void OGRWarpedLayer::SetSpatialFilterRect(double dfMinX, double dfMinY,
-                                          double dfMaxX, double dfMaxY)
-{
-    OGRLayer::SetSpatialFilterRect(dfMinX, dfMinY, dfMaxX, dfMaxY);
-}
-
-/************************************************************************/
-/*                         SetSpatialFilter()                           */
-/************************************************************************/
-
-void OGRWarpedLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeom)
-{
-    if (iGeomField < 0 || iGeomField >= GetLayerDefn()->GetGeomFieldCount())
-    {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Invalid geometry field index : %d", iGeomField);
-        return;
-    }
 
     m_iGeomFieldFilter = iGeomField;
     if (InstallFilter(poGeom))
@@ -108,7 +72,8 @@ void OGRWarpedLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeom)
     {
         if (poGeom == nullptr || m_poReversedCT == nullptr)
         {
-            m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter, nullptr);
+            return m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter,
+                                                        nullptr);
         }
         else
         {
@@ -117,55 +82,55 @@ void OGRWarpedLayer::SetSpatialFilter(int iGeomField, OGRGeometry *poGeom)
             if (std::isinf(sEnvelope.MinX) && std::isinf(sEnvelope.MinY) &&
                 std::isinf(sEnvelope.MaxX) && std::isinf(sEnvelope.MaxY))
             {
-                m_poDecoratedLayer->SetSpatialFilterRect(
+                return m_poDecoratedLayer->SetSpatialFilterRect(
                     m_iGeomFieldFilter, sEnvelope.MinX, sEnvelope.MinY,
                     sEnvelope.MaxX, sEnvelope.MaxY);
             }
             else if (ReprojectEnvelope(&sEnvelope, m_poReversedCT))
             {
-                m_poDecoratedLayer->SetSpatialFilterRect(
+                return m_poDecoratedLayer->SetSpatialFilterRect(
                     m_iGeomFieldFilter, sEnvelope.MinX, sEnvelope.MinY,
                     sEnvelope.MaxX, sEnvelope.MaxY);
             }
             else
             {
-                m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter,
-                                                     nullptr);
+                return m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter,
+                                                            nullptr);
             }
         }
     }
     else
     {
-        m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter, poGeom);
+        return m_poDecoratedLayer->SetSpatialFilter(m_iGeomFieldFilter, poGeom);
     }
 }
 
 /************************************************************************/
-/*                        SetSpatialFilterRect()                        */
+/*                         TranslateFeature()                           */
 /************************************************************************/
 
-void OGRWarpedLayer::SetSpatialFilterRect(int iGeomField, double dfMinX,
-                                          double dfMinY, double dfMaxX,
-                                          double dfMaxY)
+void OGRWarpedLayer::TranslateFeature(
+    std::unique_ptr<OGRFeature> poSrcFeature,
+    std::vector<std::unique_ptr<OGRFeature>> &apoOutFeatures)
 {
-    OGRLayer::SetSpatialFilterRect(iGeomField, dfMinX, dfMinY, dfMaxX, dfMaxY);
+    apoOutFeatures.push_back(
+        SrcFeatureToWarpedFeature(std::move(poSrcFeature)));
 }
 
 /************************************************************************/
 /*                     SrcFeatureToWarpedFeature()                      */
 /************************************************************************/
 
-OGRFeature *OGRWarpedLayer::SrcFeatureToWarpedFeature(OGRFeature *poSrcFeature)
+std::unique_ptr<OGRFeature>
+OGRWarpedLayer::SrcFeatureToWarpedFeature(std::unique_ptr<OGRFeature> poFeature)
 {
-    OGRFeature *poFeature = new OGRFeature(GetLayerDefn());
-    poFeature->SetFrom(poSrcFeature);
-    poFeature->SetFID(poSrcFeature->GetFID());
+    // This is safe to do here as they have matching attribute and geometry
+    // fields
+    OGRLayer *poThisLayer = this;
+    poFeature->SetFDefnUnsafe(poThisLayer->GetLayerDefn());
 
     OGRGeometry *poGeom = poFeature->GetGeomFieldRef(m_iGeomField);
-    if (poGeom == nullptr)
-        return poFeature;
-
-    if (poGeom->transform(m_poCT) != OGRERR_NONE)
+    if (poGeom && poGeom->transform(m_poCT) != OGRERR_NONE)
     {
         delete poFeature->StealGeometry(m_iGeomField);
     }
@@ -177,30 +142,21 @@ OGRFeature *OGRWarpedLayer::SrcFeatureToWarpedFeature(OGRFeature *poSrcFeature)
 /*                     WarpedFeatureToSrcFeature()                      */
 /************************************************************************/
 
-OGRFeature *OGRWarpedLayer::WarpedFeatureToSrcFeature(OGRFeature *poFeature)
+std::unique_ptr<OGRFeature>
+OGRWarpedLayer::WarpedFeatureToSrcFeature(std::unique_ptr<OGRFeature> poFeature)
 {
-    OGRFeature *poSrcFeature =
-        new OGRFeature(m_poDecoratedLayer->GetLayerDefn());
-    poSrcFeature->SetFrom(poFeature);
-    poSrcFeature->SetFID(poFeature->GetFID());
+    // This is safe to do here as they have matching attribute and geometry
+    // fields
+    poFeature->SetFDefnUnsafe(m_poDecoratedLayer->GetLayerDefn());
 
-    OGRGeometry *poGeom = poSrcFeature->GetGeomFieldRef(m_iGeomField);
-    if (poGeom != nullptr)
+    OGRGeometry *poGeom = poFeature->GetGeomFieldRef(m_iGeomField);
+    if (poGeom &&
+        (!m_poReversedCT || poGeom->transform(m_poReversedCT) != OGRERR_NONE))
     {
-        if (m_poReversedCT == nullptr)
-        {
-            delete poSrcFeature;
-            return nullptr;
-        }
-
-        if (poGeom->transform(m_poReversedCT) != OGRERR_NONE)
-        {
-            delete poSrcFeature;
-            return nullptr;
-        }
+        return nullptr;
     }
 
-    return poSrcFeature;
+    return poFeature;
 }
 
 /************************************************************************/
@@ -211,21 +167,19 @@ OGRFeature *OGRWarpedLayer::GetNextFeature()
 {
     while (true)
     {
-        OGRFeature *poFeature = m_poDecoratedLayer->GetNextFeature();
-        if (poFeature == nullptr)
+        auto poFeature =
+            std::unique_ptr<OGRFeature>(m_poDecoratedLayer->GetNextFeature());
+        if (!poFeature)
             return nullptr;
 
-        OGRFeature *poFeatureNew = SrcFeatureToWarpedFeature(poFeature);
-        delete poFeature;
-
-        OGRGeometry *poGeom = poFeatureNew->GetGeomFieldRef(m_iGeomField);
+        auto poFeatureNew = SrcFeatureToWarpedFeature(std::move(poFeature));
+        const OGRGeometry *poGeom = poFeatureNew->GetGeomFieldRef(m_iGeomField);
         if (m_poFilterGeom != nullptr && !FilterGeometry(poGeom))
         {
-            delete poFeatureNew;
             continue;
         }
 
-        return poFeatureNew;
+        return poFeatureNew.release();
     }
 }
 
@@ -235,14 +189,13 @@ OGRFeature *OGRWarpedLayer::GetNextFeature()
 
 OGRFeature *OGRWarpedLayer::GetFeature(GIntBig nFID)
 {
-    OGRFeature *poFeature = m_poDecoratedLayer->GetFeature(nFID);
-    if (poFeature != nullptr)
+    auto poFeature =
+        std::unique_ptr<OGRFeature>(m_poDecoratedLayer->GetFeature(nFID));
+    if (poFeature)
     {
-        OGRFeature *poFeatureNew = SrcFeatureToWarpedFeature(poFeature);
-        delete poFeature;
-        poFeature = poFeatureNew;
+        poFeature = SrcFeatureToWarpedFeature(std::move(poFeature));
     }
-    return poFeature;
+    return poFeature.release();
 }
 
 /************************************************************************/
@@ -251,17 +204,12 @@ OGRFeature *OGRWarpedLayer::GetFeature(GIntBig nFID)
 
 OGRErr OGRWarpedLayer::ISetFeature(OGRFeature *poFeature)
 {
-    OGRErr eErr;
-
-    OGRFeature *poFeatureNew = WarpedFeatureToSrcFeature(poFeature);
-    if (poFeatureNew == nullptr)
+    auto poFeatureNew = WarpedFeatureToSrcFeature(
+        std::unique_ptr<OGRFeature>(poFeature->Clone()));
+    if (!poFeatureNew)
         return OGRERR_FAILURE;
 
-    eErr = m_poDecoratedLayer->SetFeature(poFeatureNew);
-
-    delete poFeatureNew;
-
-    return eErr;
+    return m_poDecoratedLayer->SetFeature(poFeatureNew.get());
 }
 
 /************************************************************************/
@@ -270,17 +218,12 @@ OGRErr OGRWarpedLayer::ISetFeature(OGRFeature *poFeature)
 
 OGRErr OGRWarpedLayer::ICreateFeature(OGRFeature *poFeature)
 {
-    OGRErr eErr;
-
-    OGRFeature *poFeatureNew = WarpedFeatureToSrcFeature(poFeature);
-    if (poFeatureNew == nullptr)
+    auto poFeatureNew = WarpedFeatureToSrcFeature(
+        std::unique_ptr<OGRFeature>(poFeature->Clone()));
+    if (!poFeatureNew)
         return OGRERR_FAILURE;
 
-    eErr = m_poDecoratedLayer->CreateFeature(poFeatureNew);
-
-    delete poFeatureNew;
-
-    return eErr;
+    return m_poDecoratedLayer->CreateFeature(poFeatureNew.get());
 }
 
 /************************************************************************/
@@ -289,17 +232,12 @@ OGRErr OGRWarpedLayer::ICreateFeature(OGRFeature *poFeature)
 
 OGRErr OGRWarpedLayer::IUpsertFeature(OGRFeature *poFeature)
 {
-    OGRErr eErr;
-
-    OGRFeature *poFeatureNew = WarpedFeatureToSrcFeature(poFeature);
+    auto poFeatureNew = WarpedFeatureToSrcFeature(
+        std::unique_ptr<OGRFeature>(poFeature->Clone()));
     if (poFeatureNew == nullptr)
         return OGRERR_FAILURE;
 
-    eErr = m_poDecoratedLayer->UpsertFeature(poFeatureNew);
-
-    delete poFeatureNew;
-
-    return eErr;
+    return m_poDecoratedLayer->UpsertFeature(poFeatureNew.get());
 }
 
 /************************************************************************/
@@ -313,35 +251,22 @@ OGRErr OGRWarpedLayer::IUpdateFeature(OGRFeature *poFeature,
                                       const int *panUpdatedGeomFieldsIdx,
                                       bool bUpdateStyleString)
 {
-    OGRErr eErr;
-
-    OGRFeature *poFeatureNew = WarpedFeatureToSrcFeature(poFeature);
-    if (poFeatureNew == nullptr)
+    auto poFeatureNew = WarpedFeatureToSrcFeature(
+        std::unique_ptr<OGRFeature>(poFeature->Clone()));
+    if (!poFeatureNew)
         return OGRERR_FAILURE;
 
-    eErr = m_poDecoratedLayer->UpdateFeature(
-        poFeatureNew, nUpdatedFieldsCount, panUpdatedFieldsIdx,
+    return m_poDecoratedLayer->UpdateFeature(
+        poFeatureNew.get(), nUpdatedFieldsCount, panUpdatedFieldsIdx,
         nUpdatedGeomFieldsCount, panUpdatedGeomFieldsIdx, bUpdateStyleString);
-
-    delete poFeatureNew;
-
-    return eErr;
 }
 
 /************************************************************************/
 /*                            GetLayerDefn()                           */
 /************************************************************************/
 
-OGRFeatureDefn *OGRWarpedLayer::GetLayerDefn()
+const OGRFeatureDefn *OGRWarpedLayer::GetLayerDefn() const
 {
-    if (m_poFeatureDefn != nullptr)
-        return m_poFeatureDefn;
-
-    m_poFeatureDefn = m_poDecoratedLayer->GetLayerDefn()->Clone();
-    m_poFeatureDefn->Reference();
-    if (m_poFeatureDefn->GetGeomFieldCount() > 0)
-        m_poFeatureDefn->GetGeomFieldDefn(m_iGeomField)->SetSpatialRef(m_poSRS);
-
     return m_poFeatureDefn;
 }
 
@@ -349,7 +274,7 @@ OGRFeatureDefn *OGRWarpedLayer::GetLayerDefn()
 /*                            GetSpatialRef()                           */
 /************************************************************************/
 
-OGRSpatialReference *OGRWarpedLayer::GetSpatialRef()
+const OGRSpatialReference *OGRWarpedLayer::GetSpatialRef() const
 {
     if (m_iGeomField == 0)
         return m_poSRS;
@@ -370,20 +295,11 @@ GIntBig OGRWarpedLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                              GetExtent()                             */
+/*                             IGetExtent()                             */
 /************************************************************************/
 
-OGRErr OGRWarpedLayer::GetExtent(OGREnvelope *psExtent, int bForce)
-{
-    return GetExtent(0, psExtent, bForce);
-}
-
-/************************************************************************/
-/*                              GetExtent()                             */
-/************************************************************************/
-
-OGRErr OGRWarpedLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
-                                 int bForce)
+OGRErr OGRWarpedLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                  bool bForce)
 {
     if (iGeomField == m_iGeomField)
     {
@@ -586,12 +502,15 @@ int OGRWarpedLayer::ReprojectEnvelope(OGREnvelope *psEnvelope,
 /*                             TestCapability()                         */
 /************************************************************************/
 
-int OGRWarpedLayer::TestCapability(const char *pszCapability)
+int OGRWarpedLayer::TestCapability(const char *pszCapability) const
 {
     if (EQUAL(pszCapability, OLCFastGetExtent) && sStaticEnvelope.IsInit())
         return TRUE;
 
     int bVal = m_poDecoratedLayer->TestCapability(pszCapability);
+
+    if (EQUAL(pszCapability, OLCFastGetArrowStream))
+        return false;
 
     if (EQUAL(pszCapability, OLCFastSpatialFilter) ||
         EQUAL(pszCapability, OLCRandomWrite) ||
@@ -620,6 +539,16 @@ void OGRWarpedLayer::SetExtent(double dfXMin, double dfYMin, double dfXMax,
     sStaticEnvelope.MinY = dfYMin;
     sStaticEnvelope.MaxX = dfXMax;
     sStaticEnvelope.MaxY = dfYMax;
+}
+
+/************************************************************************/
+/*                            GetArrowStream()                          */
+/************************************************************************/
+
+bool OGRWarpedLayer::GetArrowStream(struct ArrowArrayStream *out_stream,
+                                    CSLConstList papszOptions)
+{
+    return OGRLayer::GetArrowStream(out_stream, papszOptions);
 }
 
 #endif /* #ifndef DOXYGEN_SKIP */

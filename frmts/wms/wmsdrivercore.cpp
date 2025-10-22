@@ -9,26 +9,15 @@
  * Copyright (c) 2007, Adam Nowacki
  * Copyright (c) 2009-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
+#include "gdal_frmts.h"
+#include "gdalplugindriverproxy.h"
+
 #include "wmsdrivercore.h"
+
+#include "gdalsubdatasetinfo.h"
 
 /************************************************************************/
 /*                     WMSDriverIdentify()                              */
@@ -38,7 +27,8 @@ int WMSDriverIdentify(GDALOpenInfo *poOpenInfo)
 
 {
     const char *pszFilename = poOpenInfo->pszFilename;
-    const char *pabyHeader = (const char *)poOpenInfo->pabyHeader;
+    const char *pabyHeader =
+        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
     if (poOpenInfo->nHeaderBytes == 0 &&
         STARTS_WITH_CI(pszFilename, "<GDAL_WMS>"))
     {
@@ -109,6 +99,11 @@ int WMSDriverIdentify(GDALOpenInfo *poOpenInfo)
     {
         return TRUE;
     }
+    else if (poOpenInfo->nHeaderBytes == 0 &&
+             STARTS_WITH_CI(pszFilename, "IIIF:"))
+    {
+        return TRUE;
+    }
     else
         return FALSE;
 }
@@ -117,7 +112,7 @@ int WMSDriverIdentify(GDALOpenInfo *poOpenInfo)
 /*                    OGRWMSDriverGetSubdatasetInfo()                   */
 /************************************************************************/
 
-struct WMSDriverSubdatasetInfo : public GDALSubdatasetInfo
+struct WMSDriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit WMSDriverSubdatasetInfo(const std::string &fileName)
@@ -127,35 +122,37 @@ struct WMSDriverSubdatasetInfo : public GDALSubdatasetInfo
 
     // GDALSubdatasetInfo interface
   private:
-    void parseFileName() override
-    {
-        if (!STARTS_WITH_CI(m_fileName.c_str(), "WMS:"))
-        {
-            return;
-        }
-
-        const CPLString osLayers = CPLURLGetValue(m_fileName.c_str(), "LAYERS");
-
-        if (!osLayers.empty())
-        {
-            m_subdatasetComponent = "LAYERS=" + osLayers;
-            m_driverPrefixComponent = "WMS";
-
-            m_pathComponent = m_fileName;
-            m_pathComponent.erase(m_pathComponent.find(m_subdatasetComponent),
-                                  m_subdatasetComponent.length());
-            m_pathComponent.erase(0, 4);
-            const std::size_t nDoubleAndPos = m_pathComponent.find("&&");
-            if (nDoubleAndPos != std::string::npos)
-            {
-                m_pathComponent.erase(nDoubleAndPos, 1);
-            }
-            // Reconstruct URL with LAYERS at the end or ModifyPathComponent will fail
-            m_fileName = m_driverPrefixComponent + ":" + m_pathComponent + "&" +
-                         m_subdatasetComponent;
-        }
-    }
+    void parseFileName() override;
 };
+
+void WMSDriverSubdatasetInfo::parseFileName()
+{
+    if (!STARTS_WITH_CI(m_fileName.c_str(), "WMS:"))
+    {
+        return;
+    }
+
+    const CPLString osLayers = CPLURLGetValue(m_fileName.c_str(), "LAYERS");
+
+    if (!osLayers.empty())
+    {
+        m_subdatasetComponent = "LAYERS=" + osLayers;
+        m_driverPrefixComponent = "WMS";
+
+        m_pathComponent = m_fileName;
+        m_pathComponent.erase(m_pathComponent.find(m_subdatasetComponent),
+                              m_subdatasetComponent.length());
+        m_pathComponent.erase(0, 4);
+        const std::size_t nDoubleAndPos = m_pathComponent.find("&&");
+        if (nDoubleAndPos != std::string::npos)
+        {
+            m_pathComponent.erase(nDoubleAndPos, 1);
+        }
+        // Reconstruct URL with LAYERS at the end or ModifyPathComponent will fail
+        m_fileName = m_driverPrefixComponent + ":" + m_pathComponent + "&" +
+                     m_subdatasetComponent;
+    }
+}
 
 static GDALSubdatasetInfo *WMSDriverGetSubdatasetInfo(const char *pszFileName)
 {

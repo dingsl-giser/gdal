@@ -8,23 +8,7 @@
  * Copyright (c) 2010, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -41,12 +25,6 @@
 #include <vector>
 
 #include <cctype>
-
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
 
 /************************************************************************/
 /*                             GetSRSAsWKT                              */
@@ -316,7 +294,7 @@ MAIN_START(argc, argv)
     if (std::isnan(dfGeoX))
     {
         // Is it an interactive terminal ?
-        if (isatty(static_cast<int>(fileno(stdin))))
+        if (CPLIsInteractive(stdin))
         {
             if (!osSourceSRS.empty())
             {
@@ -461,8 +439,9 @@ MAIN_START(argc, argv)
 
         bool bPixelReport = true;
 
-        if (iPixel < 0 || iLine < 0 || iPixel >= GDALGetRasterXSize(hSrcDS) ||
-            iLine >= GDALGetRasterYSize(hSrcDS))
+        if (iPixel < 0 || iLine < 0 ||
+            dfPixel > static_cast<double>(GDALGetRasterXSize(hSrcDS) + 1e-5) ||
+            dfLine > static_cast<double>(GDALGetRasterYSize(hSrcDS) + 1e-5))
         {
             if (bAsXML)
                 osXML += "<Alert>Location is off this file! No further details "
@@ -598,11 +577,25 @@ MAIN_START(argc, argv)
             const bool bIsComplex = CPL_TO_BOOL(
                 GDALDataTypeIsComplex(GDALGetRasterDataType(hBand)));
 
-            CPLErr err;
-            err = GDALRasterInterpolateAtPoint(hBand, dfPixelToQuery,
-                                               dfLineToQuery, eInterpolation,
-                                               &adfPixel[0], &adfPixel[1]);
+            CPLErrorReset();
+            CPLErr err = GDALRasterInterpolateAtPoint(
+                hBand, dfPixelToQuery, dfLineToQuery, eInterpolation,
+                &adfPixel[0], &adfPixel[1]);
 
+            // GDALRasterInterpolateAtPoint() returns false on nodata
+            bool bIsNoData = false;
+            if (err != CE_None && CPLGetLastErrorType() == CE_None)
+            {
+                int bHasNoData = FALSE;
+                const double dfNoData =
+                    GDALGetRasterNoDataValue(hBand, &bHasNoData);
+                if (bHasNoData)
+                {
+                    bIsNoData = true;
+                    adfPixel[0] = adfPixel[1] = dfNoData;
+                    err = CE_None;
+                }
+            }
             if (err == CE_None)
             {
                 CPLString osValue;
@@ -649,7 +642,7 @@ MAIN_START(argc, argv)
                               "Unable to get raster scale." );
                 }
 #endif
-                if (dfOffset != 0.0 || dfScale != 1.0)
+                if (!bIsNoData && (dfOffset != 0.0 || dfScale != 1.0))
                 {
                     adfPixel[0] = adfPixel[0] * dfScale + dfOffset;
 
@@ -672,7 +665,19 @@ MAIN_START(argc, argv)
                         printf("    Descaled Value: %s\n", osValue.c_str());
                 }
             }
-
+            else
+            {
+                nRetCode = 1;
+                if (bAsXML)
+                {
+                    osXML += "<IOError/>";
+                }
+                else if (bValOnly)
+                {
+                    if (i > 0)
+                        printf("%s", osFieldSep.c_str());
+                }
+            }
             if (bAsXML)
                 osXML += "</BandReport>";
         }

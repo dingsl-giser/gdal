@@ -8,23 +8,7 @@
  * Copyright (c) 2010, Brian Case
  * Copyright (c) 2011-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 #include "libkml_headers.h"
@@ -87,7 +71,7 @@ StylePtr addstylestring2kml(const char *pszStyleString, StylePtr poKmlStyle,
     IconStylePtr poKmlIconStyle = nullptr;
     LabelStylePtr poKmlLabelStyle = nullptr;
 
-    /***** create and init a style mamager with the style string *****/
+    /***** create and init a style manager with the style string *****/
     OGRStyleMgr *const poOgrSM = new OGRStyleMgr;
 
     poOgrSM->InitStyleString(pszStyleString);
@@ -604,7 +588,8 @@ void kml2stylestring(StylePtr poKmlStyle, OGRStyleMgr *poOgrSM)
         }
 
         OGRStylePen *poOgrStylePen =
-            kml2pen(std::move(poKmlLineStyle), (OGRStylePen *)poOgrTmpST);
+            kml2pen(std::move(poKmlLineStyle),
+                    cpl::down_cast<OGRStylePen *>(poOgrTmpST));
 
         poOgrNewSM->AddPart(poOgrStylePen);
 
@@ -639,7 +624,8 @@ void kml2stylestring(StylePtr poKmlStyle, OGRStyleMgr *poOgrSM)
         }
 
         OGRStyleBrush *poOgrStyleBrush =
-            kml2brush(std::move(poKmlPolyStyle), (OGRStyleBrush *)poOgrTmpST);
+            kml2brush(std::move(poKmlPolyStyle),
+                      cpl::down_cast<OGRStyleBrush *>(poOgrTmpST));
 
         poOgrNewSM->AddPart(poOgrStyleBrush);
 
@@ -674,7 +660,8 @@ void kml2stylestring(StylePtr poKmlStyle, OGRStyleMgr *poOgrSM)
         }
 
         OGRStyleSymbol *poOgrStyleSymbol =
-            kml2symbol(std::move(poKmlIconStyle), (OGRStyleSymbol *)poOgrTmpST);
+            kml2symbol(std::move(poKmlIconStyle),
+                       cpl::down_cast<OGRStyleSymbol *>(poOgrTmpST));
 
         poOgrNewSM->AddPart(poOgrStyleSymbol);
 
@@ -709,7 +696,8 @@ void kml2stylestring(StylePtr poKmlStyle, OGRStyleMgr *poOgrSM)
         }
 
         OGRStyleLabel *poOgrStyleLabel =
-            kml2label(std::move(poKmlLabelStyle), (OGRStyleLabel *)poOgrTmpST);
+            kml2label(std::move(poKmlLabelStyle),
+                      cpl::down_cast<OGRStyleLabel *>(poOgrTmpST));
 
         poOgrNewSM->AddPart(poOgrStyleLabel);
 
@@ -808,9 +796,10 @@ static StyleSelectorPtr StyleFromStyleURL(const StyleMapPtr &stylemap,
 
             /***** try it as a url then a file *****/
             VSILFILE *fp = nullptr;
-            if ((fp =
-                     VSIFOpenL(CPLFormFilename("/vsicurl/", pszUrlTmp, nullptr),
-                               "r")) != nullptr ||
+            if ((fp = VSIFOpenL(
+                     CPLFormFilenameSafe("/vsicurl/", pszUrlTmp, nullptr)
+                         .c_str(),
+                     "r")) != nullptr ||
                 (fp = VSIFOpenL(pszUrlTmp, "r")) != nullptr)
             {
                 char szbuf[1025] = {};
@@ -1019,7 +1008,7 @@ void styletable2kml(OGRStyleTable *poOgrStyleTable, KmlFactory *poKmlFactory,
         {
             CPLString osName(pszStyleName);
             osName.resize(strlen(pszStyleName) - strlen("_normal"));
-            aoSetNormalStyles.insert(osName);
+            aoSetNormalStyles.insert(std::move(osName));
         }
         else if (strlen(pszStyleName) > strlen("_highlight") &&
                  EQUAL(pszStyleName + strlen(pszStyleName) -
@@ -1028,7 +1017,7 @@ void styletable2kml(OGRStyleTable *poOgrStyleTable, KmlFactory *poKmlFactory,
         {
             CPLString osName(pszStyleName);
             osName.resize(strlen(pszStyleName) - strlen("_highlight"));
-            aoSetHighlightStyles.insert(osName);
+            aoSetHighlightStyles.insert(std::move(osName));
         }
     }
 

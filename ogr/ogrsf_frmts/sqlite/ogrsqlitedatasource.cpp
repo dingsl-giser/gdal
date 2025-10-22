@@ -15,23 +15,7 @@
  * Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -67,6 +51,7 @@
 #include "ogr_feature.h"
 #include "ogr_geometry.h"
 #include "ogr_spatialref.h"
+#include "ogr_schema_override.h"
 #include "ogrsf_frmts.h"
 #include "sqlite3.h"
 
@@ -77,6 +62,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wdocumentation"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
 #endif
 
 #if defined(HAVE_SPATIALITE) && !defined(SPATIALITE_DLOPEN)
@@ -200,18 +186,15 @@ bool OGRSQLiteBaseDataSource::InitSpatialite()
 
 void OGRSQLiteBaseDataSource::FinishSpatialite()
 {
+    // Current implementation of spatialite_cleanup_ex() (as of libspatialite 5.1)
+    // is not re-entrant due to the use of xmlCleanupParser()
+    // Cf https://groups.google.com/g/spatialite-users/c/tsfZ_GDrRKs/m/aj-Dt4xoBQAJ?utm_medium=email&utm_source=footer
+    static std::mutex oCleanupMutex;
+    std::lock_guard oLock(oCleanupMutex);
+
     if (hSpatialiteCtxt != nullptr)
     {
-        auto ctxt = hSpatialiteCtxt;
-        {
-            // Current implementation of spatialite_cleanup_ex() (as of libspatialite 5.1)
-            // is not re-entrant due to the use of xmlCleanupParser()
-            // Cf https://groups.google.com/g/spatialite-users/c/tsfZ_GDrRKs/m/aj-Dt4xoBQAJ?utm_medium=email&utm_source=footer
-            static std::mutex oCleanupMutex;
-            std::lock_guard oLock(oCleanupMutex);
-            pfn_spatialite_cleanup_ex(ctxt);
-        }
-        // coverity[thread1_overwrites_value_in_field]
+        pfn_spatialite_cleanup_ex(hSpatialiteCtxt);
         hSpatialiteCtxt = nullptr;
     }
 }
@@ -260,6 +243,44 @@ void OGRSQLiteDriverUnload(GDALDriver *)
     }
 #endif
 #endif
+}
+
+/************************************************************************/
+/*                      DealWithOgrSchemaOpenOption()                   */
+/************************************************************************/
+bool OGRSQLiteBaseDataSource::DealWithOgrSchemaOpenOption(
+    CSLConstList papszOpenOptionsIn)
+{
+    const std::string osFieldsSchemaOverrideParam =
+        CSLFetchNameValueDef(papszOpenOptionsIn, "OGR_SCHEMA", "");
+
+    if (!osFieldsSchemaOverrideParam.empty())
+    {
+        if (GetUpdate())
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "OGR_SCHEMA open option is not supported in update mode.");
+            return false;
+        }
+
+        OGRSchemaOverride oSchemaOverride;
+        const auto nErrorCount = CPLGetErrorCounter();
+        if (!oSchemaOverride.LoadFromJSON(osFieldsSchemaOverrideParam) ||
+            !oSchemaOverride.IsValid())
+        {
+            if (nErrorCount == CPLGetErrorCounter())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Content of OGR_SCHEMA in %s is not valid",
+                         osFieldsSchemaOverrideParam.c_str());
+            }
+            return false;
+        }
+
+        if (!oSchemaOverride.DefaultApply(this, "SQLite"))
+            return false;
+    }
+    return true;
 }
 
 /************************************************************************/
@@ -871,15 +892,7 @@ int OGRSQLiteBaseDataSource::prepareSql(sqlite3 *db, const char *zSql,
 /*                        OGRSQLiteDataSource()                         */
 /************************************************************************/
 
-OGRSQLiteDataSource::OGRSQLiteDataSource()
-{
-    m_adfGeoTransform[0] = 0.0;
-    m_adfGeoTransform[1] = 1.0;
-    m_adfGeoTransform[2] = 0.0;
-    m_adfGeoTransform[3] = 0.0;
-    m_adfGeoTransform[4] = 0.0;
-    m_adfGeoTransform[5] = 1.0;
-}
+OGRSQLiteDataSource::OGRSQLiteDataSource() = default;
 
 /************************************************************************/
 /*                        ~OGRSQLiteDataSource()                        */
@@ -1388,6 +1401,7 @@ bool OGRSQLiteBaseDataSource::OpenOrCreateDB(int flagsIn,
 #endif
 
     bool bPageSizeFound = false;
+    bool bSecureDeleteFound = false;
 
     const char *pszSqlitePragma =
         CPLGetConfigOption("OGR_SQLITE_PRAGMA", nullptr);
@@ -1456,14 +1470,6 @@ bool OGRSQLiteBaseDataSource::OpenOrCreateDB(int flagsIn,
         }
 #endif
 
-        const char *pszPreludeStatements =
-            CSLFetchNameValue(papszOpenOptions, "PRELUDE_STATEMENTS");
-        if (pszPreludeStatements)
-        {
-            if (SQLCommand(hDB, pszPreludeStatements) != OGRERR_NONE)
-                return false;
-        }
-
         if (pszSqlitePragma != nullptr)
         {
             char **papszTokens =
@@ -1472,7 +1478,7 @@ bool OGRSQLiteBaseDataSource::OpenOrCreateDB(int flagsIn,
             {
                 if (STARTS_WITH_CI(papszTokens[i], "PAGE_SIZE"))
                     bPageSizeFound = true;
-                if (STARTS_WITH_CI(papszTokens[i], "JOURNAL_MODE"))
+                else if (STARTS_WITH_CI(papszTokens[i], "JOURNAL_MODE"))
                 {
                     const char *pszEqual = strchr(papszTokens[i], '=');
                     if (pszEqual)
@@ -1483,6 +1489,8 @@ bool OGRSQLiteBaseDataSource::OpenOrCreateDB(int flagsIn,
                         continue;
                     }
                 }
+                else if (STARTS_WITH_CI(papszTokens[i], "SECURE_DELETE"))
+                    bSecureDeleteFound = true;
 
                 const char *pszSQL = CPLSPrintf("PRAGMA %s", papszTokens[i]);
 
@@ -1662,6 +1670,16 @@ bool OGRSQLiteBaseDataSource::OpenOrCreateDB(int flagsIn,
             sqlite3_exec(hDB, pszSQL, nullptr, nullptr, nullptr));
     }
 
+    if (!bSecureDeleteFound)
+    {
+        // Turn on secure_delete by default (unless the user specifies a
+        // value of this pragma through OGR_SQLITE_PRAGMA)
+        // For example, Debian and Conda-Forge SQLite3 builds already turn on
+        // secure_delete.
+        CPL_IGNORE_RET_VAL(sqlite3_exec(hDB, "PRAGMA secure_delete = 1",
+                                        nullptr, nullptr, nullptr));
+    }
+
     SetCacheSize();
     SetSynchronous();
     if (bLoadExtensions)
@@ -1707,6 +1725,14 @@ bool OGRSQLiteDataSource::OpenOrCreateDB(int flagsIn,
     // errour we catch, but only if OGR2SQLITEModule has been created by
     // above OGR2SQLITE_Setup()
     LoadExtensions();
+
+    const char *pszPreludeStatements =
+        CSLFetchNameValue(papszOpenOptions, "PRELUDE_STATEMENTS");
+    if (pszPreludeStatements)
+    {
+        if (SQLCommand(hDB, pszPreludeStatements) != OGRERR_NONE)
+            return false;
+    }
 
     return true;
 }
@@ -1800,8 +1826,8 @@ bool OGRSQLiteDataSource::Create(const char *pszNameIn, char **papszOptions)
     if (bUseTempFile)
     {
         m_osFinalFilename = pszNameIn;
-        m_pszFilename =
-            CPLStrdup(CPLGenerateTempFilename(CPLGetFilename(pszNameIn)));
+        m_pszFilename = CPLStrdup(
+            CPLGenerateTempFilenameSafe(CPLGetFilename(pszNameIn)).c_str());
         CPLDebug("SQLITE", "Creating temporary file %s", m_pszFilename);
     }
     else
@@ -2165,7 +2191,7 @@ bool OGRSQLiteDataSource::Open(GDALOpenInfo *poOpenInfo)
     const char *pszNewName = poOpenInfo->pszFilename;
     CPLAssert(m_apoLayers.empty());
     eAccess = poOpenInfo->eAccess;
-    nOpenFlags = poOpenInfo->nOpenFlags;
+    nOpenFlags = poOpenInfo->nOpenFlags & ~GDAL_OF_THREAD_SAFE;
     SetDescription(pszNewName);
 
     if (m_pszFilename == nullptr)
@@ -2281,87 +2307,9 @@ bool OGRSQLiteDataSource::Open(GDALOpenInfo *poOpenInfo)
                     if (STARTS_WITH(pszLine, "--"))
                         continue;
 
-                    // Reject a few words tat might have security implications
-                    // Basically we just want to allow CREATE TABLE and INSERT
-                    // INTO
-                    if (CPLString(pszLine).ifind("ATTACH") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("DETACH") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("PRAGMA") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("SELECT") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("UPDATE") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("REPLACE") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("DELETE") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("DROP") != std::string::npos ||
-                        CPLString(pszLine).ifind("ALTER") !=
-                            std::string::npos ||
-                        CPLString(pszLine).ifind("VIRTUAL") !=
-                            std::string::npos)
-                    {
-                        bool bOK = false;
-                        if (EQUAL(pszLine, "CREATE VIRTUAL TABLE SpatialIndex "
-                                           "USING VirtualSpatialIndex();"))
-                        {
-                            bOK = true;
-                        }
-                        // Accept creation of spatial index
-                        else if (STARTS_WITH_CI(pszLine,
-                                                "CREATE VIRTUAL TABLE "))
-                        {
-                            const char *pszStr =
-                                pszLine + strlen("CREATE VIRTUAL TABLE ");
-                            if (*pszStr == '"')
-                                pszStr++;
-                            while ((*pszStr >= 'a' && *pszStr <= 'z') ||
-                                   (*pszStr >= 'A' && *pszStr <= 'Z') ||
-                                   *pszStr == '_')
-                            {
-                                pszStr++;
-                            }
-                            if (*pszStr == '"')
-                                pszStr++;
-                            if (EQUAL(pszStr, " USING rtree(pkid, xmin, xmax, "
-                                              "ymin, ymax);"))
-                            {
-                                bOK = true;
-                            }
-                        }
-                        // Accept INSERT INTO idx_byte_metadata_geometry SELECT
-                        // rowid, ST_MinX(geometry), ST_MaxX(geometry),
-                        // ST_MinY(geometry), ST_MaxY(geometry) FROM
-                        // byte_metadata;
-                        else if (STARTS_WITH_CI(pszLine, "INSERT INTO idx_") &&
-                                 CPLString(pszLine).ifind("SELECT") !=
-                                     std::string::npos)
-                        {
-                            char **papszTokens =
-                                CSLTokenizeString2(pszLine, " (),,", 0);
-                            if (CSLCount(papszTokens) == 15 &&
-                                EQUAL(papszTokens[3], "SELECT") &&
-                                EQUAL(papszTokens[5], "ST_MinX") &&
-                                EQUAL(papszTokens[7], "ST_MaxX") &&
-                                EQUAL(papszTokens[9], "ST_MinY") &&
-                                EQUAL(papszTokens[11], "ST_MaxY") &&
-                                EQUAL(papszTokens[13], "FROM"))
-                            {
-                                bOK = true;
-                            }
-                            CSLDestroy(papszTokens);
-                        }
+                    if (!SQLCheckLineIsSafe(pszLine))
+                        return false;
 
-                        if (!bOK)
-                        {
-                            CPLError(CE_Failure, CPLE_NotSupported,
-                                     "Rejected statement: %s", pszLine);
-                            return false;
-                        }
-                    }
                     char *pszErrMsg = nullptr;
                     if (sqlite3_exec(hDB, pszLine, nullptr, nullptr,
                                      &pszErrMsg) != SQLITE_OK)
@@ -2461,8 +2409,17 @@ bool OGRSQLiteDataSource::Open(GDALOpenInfo *poOpenInfo)
                 continue;
 
             if (GDALDataset::GetLayerByName(pszTableName) == nullptr)
-                OpenTable(pszTableName, true, false,
-                          /* bMayEmitError = */ true);
+            {
+                const bool bRet = OpenTable(pszTableName, true, false,
+                                            /* bMayEmitError = */ true);
+                if (!bRet)
+                {
+                    CPLDebug("SQLITE", "Failed to open layer %s", pszTableName);
+                    sqlite3_free_table(papszResult);
+                    CPLHashSetDestroy(hSet);
+                    return false;
+                }
+            }
 
             if (bListAllTables)
                 CPLHashSetInsert(hSet, CPLStrdup(pszTableName));
@@ -2882,7 +2839,10 @@ bool OGRSQLiteDataSource::OpenVirtualTable(const char *pszName,
         {
             OGRGeometry *poGeom = poFeature->GetGeometryRef();
             if (poGeom)
-                poLayer->GetLayerDefn()->SetGeomType(poGeom->getGeometryType());
+            {
+                whileUnsealing(poLayer->GetLayerDefn())
+                    ->SetGeomType(poGeom->getGeometryType());
+            }
             delete poFeature;
         }
         poLayer->ResetReading();
@@ -2914,6 +2874,13 @@ bool OGRSQLiteDataSource::OpenTable(const char *pszTableName, bool bIsTable,
     /*      Add layer to data source layer list.                            */
     /* -------------------------------------------------------------------- */
     m_apoLayers.push_back(std::move(poLayer));
+
+    // Remove in case of error in the schema processing
+    if (!DealWithOgrSchemaOpenOption(papszOpenOptions))
+    {
+        m_apoLayers.pop_back();
+        return false;
+    }
 
     return true;
 }
@@ -2952,7 +2919,7 @@ bool OGRSQLiteDataSource::OpenView(const char *pszViewName,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRSQLiteDataSource::TestCapability(const char *pszCap)
+int OGRSQLiteDataSource::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, ODsCCreateLayer) || EQUAL(pszCap, ODsCDeleteLayer) ||
@@ -2972,7 +2939,7 @@ int OGRSQLiteDataSource::TestCapability(const char *pszCap)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRSQLiteBaseDataSource::TestCapability(const char *pszCap)
+int OGRSQLiteBaseDataSource::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCTransactions))
         return true;
@@ -2986,7 +2953,7 @@ int OGRSQLiteBaseDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRSQLiteDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRSQLiteDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || iLayer >= static_cast<int>(m_apoLayers.size()))
@@ -3314,9 +3281,11 @@ OGRLayer *OGRSQLiteDataSource::ExecuteSQL(const char *pszSQLCommand,
             }
         }
     }
+    else if (ProcessTransactionSQL(pszSQLCommand))
+    {
+        return nullptr;
+    }
     else if (!STARTS_WITH_CI(pszSQLCommand, "SELECT ") &&
-             !EQUAL(pszSQLCommand, "BEGIN") &&
-             !EQUAL(pszSQLCommand, "COMMIT") &&
              !STARTS_WITH_CI(pszSQLCommand, "CREATE TABLE ") &&
              !STARTS_WITH_CI(pszSQLCommand, "PRAGMA "))
     {
@@ -3665,9 +3634,6 @@ OGRSQLiteDataSource::ICreateLayer(const char *pszLayerNameIn,
         /* Only if linked against SpatiaLite and the datasource was created as a
          * SpatiaLite DB */
         if (m_bIsSpatiaLiteDB && IsSpatialiteLoaded())
-#else
-        if (0)
-#endif
         {
             if (pszSI != nullptr && EQUAL(pszSI, "IMMEDIATE"))
             {
@@ -3678,6 +3644,7 @@ OGRSQLiteDataSource::ICreateLayer(const char *pszLayerNameIn,
                 bDeferredSpatialIndexCreation = true;
             }
         }
+#endif
     }
     else if (m_bHaveGeometryColumns)
     {
@@ -3887,10 +3854,18 @@ OGRErr OGRSQLiteDataSource::DeleteLayer(int iLayer)
 
 OGRErr OGRSQLiteBaseDataSource::StartTransaction(CPL_UNUSED int bForce)
 {
-    if (bUserTransactionActive || nSoftTransactionLevel != 0)
+    if (m_bUserTransactionActive || m_nSoftTransactionLevel != 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Transaction already established");
+        return OGRERR_FAILURE;
+    }
+
+    // Check if we are in a SAVEPOINT transaction
+    if (m_aosSavepoints.size() > 0)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Cannot start a transaction within a SAVEPOINT");
         return OGRERR_FAILURE;
     }
 
@@ -3898,7 +3873,7 @@ OGRErr OGRSQLiteBaseDataSource::StartTransaction(CPL_UNUSED int bForce)
     if (eErr != OGRERR_NONE)
         return eErr;
 
-    bUserTransactionActive = true;
+    m_bUserTransactionActive = true;
     return OGRERR_NONE;
 }
 
@@ -3925,21 +3900,22 @@ OGRErr OGRSQLiteDataSource::StartTransaction(int bForce)
 
 OGRErr OGRSQLiteBaseDataSource::CommitTransaction()
 {
-    if (!bUserTransactionActive)
+    if (!m_bUserTransactionActive && !m_bImplicitTransactionOpened)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Transaction not established");
         return OGRERR_FAILURE;
     }
 
-    bUserTransactionActive = false;
-    CPLAssert(nSoftTransactionLevel == 1);
+    m_bUserTransactionActive = false;
+    m_bImplicitTransactionOpened = false;
+    CPLAssert(m_nSoftTransactionLevel == 1);
     return SoftCommitTransaction();
 }
 
 OGRErr OGRSQLiteDataSource::CommitTransaction()
 
 {
-    if (nSoftTransactionLevel == 1)
+    if (m_nSoftTransactionLevel == 1)
     {
         for (auto &poLayer : m_apoLayers)
         {
@@ -3963,21 +3939,22 @@ OGRErr OGRSQLiteDataSource::CommitTransaction()
 
 OGRErr OGRSQLiteBaseDataSource::RollbackTransaction()
 {
-    if (!bUserTransactionActive)
+    if (!m_bUserTransactionActive)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Transaction not established");
         return OGRERR_FAILURE;
     }
 
-    bUserTransactionActive = false;
-    CPLAssert(nSoftTransactionLevel == 1);
+    m_bUserTransactionActive = false;
+    CPLAssert(m_nSoftTransactionLevel == 1);
+
     return SoftRollbackTransaction();
 }
 
 OGRErr OGRSQLiteDataSource::RollbackTransaction()
 
 {
-    if (nSoftTransactionLevel == 1)
+    if (m_nSoftTransactionLevel == 1)
     {
         for (auto &poLayer : m_apoLayers)
         {
@@ -3999,6 +3976,11 @@ OGRErr OGRSQLiteDataSource::RollbackTransaction()
     return OGRSQLiteBaseDataSource::RollbackTransaction();
 }
 
+bool OGRSQLiteBaseDataSource::IsInTransaction() const
+{
+    return m_nSoftTransactionLevel > 0;
+}
+
 /************************************************************************/
 /*                        SoftStartTransaction()                        */
 /*                                                                      */
@@ -4010,11 +3992,17 @@ OGRErr OGRSQLiteDataSource::RollbackTransaction()
 OGRErr OGRSQLiteBaseDataSource::SoftStartTransaction()
 
 {
-    nSoftTransactionLevel++;
+    m_nSoftTransactionLevel++;
 
     OGRErr eErr = OGRERR_NONE;
-    if (nSoftTransactionLevel == 1)
+    if (m_nSoftTransactionLevel == 1)
     {
+        for (int i = 0; i < GetLayerCount(); i++)
+        {
+            OGRLayer *poLayer = GetLayer(i);
+            poLayer->PrepareStartTransaction();
+        }
+
         eErr = DoTransactionCommand("BEGIN");
     }
 
@@ -4037,15 +4025,15 @@ OGRErr OGRSQLiteBaseDataSource::SoftCommitTransaction()
     // CPLDebug("SQLite", "%p->SoftCommitTransaction() : %d",
     //          this, nSoftTransactionLevel);
 
-    if (nSoftTransactionLevel <= 0)
+    if (m_nSoftTransactionLevel <= 0)
     {
         CPLAssert(false);
         return OGRERR_FAILURE;
     }
 
     OGRErr eErr = OGRERR_NONE;
-    nSoftTransactionLevel--;
-    if (nSoftTransactionLevel == 0)
+    m_nSoftTransactionLevel--;
+    if (m_nSoftTransactionLevel == 0)
     {
         eErr = DoTransactionCommand("COMMIT");
     }
@@ -4066,20 +4054,219 @@ OGRErr OGRSQLiteBaseDataSource::SoftRollbackTransaction()
     // CPLDebug("SQLite", "%p->SoftRollbackTransaction() : %d",
     //          this, nSoftTransactionLevel);
 
-    if (nSoftTransactionLevel <= 0)
+    while (!m_aosSavepoints.empty())
+    {
+        if (RollbackToSavepoint(m_aosSavepoints.back()) != OGRERR_NONE)
+        {
+            return OGRERR_FAILURE;
+        }
+        m_aosSavepoints.pop_back();
+    }
+
+    if (m_nSoftTransactionLevel <= 0)
     {
         CPLAssert(false);
         return OGRERR_FAILURE;
     }
 
     OGRErr eErr = OGRERR_NONE;
-    nSoftTransactionLevel--;
-    if (nSoftTransactionLevel == 0)
+    m_nSoftTransactionLevel--;
+    if (m_nSoftTransactionLevel == 0)
     {
         eErr = DoTransactionCommand("ROLLBACK");
+        if (eErr == OGRERR_NONE)
+        {
+            for (int i = 0; i < GetLayerCount(); i++)
+            {
+                OGRLayer *poLayer = GetLayer(i);
+                poLayer->FinishRollbackTransaction("");
+            }
+        }
     }
 
     return eErr;
+}
+
+OGRErr OGRSQLiteBaseDataSource::StartSavepoint(const std::string &osName)
+{
+
+    // A SAVEPOINT implicitly starts a transaction, let's fake one
+    if (!IsInTransaction())
+    {
+        m_bImplicitTransactionOpened = true;
+        m_nSoftTransactionLevel++;
+        for (int i = 0; i < GetLayerCount(); i++)
+        {
+            OGRLayer *poLayer = GetLayer(i);
+            poLayer->PrepareStartTransaction();
+        }
+    }
+
+    const std::string osCommand = "SAVEPOINT " + osName;
+    const auto eErr = DoTransactionCommand(osCommand.c_str());
+
+    if (eErr == OGRERR_NONE)
+    {
+        m_aosSavepoints.push_back(osName);
+    }
+
+    return eErr;
+}
+
+OGRErr OGRSQLiteBaseDataSource::ReleaseSavepoint(const std::string &osName)
+{
+    if (m_aosSavepoints.empty() ||
+        std::find(m_aosSavepoints.cbegin(), m_aosSavepoints.cend(), osName) ==
+            m_aosSavepoints.cend())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Savepoint %s not found",
+                 osName.c_str());
+        return OGRERR_FAILURE;
+    }
+
+    const std::string osCommand = "RELEASE SAVEPOINT " + osName;
+    const auto eErr = DoTransactionCommand(osCommand.c_str());
+
+    if (eErr == OGRERR_NONE)
+    {
+        // If the savepoint is the outer most, this is the same as COMMIT
+        // and the transaction is closed
+        if (m_bImplicitTransactionOpened &&
+            m_aosSavepoints.front().compare(osName) == 0)
+        {
+            m_bImplicitTransactionOpened = false;
+            m_bUserTransactionActive = false;
+            m_nSoftTransactionLevel = 0;
+            m_aosSavepoints.clear();
+        }
+        else
+        {
+            // Find all savepoints up to the target one and remove them
+            while (!m_aosSavepoints.empty() && m_aosSavepoints.back() != osName)
+            {
+                m_aosSavepoints.pop_back();
+            }
+            if (!m_aosSavepoints.empty())  // should always be true
+            {
+                m_aosSavepoints.pop_back();
+            }
+        }
+    }
+    return eErr;
+}
+
+OGRErr OGRSQLiteBaseDataSource::RollbackToSavepoint(const std::string &osName)
+{
+    if (m_aosSavepoints.empty() ||
+        std::find(m_aosSavepoints.cbegin(), m_aosSavepoints.cend(), osName) ==
+            m_aosSavepoints.cend())
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Savepoint %s not found",
+                 osName.c_str());
+        return OGRERR_FAILURE;
+    }
+
+    const std::string osCommand = "ROLLBACK TO SAVEPOINT " + osName;
+    const auto eErr = DoTransactionCommand(osCommand.c_str());
+
+    if (eErr == OGRERR_NONE)
+    {
+
+        // The target savepoint should become the last one in the list
+        // and does not need to be removed because ROLLBACK TO SAVEPOINT
+        while (!m_aosSavepoints.empty() && m_aosSavepoints.back() != osName)
+        {
+            m_aosSavepoints.pop_back();
+        }
+    }
+
+    for (int i = 0; i < GetLayerCount(); i++)
+    {
+        OGRLayer *poLayer = GetLayer(i);
+        poLayer->FinishRollbackTransaction(osName);
+    }
+
+    return eErr;
+}
+
+/************************************************************************/
+/*                          ProcessTransactionSQL()                     */
+/************************************************************************/
+bool OGRSQLiteBaseDataSource::ProcessTransactionSQL(
+    const std::string &osSQLCommand)
+{
+    bool retVal = true;
+
+    if (EQUAL(osSQLCommand.c_str(), "BEGIN"))
+    {
+        SoftStartTransaction();
+    }
+    else if (EQUAL(osSQLCommand.c_str(), "COMMIT"))
+    {
+        SoftCommitTransaction();
+    }
+    else if (EQUAL(osSQLCommand.c_str(), "ROLLBACK"))
+    {
+        SoftRollbackTransaction();
+    }
+    else if (STARTS_WITH_CI(osSQLCommand.c_str(), "SAVEPOINT"))
+    {
+        const CPLStringList aosTokens(SQLTokenize(osSQLCommand.c_str()));
+        if (aosTokens.size() == 2)
+        {
+            const char *pszSavepointName = aosTokens[1];
+            StartSavepoint(pszSavepointName);
+        }
+        else
+        {
+            retVal = false;
+        }
+    }
+    else if (STARTS_WITH_CI(osSQLCommand.c_str(), "RELEASE"))
+    {
+        const CPLStringList aosTokens(SQLTokenize(osSQLCommand.c_str()));
+        if (aosTokens.size() == 2)
+        {
+            const char *pszSavepointName = aosTokens[1];
+            ReleaseSavepoint(pszSavepointName);
+        }
+        else if (aosTokens.size() == 3 && EQUAL(aosTokens[1], "SAVEPOINT"))
+        {
+            const char *pszSavepointName = aosTokens[2];
+            ReleaseSavepoint(pszSavepointName);
+        }
+        else
+        {
+            retVal = false;
+        }
+    }
+    else if (STARTS_WITH_CI(osSQLCommand.c_str(), "ROLLBACK"))
+    {
+        const CPLStringList aosTokens(SQLTokenize(osSQLCommand.c_str()));
+        if (aosTokens.size() == 2)
+        {
+            if (EQUAL(aosTokens[1], "TRANSACTION"))
+            {
+                SoftRollbackTransaction();
+            }
+            else
+            {
+                const char *pszSavepointName = aosTokens[1];
+                RollbackToSavepoint(pszSavepointName);
+            }
+        }
+        else if (aosTokens.size() > 1)  // Savepoint name is last token
+        {
+            const char *pszSavepointName = aosTokens[aosTokens.size() - 1];
+            RollbackToSavepoint(pszSavepointName);
+        }
+    }
+    else
+    {
+        retVal = false;
+    }
+
+    return retVal;
 }
 
 /************************************************************************/
@@ -4288,9 +4475,13 @@ int OGRSQLiteDataSource::FetchSRSId(const OGRSpatialReference *poSRS)
                 {
                     std::unique_ptr<OGRSpatialReference,
                                     OGRSpatialReferenceReleaser>
-                        poCachedSRS(new OGRSpatialReference(oSRS));
-                    poCachedSRS->SetAxisMappingStrategy(
-                        OAMS_TRADITIONAL_GIS_ORDER);
+                        poCachedSRS;
+                    poCachedSRS.reset(oSRS.Clone());
+                    if (poCachedSRS)
+                    {
+                        poCachedSRS->SetAxisMappingStrategy(
+                            OAMS_TRADITIONAL_GIS_ORDER);
+                    }
                     AddSRIDToCache(nSRSId, std::move(poCachedSRS));
                 }
 
@@ -4390,9 +4581,9 @@ int OGRSQLiteDataSource::FetchSRSId(const OGRSpatialReference *poSRS)
 
         if (nSRSId != m_nUndefinedSRID)
         {
-            auto poSRSClone = std::unique_ptr<OGRSpatialReference,
-                                              OGRSpatialReferenceReleaser>(
-                new OGRSpatialReference(oSRS));
+            std::unique_ptr<OGRSpatialReference, OGRSpatialReferenceReleaser>
+                poSRSClone;
+            poSRSClone.reset(oSRS.Clone());
             AddSRIDToCache(nSRSId, std::move(poSRSClone));
         }
 

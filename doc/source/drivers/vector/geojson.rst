@@ -22,9 +22,8 @@ The OGR GeoJSON driver translates GeoJSON encoded data to objects of the
 Feature, Geometry. The implementation is based on `GeoJSON
 Specification, v1.0 <http://geojson.org/geojson-spec.html>`__.
 
-Starting with GDAL 2.1.0, the GeoJSON driver supports updating existing
-GeoJSON files. In that case, the default value for the NATIVE_DATA open
-option will be YES.
+The GeoJSON driver supports updating existing GeoJSON files.
+In that case, the default value for the NATIVE_DATA open option will be YES.
 
 Driver capabilities
 -------------------
@@ -47,7 +46,7 @@ The OGR GeoJSON driver accepts three types of sources of data:
    extension .geojson or .json
 -  Text passed directly and encoded in GeoJSON
 
-Starting with GDAL 2.3, the URL/filename/text might be prefixed with
+The URL/filename/text might be prefixed with
 GeoJSON: to avoid any ambiguity with other drivers. Alternatively, starting
 with GDAL 3.10, specifying the ``-if GeoJSON`` option to command line utilities
 accepting it, or ``GeoJSON`` as the only value of the ``papszAllowedDrivers`` of
@@ -67,7 +66,7 @@ pre-defined name *OGRGeoJSON*:
 It is also valid to assume that OGRDataSource::GetLayerCount() for
 GeoJSON datasource always returns 1.
 
-Starting with GDAL 2.2, the layer name is built with the following
+The layer name is built with the following
 logic:
 
 #. If a "name" member is found at the FeatureCollection level, it is
@@ -78,13 +77,13 @@ logic:
 #. Otherwise OGRGeoJSON is used.
 
 Accessing Web Service as a datasource (i.e. FeatureServer), each request
-will produce new layer. This behavior conforms to stateless nature of
+will produce a new layer. This behavior conforms to the stateless nature of
 HTTP transaction and is similar to how Web browsers operate: single
 request == single page.
 
 If a top-level member of GeoJSON data is of any other type than
 *FeatureCollection*, the driver will produce a layer with only one
-feature. Otherwise, a layer will consists of a set of features.
+feature. Otherwise, a layer will consist of a set of features.
 
 If the :oo:`NATIVE_DATA` open option is set to YES, members at the level of
 the FeatureCollection will be stored as a serialized JSON object in the
@@ -111,19 +110,19 @@ properties, then resulting schema of fields in OGRFeatureDefn is
 generated as `union <http://en.wikipedia.org/wiki/Union_(set_theory)>`__
 of all *Feature* properties.
 
-Schema detection will recognized fields of type String, Integer, Real,
+Schema detection will recognize fields of type String, Integer, Real,
 StringList, IntegerList and RealList, Integer(Boolean), Date, Time and DateTime.
 
-It is possible to tell the driver to not to process attributes by
-setting configuration option :config:`ATTRIBUTES_SKIP=YES`.
-Default behavior is to preserve all attributes (as an union, see
-previous paragraph), what is equal to setting
+It is possible to tell the driver not to process attributes by
+setting the configuration option :config:`ATTRIBUTES_SKIP=YES`.
+The default behavior is to preserve all attributes (as a union, see
+previous paragraph), which is equal to setting
 :config:`ATTRIBUTES_SKIP=NO`.
 
 If the :oo:`NATIVE_DATA` open option is set to YES, the Feature JSON object
 will be stored as a serialized JSON object in the NativeData property of
 the OGRFeature object (and "application/vnd.geo+json" in the
-NativeMediaType property). On write, if a OGRFeature to be written has
+NativeMediaType property). On write, if the OGRFeature to be written has
 its NativeMediaType property set to "application/vnd.geo+json" and its
 NativeData property set to a string that is a serialized JSON object,
 then extra members of this object (i.e. not the "property" dictionary,
@@ -135,14 +134,14 @@ Geometry
 --------
 
 Similarly to the issue with mixed-properties features, the *GeoJSON
-Specification* draft does not require all *Feature* objects in a
-collection must have geometry of the same type. Fortunately, OGR objects
+Specification* draft does not require that all *Feature* objects in a
+collection have the same type of geometry. Fortunately, OGR objects
 model does allow to have geometries of different types in single layer -
 a heterogeneous layer. By default, the GeoJSON driver preserves type of
 geometries.
 
-However, sometimes there is a need to generate a homogeneous layer from
-a set of heterogeneous features. For this purpose, it is possible to
+However, sometimes the need arises to have a homogeneous layer from a
+set of heterogeneous features. For this purpose, it is possible to
 tell the driver to wrap all geometries with OGRGeometryCollection type
 as a common denominator. This behavior may be controlled by setting
 the :config:`GEOMETRY_AS_COLLECTION` configuration option to YES.
@@ -238,6 +237,36 @@ This driver supports the following open options:
       detected as such).
       Can also be set with the :config:`OGR_GEOJSON_DATE_AS_STRING`
       configuration option.
+
+-  .. oo:: FOREIGN_MEMBERS
+      :choices: AUTO, ALL, NONE, STAC
+      :default: AUTO
+      :since: 3.11.0
+
+      Whether and how foreign members at the feature level should be processed
+      as OGR fields:
+
+      - ``AUTO`` mode behaves like ``STAC`` mode if a ``stac_version`` member is found at
+        the Feature level, otherwise it behaves as ``NONE`` mode.
+
+      - In ``ALL`` mode, all foreign members at the feature level are added.
+        Whether to recursively explore nested objects and produce flatten OGR attributes
+        or not is decided by the ``FLATTEN_NESTED_ATTRIBUTES`` open option.
+
+      - In ``NONE`` mode, no foreign members at the feature level are added.
+
+      - ``STAC`` mode (Spatio-Temporal Asset Catalog) behaves the same as ``ALL``,
+        except content under the ``assets`` member is by default flattened
+        as ``assets.{asset_name}.{asset_property}`` fields.
+
+-  .. oo:: OGR_SCHEMA
+      :choices: <filename>|<json string>
+      :since: 3.11.0
+
+      Partially or totally overrides the auto-detected schema to use for creating the layer.
+      The overrides are defined as a JSON list of field definitions.
+      This can be a filename, a URL or JSON string conformant with the `ogr_fields_override.schema.json schema <https://raw.githubusercontent.com/OSGeo/gdal/refs/heads/master/ogr/data/ogr_fields_override.schema.json>`_
+
 
 To explain :oo:`FLATTEN_NESTED_ATTRIBUTES`, consider the following GeoJSON
 fragment:
@@ -426,7 +455,7 @@ Round-tripping of extra JSON members
 
 See :ref:`rfc-60` for more details.
 
-Starting with GDAL 2.1, extra JSON members at the FeatureCollection,
+Extra JSON members at the FeatureCollection,
 Feature or geometry levels that are not normally reflected in the OGR
 abstraction, such as the ones called "extra_XXXXX_member" in the below
 snippet, are by default preserved when executing ogr2ogr with GeoJSON

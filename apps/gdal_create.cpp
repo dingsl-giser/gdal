@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -299,17 +283,15 @@ MAIN_START(argc, argv)
         GDALExit(1);
     }
 
-    double adfGeoTransform[6] = {0, 1, 0, 0, 0, 1};
+    GDALGeoTransform gt;
     if (sOptions.bGeoTransform && sOptions.nPixels > 0 && sOptions.nLines > 0)
     {
-        adfGeoTransform[0] = sOptions.dfULX;
-        adfGeoTransform[1] =
-            (sOptions.dfLRX - sOptions.dfULX) / sOptions.nPixels;
-        adfGeoTransform[2] = 0;
-        adfGeoTransform[3] = sOptions.dfULY;
-        adfGeoTransform[4] = 0;
-        adfGeoTransform[5] =
-            (sOptions.dfLRY - sOptions.dfULY) / sOptions.nLines;
+        gt[0] = sOptions.dfULX;
+        gt[1] = (sOptions.dfLRX - sOptions.dfULX) / sOptions.nPixels;
+        gt[2] = 0;
+        gt[3] = sOptions.dfULY;
+        gt[4] = 0;
+        gt[5] = (sOptions.dfLRY - sOptions.dfULY) / sOptions.nLines;
     }
 
     std::unique_ptr<GDALDataset> poInputDS;
@@ -342,7 +324,7 @@ MAIN_START(argc, argv)
         if (!(sOptions.bGeoTransform && sOptions.nPixels > 0 &&
               sOptions.nLines > 0))
         {
-            if (poInputDS->GetGeoTransform(adfGeoTransform) == CE_None)
+            if (poInputDS->GetGeoTransform(gt) == CE_None)
             {
                 sOptions.bGeoTransform = true;
             }
@@ -460,7 +442,7 @@ MAIN_START(argc, argv)
             GDALClose(hDS);
             GDALExit(1);
         }
-        if (GDALSetGeoTransform(hDS, adfGeoTransform) != CE_None)
+        if (GDALDataset::FromHandle(hDS)->SetGeoTransform(gt) != CE_None)
         {
             GDALClose(hDS);
             GDALExit(1);

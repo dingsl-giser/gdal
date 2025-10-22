@@ -8,23 +8,7 @@
  * Copyright (c) 2004, Frank Warmerdam
  * Copyright (c) 2007-2024, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_core.h"
@@ -94,7 +78,7 @@ static char **NCDFTokenizeArray(const char *pszValue)
     }
     else
     {
-        papszValues = reinterpret_cast<char **>(CPLCalloc(2, sizeof(char *)));
+        papszValues = static_cast<char **>(CPLCalloc(2, sizeof(char *)));
         papszValues[0] = CPLStrdup(pszValue);
         papszValues[1] = nullptr;
     }
@@ -744,13 +728,16 @@ OGRErr OGRSpatialReference::importFromCF1(CSLConstList papszKeyValues,
         const double dfNorthPoleGridLong = FetchDoubleParam(
             papszKeyValues, CF_PP_NORTH_POLE_GRID_LONGITUDE, 0.0);
 
+        if (!bGotGeogCS)
+            SetWellKnownGeogCS("WGS84");
+
         bRotatedPole = true;
         SetDerivedGeogCRSWithPoleRotationNetCDFCFConvention(
             "Rotated_pole", dfGridNorthPoleLat, dfGridNorthPoleLong,
             dfNorthPoleGridLong);
     }
 
-    if (IsProjected())
+    if (IsProjected() && !bRotatedPole)
     {
         const char *pszProjectedCRSName =
             CSLFetchNameValue(papszKeyValues, CF_PROJECTED_CRS_NAME);
@@ -764,7 +751,7 @@ OGRErr OGRSpatialReference::importFromCF1(CSLConstList papszKeyValues,
         SetAngularUnits(SRS_UA_DEGREE, CPLAtof(SRS_UA_DEGREE_CONV));
         SetAuthority("GEOGCS|UNIT", "EPSG", 9122);
     }
-    else if (pszUnits != nullptr && !EQUAL(pszUnits, ""))
+    else if (pszUnits != nullptr && !EQUAL(pszUnits, "") && !bRotatedPole)
     {
         if (EQUAL(pszUnits, "m") || EQUAL(pszUnits, "metre") ||
             EQUAL(pszUnits, "meter"))

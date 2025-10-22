@@ -19,6 +19,7 @@ acl
 ACL
 actinia
 ActiveX
+adbc
 addalpha
 addCurve
 addfields
@@ -33,6 +34,7 @@ advertizing
 AdviseRead
 advized
 AES
+affine
 Affine
 ahArrays
 airphotos
@@ -44,6 +46,7 @@ Alamos
 Albers
 Alessandro
 alg
+AlgorithmArg
 Alibaba
 Alicante
 allCountries
@@ -67,7 +70,6 @@ Andrey
 AndreyK
 andsize
 anMapNewAxisToOldAxis
-annd
 Antalya
 antialias
 antimeridian
@@ -96,7 +98,6 @@ Arrayname
 arrayStartIdx
 ASC
 ascii
-askin
 aspatial
 Aspatial
 assumerolewithwebidentity
@@ -105,6 +106,7 @@ Astrogeology
 Astun
 AStyle
 astylename
+astype
 async
 atable
 athematic
@@ -130,7 +132,6 @@ autocommit
 autoconf
 Autoconf
 autocorrelation
-autodetection
 Autodesk
 autodetect
 autodetected
@@ -166,10 +167,12 @@ backporting
 Backporting
 backports
 backslashed
+backtick
 bak
 bAllowPromotingToCurves
 bAllowResizeOutptr
 bandblockcache
+BandMetadataItem
 BandN
 BandsCount
 bAnglesInPackedDMSFormat
@@ -233,6 +236,7 @@ blockings
 blocksize
 BlockSizeX
 BlockSizeY
+BlockWindows
 blocky
 bLookForCircular
 bLookForNonLinear
@@ -265,12 +269,11 @@ bOwnMask
 bOwnSubtransformer
 bPixelIsPoint
 bpw
-branche
 Brashear
+bRelativeToReferencePath
 Bresenham
 bReversed
 Brezenham
-brighest
 Brodin
 Brotli
 Brovey
@@ -295,6 +298,8 @@ buildbot
 Buildbot
 BuildVRT
 BuildVRTOptions
+bulleted
+Bulleted
 bumpmap
 BUnits
 bUnlinkAndSeize
@@ -326,6 +331,7 @@ cass
 Cassini
 casted
 cb
+CBMTILE
 CCache
 ceil
 celldepth
@@ -364,16 +370,19 @@ checksums
 Cheeseman
 Christoph
 Chroma
+chrominance
 chs
 chSep
 cid
 CInt
 circularstrings
 ClampRequests
+clang
 ClassificationCode
 Clayers
 CleanTimeout
 clearerr
+CLI
 clib
 clipdst
 clipdstlayer
@@ -417,6 +426,7 @@ Coeff
 Coefs
 colname
 colorinterp
+ColorInterpretation
 colormap
 colormapped
 colorspace
@@ -430,16 +440,17 @@ commandline
 Commandline
 CommitTransaction
 comparator
-comparible
 compilable
 ComplexSource
 compoundcurves
 compressiblity
 compressions
+concat
 conceptualhelp
 cond
 conda
 Conda
+condBand
 conf
 config
 Config
@@ -450,6 +461,9 @@ connectedness
 const
 constexpr
 contensts
+contextlib
+contextmanager
+ContourOptions
 Contrarty
 conv
 Convair
@@ -520,6 +534,9 @@ cvs
 Cxx
 Cygwin
 dall
+Damerau
+dan
+DanB
 DanielM
 danlittle
 dat
@@ -558,6 +575,7 @@ Datums
 dawson
 Daylon
 dBASE
+dbaston
 dbf
 dbfopen
 DBit
@@ -614,6 +632,7 @@ describedby
 deserialization
 deserialize
 deserialized
+deserializing
 desirabled
 dest
 destructor
@@ -636,6 +655,8 @@ dfCutlineBlendDist
 dfCxtX
 dfDistance
 dfErrorThreshold
+dfGeolocX
+dfGeolocY
 dfInvisibleVal
 dfLLX
 dfMax
@@ -670,7 +691,6 @@ dialogs
 differencing
 dimensionality
 dimensioned
-dimensons
 dimN
 DINSTALL
 dir
@@ -726,6 +746,7 @@ dstSRS
 dstType
 dt
 dT
+dtype
 DUnits
 dValue
 dve
@@ -767,6 +788,7 @@ Elbor
 ElementPath
 ellps
 elpaso
+elseBand
 emptor
 Enablement
 Encodings
@@ -791,6 +813,7 @@ Erdas
 eRequestedInputDT
 erer
 eResampleAlg
+Errno
 erroring
 errorMsg
 ers
@@ -823,6 +846,7 @@ executables
 Exif
 explodeCollections
 eXploration
+exponentialBase
 exportToESRI
 ExportToIsoWkb
 ExportToIsoWkt
@@ -892,6 +916,7 @@ FindFile
 finition
 fiona
 fipszone
+fixedLevels
 fixup
 flatbuffers
 flatgeobuf
@@ -900,6 +925,7 @@ fld
 flippmoke
 floodfill
 flurstueck
+flushable
 Fonseca
 FootprintOptions
 fopen
@@ -910,6 +936,7 @@ ForceTo
 forceToMultiPolygon
 forecolor
 Foris
+formatter
 formatters
 formly
 Fortran
@@ -922,6 +949,7 @@ fpRawL
 fprintf
 fpSource
 fputc
+frac
 franca
 france
 FrankW
@@ -938,6 +966,7 @@ fs
 fSecond
 fseek
 fsiz
+fsspec
 ftell
 FTimesBold
 FTimesRoman
@@ -974,6 +1003,8 @@ gdalabstractbandblockcache
 gdaladdo
 gdalalljni
 gdalallregister
+GDALArgDatasetValue
+GDALArgDatasetValue
 gdalarraybandblockcache
 gdalasyncread
 GDALAsyncReader
@@ -984,10 +1015,13 @@ gdalbuildvrt
 gdalcompare
 gdalconst
 gdaldata
+GDALDataset
 gdaldem
 gdaldriver
+GDALEDTComponent
 gdalenhance
 gdalframework
+gdalg
 gdalgmlcoverage
 GDALGridDataMetricsOptions
 GDALGridInverseDistanceToAPowerNearestNeighborOptions
@@ -1013,9 +1047,11 @@ gdalrasterblock
 gdalrc
 gdalsrsinfo
 gdaltest
+GDALThreadLocalDatasetCache
 gdaltindex
 gdaltransform
 gdalvirtualmem
+gdalvsi
 gdalwarp
 gdalwmscache
 gdb
@@ -1059,6 +1095,8 @@ geoloc
 geolocated
 geolocation
 Geolocation
+geolocX
+geolocY
 Géologiques
 Geomatics
 Geomedia
@@ -1114,6 +1152,7 @@ GetFieldAsDateTime
 GetFieldCount
 GetFieldDefn
 GetFieldSubTypeName
+GetFileList
 GetGeomFieldCount
 GetGeomFieldDefn
 GetLayerDefn
@@ -1132,7 +1171,6 @@ getter
 getters
 GetTiledVirtualMem
 GetTileService
-gettings
 GetType
 GetView
 GetVirtualArray
@@ -1180,6 +1218,7 @@ gnot
 Gohlke
 Golang
 Golomb
+Goode
 goog
 googleapis
 gpkg
@@ -1222,7 +1261,6 @@ GTiff
 GTO
 gtrnctr
 gtype
-Guildlines
 Gusev
 gusevmihs
 gxt
@@ -1231,6 +1269,7 @@ gz
 gzip
 GZip
 gzipped
+Hadoop
 Haff
 Halasz
 hana
@@ -1242,7 +1281,9 @@ hashset
 hashtable
 hAttr
 Hayford
+hBand
 hComp
+hCondBand
 hCT
 hCutline
 hdbuserstore
@@ -1261,6 +1302,7 @@ heightfield
 Heightfield
 heightfields
 Helmert
+hElseBand
 Helvetica
 hether
 hFeat
@@ -1274,8 +1316,6 @@ hibase
 hicover
 hidensity
 hiduff
-hiearchical
-Hiearchical
 hieast
 hielev
 hifuel
@@ -1292,10 +1332,15 @@ hMaskBand
 hMutex
 hNewSubGeom
 hObject
+hOutDS
 hobu
 hoc
 holded
 Homebrew
+homographies
+Homographies
+homography
+Homography
 Homolosine
 honour
 honoured
@@ -1323,6 +1368,7 @@ hSrcDS
 hST
 hTarget
 hTargetEDT
+hThenBand
 hThis
 html
 hTransformArg
@@ -1338,6 +1384,9 @@ Hydrologic
 Hydrological
 hypercubes
 hyperspectral
+hypsometric
+Hypsometric
+hZonesDS
 iAxis
 iBand
 iChild
@@ -1351,6 +1400,7 @@ IdentificationTolerance
 identificator
 Identificator
 IDisposable
+idofic
 Idrisi
 iDriver
 idx
@@ -1359,6 +1409,7 @@ ieee
 ifdef
 ifit
 ifndef
+IfThenElse
 ifv
 igc
 IGeometry
@@ -1368,6 +1419,7 @@ igor
 IIP
 ij
 iLayer
+iLength
 ili
 imag
 imagefile
@@ -1382,6 +1434,7 @@ importFromEPSGA
 importFromURN
 importFromWkb
 ImportFromWKB
+importFromWkt
 ImportFromWKT
 Impots
 imtem
@@ -1392,6 +1445,7 @@ InfoFormat
 InfoOptions
 Informatisé
 Informix
+InfraRed
 ing
 ini
 init
@@ -1430,10 +1484,12 @@ isdst
 IsEmpty
 IsNullable
 isspace
+iStartRow
 iSubGeom
 ISurface
 itemtypes
 iterable
+iteratively
 itf
 itopen
 iTXt
@@ -1479,6 +1535,7 @@ julian
 Julien
 Jupyter
 Jürgen
+Ka
 Kadaster
 kak
 kakadu
@@ -1508,6 +1565,7 @@ KShortest
 kslikebase
 KSpread
 ktx
+Ku
 Kubernetes
 Kumar
 Kuratomi
@@ -1538,6 +1596,7 @@ leftfov
 LegalConstraints
 len
 Leveller
+Levenshtein
 lf
 libaom
 libarchive
@@ -1548,6 +1607,7 @@ libbsd
 libcf
 libcfitsio
 libcrypto
+libcsf
 libcurl
 libCurl
 libdav
@@ -1574,6 +1634,7 @@ libkdu
 libkea
 libkml
 Libkml
+liblerc
 libltidsdk
 liblz
 libmdbodbc
@@ -1596,7 +1657,6 @@ libpython
 librarified
 librasterlite
 libregis
-librray
 libs
 libspatialite
 libsqlite
@@ -1672,8 +1732,6 @@ LSB
 lsbf
 Lucena
 Luminance
-Luratech
-Lurawave
 luts
 lvbag
 lwf
@@ -1696,6 +1754,7 @@ mapbox
 Mapbox
 Maperitive
 mapFieldType
+Mapfile
 mapinfo
 Mapinfo
 maplist
@@ -1721,13 +1780,19 @@ maxdistance
 maxheight
 maximising
 MaximumLong
+maxlat
+maxlon
 maxOccurs
 MaxSize
 maxwidth
 maxx
 maxX
+MaxX
+MaxX
 maxy
 maxY
+MaxY
+maxz
 MaxZ
 mbtiles
 mbtowc
@@ -1737,6 +1802,7 @@ md
 mdb
 mdbtools
 mdd
+mdim
 megt
 Melero
 mem
@@ -1755,6 +1821,7 @@ Miara
 MiB
 Microstation
 mif
+MikeS
 millimetric
 mimetype
 miniconda
@@ -1769,13 +1836,18 @@ minimalistic
 minimising
 Minio
 minixml
+minlat
+minlon
 minsize
 minX
 miny
 minY
+MinY
+minz
 MinZ
 Mipmaps
 MiraD
+miramon
 mis
 mitab
 mkdir
@@ -1796,6 +1868,7 @@ Mollweide
 Mongo
 MONGOCXX
 mongocxxv
+MongoDB
 monoblock
 Monospace
 Morissette
@@ -1816,6 +1889,7 @@ mscale
 msg
 msi
 msk
+msmitherdc
 mssql
 mssqlspatial
 MSVC
@@ -1840,6 +1914,7 @@ multilines
 multilinestring
 multilinestrings
 Multipage
+multipart
 multipatch
 Multiplatform
 multipoint
@@ -1850,6 +1925,7 @@ MultiPolygon
 multipolygons
 multiproc
 multiprocess
+multireadtest
 multirecords
 multispectral
 multistring
@@ -1862,6 +1938,7 @@ multithreaded
 multithreading
 Multithreading
 mundialis
+muparser
 Mutatie
 mutex
 Mutex
@@ -1888,6 +1965,7 @@ Namespaces
 namespacing
 nan
 NaN
+nanometer
 nArgc
 nArray
 nArrays
@@ -1947,6 +2025,7 @@ neighbouring
 neighbours
 nEndVertex
 nEntryCount
+netBSD
 netcdf
 netCDF
 netcore
@@ -2047,6 +2126,7 @@ nRecurseDepth
 nRefCount
 nReqOrder
 nSampleStep
+nScopeFlags
 nSecond
 nSize
 nSrcBufferAllocSize
@@ -2094,6 +2174,7 @@ Nummeraanduiding
 numnorth
 numpy
 Numpy
+NumPy
 numslope
 numwoodies
 nUpdatedFieldsCount
@@ -2115,12 +2196,14 @@ nYSize
 nYStride
 nz
 nZStride
+OAMS
 oauth
 OAuth
 objdir
 objectclasses
 OBJECTID
 objektkoordinaten
+observability
 oci
 OCI
 odbc
@@ -2179,7 +2262,6 @@ openjpeg
 OpenJPEG
 openlayers
 Operationen
-operationg
 opj
 optfile
 optfiles
@@ -2196,6 +2278,7 @@ orthocorrection
 orthorectification
 Orthorectified
 orthorectifying
+os
 osAfter
 osBefore
 osgeo
@@ -2220,17 +2303,20 @@ outptr
 outputBounds
 outputer
 outputSchema
+outString
 Oversample
 OverviewCount
 ovf
 ovr
 ozi
+pabSuccess
 pabyData
 pabyDstData
 pabyHeader
 pabyM
 pabySrcData
 pabyValue
+pabyWKB
 pabyX
 pabyY
 pabyZ
@@ -2239,6 +2325,7 @@ padfDstNoDataImag
 padfDstNoDataReal
 padfGeoTransformOut
 padfGT
+padfH
 padfLayerBurnValues
 padfM
 padfPrjParams
@@ -2261,6 +2348,7 @@ panBandList
 panBandMap
 pand
 panDstBands
+panErrorCodes
 panHistogram
 panMap
 panOffsets
@@ -2296,6 +2384,7 @@ papszOptions
 papszOverride
 papszSiblingFiles
 papszSrcDSNames
+papszStrList
 papszURL
 papszVectorTranslateArguments
 papszWarpOptions
@@ -2303,7 +2392,9 @@ Paquet
 paradygm
 parallelisation
 parallelising
+Parallelization
 parallelize
+parallelized
 param
 parameterisation
 parametrized
@@ -2321,6 +2412,7 @@ passthrough
 pathname
 PAux
 pauxdataset
+pbCannotBeExactlyRepresented
 pbf
 pbHasNoData
 pbHasNoDataValue
@@ -2383,6 +2475,7 @@ pgRouting
 pgsql
 pgw
 phGeometry
+phLockFileHandle
 Photogrammetric
 photometric
 photooverlay
@@ -2394,6 +2487,8 @@ Pirmin
 pixelfunction
 pixelfunctions
 pixelsize
+pixi
+Pixi
 Pixmap
 pkgconfig
 pkid
@@ -2401,6 +2496,7 @@ Placemark
 plaintext
 Plessis
 plmosaic
+plscenes
 plscenesconf
 pM
 pnBufferSize
@@ -2428,6 +2524,7 @@ pnSrcYSize
 pnt
 pnXSize
 pnYSize
+poCRS
 podaac
 podofo
 PoDoFo
@@ -2437,6 +2534,7 @@ poFeatureDefn
 poFieldDefn
 poFilterGeom
 poGCP
+poGeom
 poGeomFieldDefn
 PointFromColumns
 PointOnSurface
@@ -2462,6 +2560,7 @@ poOtherGeom
 poppler
 Poppler
 poRootGroup
+pos
 positionName
 posix
 Posix
@@ -2479,6 +2578,7 @@ Postgresql
 poTargetSRS
 pOutBuffer
 ppabyRet
+ppabyWKB
 ppadfOutNoData
 ppadfPrjParams
 ppanHistogram
@@ -2518,6 +2618,7 @@ precompiled
 precompute
 predefine
 predelete
+preinstalled
 prelimenary
 preload
 premultiplication
@@ -2525,7 +2626,6 @@ Prepar
 preparse
 prepended
 prepending
-preprare
 preprocessing
 prescanning
 preserveFID
@@ -2572,12 +2672,14 @@ psExtent
 psExtraArg
 psField
 psGCP
+psNewOptions
 psNewSibling
 psNext
 psOlderSibling
 psOlderSiblings
 psOptions
 psOptionsIn
+psOwnedTransformerArg
 psql
 pSrcBuffer
 pSrcBufferAllocStart
@@ -2599,6 +2701,7 @@ pszDestFilename
 pszDomain
 pszDstFilename
 pszElement
+pszExt
 pszFile
 pszFilename
 pszFileName
@@ -2621,6 +2724,7 @@ pszPath
 pszPreferredAuthority
 pszPrefix
 pszProj
+pszReferencePath
 pszRequest
 pszSource
 pszSrc
@@ -2633,6 +2737,7 @@ pszTmpFieldValue
 pszValue
 pszXMLMetadata
 ptr
+pTransformerArg
 pTranslationTable
 pugixml
 Pulkovo
@@ -2684,6 +2789,7 @@ rasterize
 Rasterize
 rasterized
 RasterizeOptions
+rasterizes
 rasterizing
 rasterlite
 Rasterlite
@@ -2725,6 +2831,7 @@ RecordBatch
 RecordBatchAsNumpy
 recurse
 recursionLevel
+redirections
 Redistributable
 reentrancy
 reentrant
@@ -2733,7 +2840,6 @@ referenceSystemIdentifier
 referenceSystemInfo
 referer
 Referer
-refererenced
 reflectance
 reflectances
 refSysID
@@ -2832,6 +2938,7 @@ RPF
 rpr
 RRaster
 rrd
+rsc
 rsiz
 rst
 rsync
@@ -2895,6 +3002,7 @@ ServerUrl
 setAccessControl
 setAccessControlRecursive
 setargv
+SetAxisMappingStrategy
 setCoordinateDimension
 setfeature
 SetFeature
@@ -2930,6 +3038,7 @@ sig
 Sightlines
 signedness
 significants
+Simmon
 sinc
 sizeBytes
 sizeKnown
@@ -2977,7 +3086,6 @@ Spatio
 spc
 specialised
 speciffed
-specificaiton
 specificities
 Specifieds
 SpectralBand
@@ -3014,6 +3122,7 @@ StartTransaction
 stat'ed
 stateful
 stderr
+stdev
 stdin
 stdout
 stealInteriorRing
@@ -3052,6 +3161,8 @@ Struve
 styleurl
 styleurls
 su
+subalgorithm
+subalgorithms
 subarcs
 subarray
 subbottom
@@ -3060,6 +3171,8 @@ subclassed
 Subclassed
 subclasses
 Subclasses
+subcommand
+subcommands
 subdataset
 Subdataset
 subdatasets
@@ -3103,7 +3216,7 @@ subsetted
 subsetting
 Subsetting
 subsettings
-substituable
+substitutable
 substring
 subsubgroup
 subtelty
@@ -3132,6 +3245,7 @@ swi
 Swif
 swiftclient
 swq
+sxf
 sym
 symlinked
 syntaxes
@@ -3168,6 +3282,7 @@ tgz
 th
 thebuffer
 themself
+thenBand
 thescale
 thf
 THH
@@ -3216,6 +3331,7 @@ TileY
 tim
 timePosition
 timesheet
+timezones
 TinZ
 tippecanoe
 tm
@@ -3360,6 +3476,7 @@ UpdateFeature
 updateTime
 UpperLeftX
 UpperLeftY
+upsampling
 upsert
 uri
 url
@@ -3383,6 +3500,7 @@ utf
 UTF
 utils
 utm
+utmsmall
 va
 Vaisala
 valgrind
@@ -3402,6 +3520,7 @@ vcpkg
 vct
 vcvars
 vdc
+vdv
 vecror
 VectorInfo
 VectorInfoOptions
@@ -3419,6 +3538,7 @@ vetoers
 vetos
 Vexcel
 vfk
+vfs
 Viersen
 viewshed
 Viewshed
@@ -3435,6 +3555,7 @@ vrf
 vrt
 VRT
 VRTDataset
+VRTDerivedRasterBand
 VRTPansharpenedDataset
 VRTWarpedDataset
 vsgis
@@ -3444,6 +3565,7 @@ vsiaz
 vsicached
 vsicrypt
 vsicurl
+VSIFile
 VSIFOpen
 vsigs
 vsigz
@@ -3493,6 +3615,8 @@ webmercator
 WebP
 WEBP
 webviewer
+weighted_frac
+weighted_stdev
 wellformedness
 Westervelt
 westing

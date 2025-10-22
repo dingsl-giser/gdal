@@ -7,27 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2009, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dxf.h"
 #include "cpl_conv.h"
+#include "cpl_vsi_virtual.h"
+
+#include <algorithm>
 
 /************************************************************************/
 /*                       OGRDXFDriverIdentify()                         */
@@ -38,9 +25,14 @@ static int OGRDXFDriverIdentify(GDALOpenInfo *poOpenInfo)
 {
     if (poOpenInfo->fpL == nullptr || poOpenInfo->nHeaderBytes == 0)
         return FALSE;
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "dxf"))
+    if (poOpenInfo->IsExtensionEqualToCI("dxf"))
         return TRUE;
-    const char *pszIter = (const char *)poOpenInfo->pabyHeader;
+
+    const char *pszIter =
+        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
+    if (STARTS_WITH(pszIter, AUTOCAD_BINARY_DXF_SIGNATURE.data()))
+        return true;
+
     bool bFoundZero = false;
     int i = 0;  // Used after for.
     for (; pszIter[i]; i++)
@@ -83,16 +75,18 @@ static GDALDataset *OGRDXFDriverOpen(GDALOpenInfo *poOpenInfo)
     if (!OGRDXFDriverIdentify(poOpenInfo))
         return nullptr;
 
-    OGRDXFDataSource *poDS = new OGRDXFDataSource();
+    auto poDS = std::make_unique<OGRDXFDataSource>();
 
-    if (!poDS->Open(poOpenInfo->pszFilename, false,
+    VSILFILE *fp = nullptr;
+    std::swap(fp, poOpenInfo->fpL);
+
+    if (!poDS->Open(poOpenInfo->pszFilename, fp, false,
                     poOpenInfo->papszOpenOptions))
     {
-        delete poDS;
-        poDS = nullptr;
+        poDS.reset();
     }
 
-    return poDS;
+    return poDS.release();
 }
 
 /************************************************************************/
@@ -113,6 +107,124 @@ OGRDXFDriverCreate(const char *pszName, CPL_UNUSED int nBands,
         delete poDS;
         return nullptr;
     }
+}
+
+/************************************************************************/
+/*                   OGRDXFDriverCanVectorTranslateFrom()               */
+/************************************************************************/
+
+static bool OGRDXFDriverCanVectorTranslateFrom(
+    const char * /*pszDestName*/, GDALDataset *poSourceDS,
+    CSLConstList papszVectorTranslateArguments, char ***ppapszFailureReasons)
+{
+    VSIVirtualHandleUniquePtr fpSrc;
+    auto poSrcDriver = poSourceDS->GetDriver();
+    if (poSrcDriver && EQUAL(poSrcDriver->GetDescription(), "DXF"))
+    {
+        fpSrc.reset(VSIFOpenL(poSourceDS->GetDescription(), "rb"));
+    }
+    if (!fpSrc)
+    {
+        if (ppapszFailureReasons)
+            *ppapszFailureReasons = CSLAddString(
+                *ppapszFailureReasons, "Source driver is not binary DXF");
+        return false;
+    }
+    std::string osBuffer;
+    constexpr size_t nBinarySignatureLen = AUTOCAD_BINARY_DXF_SIGNATURE.size();
+    osBuffer.resize(nBinarySignatureLen);
+    if (!(fpSrc->Read(osBuffer.data(), 1, osBuffer.size()) == osBuffer.size() &&
+          memcmp(osBuffer.data(), AUTOCAD_BINARY_DXF_SIGNATURE.data(),
+                 nBinarySignatureLen) == 0))
+    {
+        if (ppapszFailureReasons)
+            *ppapszFailureReasons = CSLAddString(
+                *ppapszFailureReasons, "Source driver is not binary DXF");
+        return false;
+    }
+
+    if (papszVectorTranslateArguments)
+    {
+        const int nArgs = CSLCount(papszVectorTranslateArguments);
+        for (int i = 0; i < nArgs; ++i)
+        {
+            if (i + 1 < nArgs &&
+                (strcmp(papszVectorTranslateArguments[i], "-f") == 0 ||
+                 strcmp(papszVectorTranslateArguments[i], "-of") == 0))
+            {
+                ++i;
+            }
+            else
+            {
+                if (ppapszFailureReasons)
+                    *ppapszFailureReasons =
+                        CSLAddString(*ppapszFailureReasons,
+                                     "Direct copy from binary DXF does not "
+                                     "support GDALVectorTranslate() options");
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+/************************************************************************/
+/*                     OGRDXFDriverVectorTranslateFrom()                */
+/************************************************************************/
+
+static GDALDataset *OGRDXFDriverVectorTranslateFrom(
+    const char *pszDestName, GDALDataset *poSourceDS,
+    CSLConstList papszVectorTranslateArguments,
+    GDALProgressFunc /* pfnProgress */, void * /* pProgressData */)
+{
+    if (!OGRDXFDriverCanVectorTranslateFrom(
+            pszDestName, poSourceDS, papszVectorTranslateArguments, nullptr))
+    {
+        return nullptr;
+    }
+
+    CPLDebug("DXF",
+             "Doing direct translation from AutoCAD DXF Binary to DXF ASCII");
+
+    VSIVirtualHandleUniquePtr fpSrc(
+        VSIFOpenL(poSourceDS->GetDescription(), "rb"));
+    if (!fpSrc)
+    {
+        return nullptr;
+    }
+
+    VSIVirtualHandleUniquePtr fpDst(VSIFOpenL(pszDestName, "wb"));
+    if (!fpDst)
+    {
+        CPLError(CE_Failure, CPLE_FileIO, "Cannot create %s ", pszDestName);
+        return nullptr;
+    }
+
+    OGRDXFReaderBinary reader;
+    reader.Initialize(fpSrc.get());
+
+    constexpr const int BUFFER_SIZE = 4096;
+    std::string osBuffer;
+    osBuffer.resize(BUFFER_SIZE);
+
+    bool bOK = true;
+    int nCode;
+    while (bOK && (nCode = reader.ReadValue(&osBuffer[0], BUFFER_SIZE)) >= 0)
+    {
+        bOK = fpDst->Printf("%d\n%s\n", nCode, osBuffer.c_str()) != 0;
+        if (nCode == 0 && osBuffer.compare(0, 3, "EOF", 3) == 0)
+            break;
+    }
+
+    if (!bOK || VSIFCloseL(fpDst.release()) != 0)
+    {
+        CPLError(CE_Failure, CPLE_FileIO, "Error while writing file");
+        return nullptr;
+    }
+
+    GDALOpenInfo oOpenInfo(pszDestName, GA_ReadOnly);
+    return OGRDXFDriverOpen(&oOpenInfo);
 }
 
 /************************************************************************/
@@ -145,6 +257,28 @@ void RegisterOGRDXF()
         "file' default='trailer.dxf'/>"
         "  <Option name='FIRST_ENTITY' type='int' description='Identifier of "
         "first entity'/>"
+        "  <Option name='INSUNITS' type='string-select' "
+        "description='Drawing units for the model space ($INSUNITS system "
+        "variable)' default='AUTO'>"
+        "    <Value>AUTO</Value>"
+        "    <Value>HEADER_VALUE</Value>"
+        "    <Value alias='0'>UNITLESS</Value>"
+        "    <Value alias='1'>INCHES</Value>"
+        "    <Value alias='2'>FEET</Value>"
+        "    <Value alias='4'>MILLIMETERS</Value>"
+        "    <Value alias='5'>CENTIMETERS</Value>"
+        "    <Value alias='6'>METERS</Value>"
+        "    <Value alias='21'>US_SURVEY_FEET</Value>"
+        "  </Option>"
+        "  <Option name='MEASUREMENT' type='string-select' "
+        "description='Whether the current drawing uses imperial or metric "
+        "hatch "
+        "pattern and linetype ($MEASUREMENT system variable)' "
+        "default='HEADER_VALUE'>"
+        "    <Value>HEADER_VALUE</Value>"
+        "    <Value alias='0'>IMPERIAL</Value>"
+        "    <Value alias='1'>METRIC</Value>"
+        "  </Option>"
         "</CreationOptionList>");
 
     poDriver->SetMetadataItem(
@@ -188,6 +322,8 @@ void RegisterOGRDXF()
     poDriver->pfnOpen = OGRDXFDriverOpen;
     poDriver->pfnIdentify = OGRDXFDriverIdentify;
     poDriver->pfnCreate = OGRDXFDriverCreate;
+    poDriver->pfnCanVectorTranslateFrom = OGRDXFDriverCanVectorTranslateFrom;
+    poDriver->pfnVectorTranslateFrom = OGRDXFDriverVectorTranslateFrom;
 
     GetGDALDriverManager()->RegisterDriver(poDriver);
 }

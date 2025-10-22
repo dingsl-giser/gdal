@@ -8,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -748,7 +732,7 @@ static void free_func_get_metadata_item(void *_elt)
 GDALProxyPoolDataset::GDALProxyPoolDataset(
     const char *pszSourceDatasetDescription, int nRasterXSizeIn,
     int nRasterYSizeIn, GDALAccess eAccessIn, int bSharedIn,
-    const char *pszProjectionRefIn, double *padfGeoTransform,
+    const char *pszProjectionRefIn, const GDALGeoTransform *pGT,
     const char *pszOwner)
     : responsiblePID(GDALGetResponsiblePIDForCurrentThread()),
       pszProjectionRef(pszProjectionRefIn ? CPLStrdup(pszProjectionRefIn)
@@ -765,20 +749,10 @@ GDALProxyPoolDataset::GDALProxyPoolDataset(
     bShared = CPL_TO_BOOL(bSharedIn);
     m_pszOwner = pszOwner ? CPLStrdup(pszOwner) : nullptr;
 
-    if (padfGeoTransform)
+    if (pGT)
     {
-        memcpy(adfGeoTransform, padfGeoTransform, 6 * sizeof(double));
-        bHasSrcGeoTransform = true;
-    }
-    else
-    {
-        adfGeoTransform[0] = 0;
-        adfGeoTransform[1] = 1;
-        adfGeoTransform[2] = 0;
-        adfGeoTransform[3] = 0;
-        adfGeoTransform[4] = 0;
-        adfGeoTransform[5] = 1;
-        bHasSrcGeoTransform = false;
+        m_gt = *pGT;
+        m_bHasSrcGeoTransform = true;
     }
 
     if (pszProjectionRefIn)
@@ -827,8 +801,8 @@ GDALProxyPoolDataset *GDALProxyPoolDataset::Create(
         return nullptr;
     poSelf->nRasterXSize = poUnderlyingDS->GetRasterXSize();
     poSelf->nRasterYSize = poUnderlyingDS->GetRasterYSize();
-    if (poUnderlyingDS->GetGeoTransform(poSelf->adfGeoTransform) == CE_None)
-        poSelf->bHasSrcGeoTransform = true;
+    if (poUnderlyingDS->GetGeoTransform(poSelf->m_gt) == CE_None)
+        poSelf->m_bHasSrcGeoTransform = true;
     const auto poSRS = poUnderlyingDS->GetSpatialRef();
     if (poSRS)
     {
@@ -1027,26 +1001,27 @@ const OGRSpatialReference *GDALProxyPoolDataset::GetSpatialRef() const
 /*                        SetGeoTransform()                             */
 /************************************************************************/
 
-CPLErr GDALProxyPoolDataset::SetGeoTransform(double *padfGeoTransform)
+CPLErr GDALProxyPoolDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    bHasSrcGeoTransform = false;
-    return GDALProxyDataset::SetGeoTransform(padfGeoTransform);
+    m_gt = gt;
+    m_bHasSrcGeoTransform = false;
+    return GDALProxyDataset::SetGeoTransform(gt);
 }
 
 /************************************************************************/
 /*                        GetGeoTransform()                             */
 /************************************************************************/
 
-CPLErr GDALProxyPoolDataset::GetGeoTransform(double *padfGeoTransform)
+CPLErr GDALProxyPoolDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    if (bHasSrcGeoTransform)
+    if (m_bHasSrcGeoTransform)
     {
-        memcpy(padfGeoTransform, adfGeoTransform, 6 * sizeof(double));
+        gt = m_gt;
         return CE_None;
     }
     else
     {
-        return GDALProxyDataset::GetGeoTransform(padfGeoTransform);
+        return GDALProxyDataset::GetGeoTransform(gt);
     }
 }
 
@@ -1181,11 +1156,12 @@ const GDAL_GCP *GDALProxyPoolDataset::GetGCPs()
 GDALProxyPoolDatasetH GDALProxyPoolDatasetCreate(
     const char *pszSourceDatasetDescription, int nRasterXSize, int nRasterYSize,
     GDALAccess eAccess, int bShared, const char *pszProjectionRef,
-    double *padfGeoTransform)
+    const double *padfGeoTransform)
 {
     return reinterpret_cast<GDALProxyPoolDatasetH>(new GDALProxyPoolDataset(
         pszSourceDatasetDescription, nRasterXSize, nRasterYSize, eAccess,
-        bShared, pszProjectionRef, padfGeoTransform));
+        bShared, pszProjectionRef,
+        reinterpret_cast<const GDALGeoTransform *>(padfGeoTransform)));
 }
 
 /************************************************************************/

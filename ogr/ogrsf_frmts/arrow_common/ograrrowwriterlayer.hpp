@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGARROWWRITERLAYER_HPP_INCLUDED
@@ -124,6 +108,124 @@ inline bool OGRArrowWriterLayer::FinalizeWriting()
 }
 
 /************************************************************************/
+/*                      RemoveIDFromMemberOfEnsembles()                 */
+/************************************************************************/
+
+/* static */
+inline void
+OGRArrowWriterLayer::RemoveIDFromMemberOfEnsembles(CPLJSONObject &obj)
+{
+    // Remove "id" from members of datum ensembles for compatibility with
+    // older PROJ versions
+    // Cf https://github.com/opengeospatial/geoparquet/discussions/110
+    // and https://github.com/OSGeo/PROJ/pull/3221
+    if (obj.GetType() == CPLJSONObject::Type::Object)
+    {
+        for (auto &subObj : obj.GetChildren())
+        {
+            RemoveIDFromMemberOfEnsembles(subObj);
+        }
+    }
+    else if (obj.GetType() == CPLJSONObject::Type::Array &&
+             obj.GetName() == "members")
+    {
+        for (auto &subObj : obj.ToArray())
+        {
+            subObj.Delete("id");
+        }
+    }
+}
+
+/************************************************************************/
+/*                            IdentifyCRS()                             */
+/************************************************************************/
+
+/* static */
+inline OGRSpatialReference
+OGRArrowWriterLayer::IdentifyCRS(const OGRSpatialReference *poSRS)
+{
+    OGRSpatialReference oSRSIdentified(*poSRS);
+
+    if (poSRS->GetAuthorityName(nullptr) == nullptr)
+    {
+        // Try to find a registered CRS that matches the input one
+        int nEntries = 0;
+        int *panConfidence = nullptr;
+        OGRSpatialReferenceH *pahSRS =
+            poSRS->FindMatches(nullptr, &nEntries, &panConfidence);
+
+        // If there are several matches >= 90%, take the only one
+        // that is EPSG
+        int iOtherAuthority = -1;
+        int iEPSG = -1;
+        const char *const apszOptions[] = {
+            "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
+        int iConfidenceBestMatch = -1;
+        for (int iSRS = 0; iSRS < nEntries; iSRS++)
+        {
+            auto poCandidateCRS = OGRSpatialReference::FromHandle(pahSRS[iSRS]);
+            if (panConfidence[iSRS] < iConfidenceBestMatch ||
+                panConfidence[iSRS] < 70)
+            {
+                break;
+            }
+            if (poSRS->IsSame(poCandidateCRS, apszOptions))
+            {
+                const char *pszAuthName =
+                    poCandidateCRS->GetAuthorityName(nullptr);
+                if (pszAuthName != nullptr && EQUAL(pszAuthName, "EPSG"))
+                {
+                    iOtherAuthority = -2;
+                    if (iEPSG < 0)
+                    {
+                        iConfidenceBestMatch = panConfidence[iSRS];
+                        iEPSG = iSRS;
+                    }
+                    else
+                    {
+                        iEPSG = -1;
+                        break;
+                    }
+                }
+                else if (iEPSG < 0 && pszAuthName != nullptr)
+                {
+                    if (EQUAL(pszAuthName, "OGC"))
+                    {
+                        const char *pszAuthCode =
+                            poCandidateCRS->GetAuthorityCode(nullptr);
+                        if (pszAuthCode && EQUAL(pszAuthCode, "CRS84"))
+                        {
+                            iOtherAuthority = iSRS;
+                            break;
+                        }
+                    }
+                    else if (iOtherAuthority == -1)
+                    {
+                        iConfidenceBestMatch = panConfidence[iSRS];
+                        iOtherAuthority = iSRS;
+                    }
+                    else
+                        iOtherAuthority = -2;
+                }
+            }
+        }
+        if (iEPSG >= 0)
+        {
+            oSRSIdentified = *OGRSpatialReference::FromHandle(pahSRS[iEPSG]);
+        }
+        else if (iOtherAuthority >= 0)
+        {
+            oSRSIdentified =
+                *OGRSpatialReference::FromHandle(pahSRS[iOtherAuthority]);
+        }
+        OSRFreeSRSArray(pahSRS);
+        CPLFree(panConfidence);
+    }
+
+    return oSRSIdentified;
+}
+
+/************************************************************************/
 /*                       CreateSchemaCommon()                           */
 /************************************************************************/
 
@@ -200,7 +302,19 @@ inline void OGRArrowWriterLayer::CreateSchemaCommon()
             {
                 const int nPrecision = poFieldDefn->GetPrecision();
                 if (nWidth != 0 && nPrecision != 0)
-                    dt = arrow::decimal(nWidth, nPrecision);
+                {
+                    // Since arrow 18.0, we could use arrow::smallest_decimal()
+                    // to return the smallest representation (i.e. possibly
+                    // decimal32 and decimal64). But for now keep decimal128
+                    // as the minimum for backwards compatibility.
+                    // GetValueDecimal() and other functions in
+                    // ogrlayerarrow.cpp would have to be adapted for decimal32
+                    // and decimal64 compatibility.
+                    if (nWidth > 38)
+                        dt = arrow::decimal256(nWidth, nPrecision);
+                    else
+                        dt = arrow::decimal128(nWidth, nPrecision);
+                }
                 else if (eSubDT == OFSTFloat32)
                     dt = arrow::float32();
                 else
@@ -319,11 +433,71 @@ inline void OGRArrowWriterLayer::CreateSchemaCommon()
                 arrow::field("m", arrow::float64(), false));
         auto pointStructType(arrow::struct_(std::move(pointFields)));
 
+        const auto getListOfVertices = [&getFixedSizeListOfPoint]()
+        {
+            return arrow::list(std::make_shared<arrow::Field>(
+                "vertices", getFixedSizeListOfPoint()));
+        };
+
+        const auto getListOfRings = [&getListOfVertices]()
+        {
+            return arrow::list(
+                std::make_shared<arrow::Field>("rings", getListOfVertices()));
+        };
+
+        const auto getListOfVerticesStruct = [&pointStructType]()
+        {
+            return arrow::list(
+                std::make_shared<arrow::Field>("vertices", pointStructType));
+        };
+
+        const auto getListOfRingsStruct = [&getListOfVerticesStruct]()
+        {
+            return arrow::list(std::make_shared<arrow::Field>(
+                "rings", getListOfVerticesStruct()));
+        };
+
         std::shared_ptr<arrow::DataType> dt;
         switch (m_aeGeomEncoding[i])
         {
             case OGRArrowGeomEncoding::WKB:
-                dt = arrow::binary();
+#if ARROW_VERSION_MAJOR >= 21
+                if (m_bUseArrowWKBExtension)
+                {
+                    CPLJSONDocument oMetadataDoc;
+
+                    const auto poSRS = poGeomFieldDefn->GetSpatialRef();
+                    if (poSRS)
+                    {
+                        OGRSpatialReference oSRSIdentified(IdentifyCRS(poSRS));
+
+                        // CRS encoded as PROJJSON
+                        char *pszPROJJSON = nullptr;
+                        oSRSIdentified.exportToPROJJSON(&pszPROJJSON, nullptr);
+                        CPLJSONDocument oCRSDoc;
+                        CPL_IGNORE_RET_VAL(oCRSDoc.LoadMemory(pszPROJJSON));
+                        CPLFree(pszPROJJSON);
+                        CPLJSONObject oCRSRoot = oCRSDoc.GetRoot();
+                        RemoveIDFromMemberOfEnsembles(oCRSRoot);
+
+                        oMetadataDoc.GetRoot().Add("crs", oCRSRoot);
+                    }
+
+                    if (m_bEdgesSpherical)
+                    {
+                        oMetadataDoc.GetRoot().Add("edges", "spherical");
+                    }
+
+                    const std::string metadata = oMetadataDoc.GetRoot().Format(
+                        CPLJSONObject::PrettyFormat::Plain);
+                    dt = std::make_shared<OGRGeoArrowWkbExtensionType>(
+                        arrow::binary(), metadata);
+                }
+                else
+#endif
+                {
+                    dt = arrow::binary();
+                }
                 break;
 
             case OGRArrowGeomEncoding::WKT:
@@ -340,24 +514,26 @@ inline void OGRArrowWriterLayer::CreateSchemaCommon()
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_FSL_LINESTRING:
-                dt = arrow::list(getFixedSizeListOfPoint());
+                dt = getListOfVertices();
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_FSL_POLYGON:
-                dt = arrow::list(arrow::list(getFixedSizeListOfPoint()));
+                dt = getListOfRings();
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_FSL_MULTIPOINT:
-                dt = arrow::list(getFixedSizeListOfPoint());
+                dt = arrow::list(std::make_shared<arrow::Field>(
+                    "points", getFixedSizeListOfPoint()));
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_FSL_MULTILINESTRING:
-                dt = arrow::list(arrow::list(getFixedSizeListOfPoint()));
+                dt = arrow::list(std::make_shared<arrow::Field>(
+                    "linestrings", getListOfVertices()));
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_FSL_MULTIPOLYGON:
-                dt = arrow::list(
-                    arrow::list(arrow::list(getFixedSizeListOfPoint())));
+                dt = arrow::list(std::make_shared<arrow::Field>(
+                    "polygons", getListOfRings()));
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_POINT:
@@ -365,23 +541,26 @@ inline void OGRArrowWriterLayer::CreateSchemaCommon()
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_LINESTRING:
-                dt = arrow::list(pointStructType);
+                dt = getListOfVerticesStruct();
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_POLYGON:
-                dt = arrow::list(arrow::list(pointStructType));
+                dt = getListOfRingsStruct();
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_MULTIPOINT:
-                dt = arrow::list(pointStructType);
+                dt = arrow::list(
+                    std::make_shared<arrow::Field>("points", pointStructType));
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_MULTILINESTRING:
-                dt = arrow::list(arrow::list(pointStructType));
+                dt = arrow::list(std::make_shared<arrow::Field>(
+                    "linestrings", getListOfVerticesStruct()));
                 break;
 
             case OGRArrowGeomEncoding::GEOARROW_STRUCT_MULTIPOLYGON:
-                dt = arrow::list(arrow::list(arrow::list(pointStructType)));
+                dt = arrow::list(std::make_shared<arrow::Field>(
+                    "polygons", getListOfRingsStruct()));
                 break;
         }
 
@@ -2142,7 +2321,7 @@ inline GIntBig OGRArrowWriterLayer::GetFeatureCount(int bForce)
 /*                         TestCapability()                             */
 /************************************************************************/
 
-inline int OGRArrowWriterLayer::TestCapability(const char *pszCap)
+inline int OGRArrowWriterLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCCreateField) || EQUAL(pszCap, OLCCreateGeomField))
         return m_poSchema == nullptr;
@@ -2269,6 +2448,14 @@ inline bool OGRArrowWriterLayer::WriteArrowBatchInternal(
     CSLConstList papszOptions,
     std::function<bool(const std::shared_ptr<arrow::RecordBatch> &)> writeBatch)
 {
+#ifdef __COVERITY__
+    (void)schema;
+    (void)array;
+    (void)papszOptions;
+    (void)writeBatch;
+    CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+    return false;
+#else
     if (m_poSchema == nullptr)
     {
         CreateSchema();
@@ -2825,6 +3012,34 @@ inline bool OGRArrowWriterLayer::WriteArrowBatchInternal(
     }
     auto poRecordBatch = *poRecordBatchResult;
 
+    if (!(bRebuildBatch || !oMapGeomFieldNameToArray.empty()))
+    {
+        for (int i = 0; i < m_poSchema->num_fields(); ++i)
+        {
+            const auto oIter =
+                oMapGeomFieldNameToArray.find(m_poSchema->field(i)->name());
+            auto l_array = (oIter != oMapGeomFieldNameToArray.end())
+                               ? oIter->second
+                               : poRecordBatch->column(i);
+            const auto schemaType = m_poSchema->field(i)->type();
+            const auto arrayType = l_array->type();
+            if (schemaType->id() != arrow::Type::EXTENSION &&
+                arrayType->id() == arrow::Type::EXTENSION)
+            {
+                bRebuildBatch = true;
+            }
+            else if (schemaType->id() != arrayType->id())
+            {
+                CPLDebug(
+                    "Arrow",
+                    "Field idx=%d name='%s', schema type=%s, array type=%s", i,
+                    m_poSchema->field(i)->name().c_str(),
+                    schemaType->ToString().c_str(),
+                    arrayType->ToString().c_str());
+            }
+        }
+    }
+
     // below assertion commented out since it is not strictly necessary, but
     // reflects what ImportRecordBatch() does.
     // CPLAssert(array->release == nullptr);
@@ -2842,12 +3057,31 @@ inline bool OGRArrowWriterLayer::WriteArrowBatchInternal(
                 apoArrays.emplace_back(oIter->second);
             else
                 apoArrays.emplace_back(poRecordBatch->column(i));
-            if (apoArrays.back()->type()->id() !=
-                m_poSchema->field(i)->type()->id())
+
+            auto expectedFieldType = m_poSchema->field(i)->type();
+            if (expectedFieldType->id() == arrow::Type::EXTENSION)
             {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Field '%s' of unexpected type",
-                         m_poSchema->field(i)->name().c_str());
+                auto extensionType = cpl::down_cast<arrow::ExtensionType *>(
+                    expectedFieldType.get());
+                expectedFieldType = extensionType->storage_type();
+            }
+
+            if (apoArrays.back()->type()->id() == arrow::Type::EXTENSION)
+            {
+                apoArrays.back() =
+                    std::static_pointer_cast<arrow::ExtensionArray>(
+                        apoArrays.back())
+                        ->storage();
+            }
+
+            if (apoArrays.back()->type()->id() != expectedFieldType->id())
+            {
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "Field '%s' of unexpected type. Got '%s', expected '%s'",
+                    m_poSchema->field(i)->name().c_str(),
+                    apoArrays.back()->type()->name().c_str(),
+                    expectedFieldType->name().c_str());
                 return false;
             }
         }
@@ -2869,6 +3103,7 @@ inline bool OGRArrowWriterLayer::WriteArrowBatchInternal(
         return true;
     }
     return false;
+#endif
 }
 
 #endif /* OGARROWWRITERLAYER_HPP_INCLUDED */

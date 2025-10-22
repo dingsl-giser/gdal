@@ -7,38 +7,12 @@
  ******************************************************************************
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
 #include "cpl_string.h"
 #include "ershdrnode.h"
-
-/************************************************************************/
-/*                             ERSHdrNode()                             */
-/************************************************************************/
-
-ERSHdrNode::ERSHdrNode()
-    : nItemMax(0), nItemCount(0), papszItemName(nullptr),
-      papszItemValue(nullptr), papoItemChild(nullptr)
-{
-}
 
 /************************************************************************/
 /*                            ~ERSHdrNode()                             */
@@ -73,13 +47,13 @@ void ERSHdrNode::MakeSpace()
 {
     if (nItemCount == nItemMax)
     {
-        nItemMax = (int)(nItemMax * 1.3) + 10;
-        papszItemName =
-            (char **)CPLRealloc(papszItemName, sizeof(char *) * nItemMax);
-        papszItemValue =
-            (char **)CPLRealloc(papszItemValue, sizeof(char *) * nItemMax);
-        papoItemChild =
-            (ERSHdrNode **)CPLRealloc(papoItemChild, sizeof(void *) * nItemMax);
+        nItemMax = nItemMax + nItemMax / 3 + 10;
+        papszItemName = static_cast<char **>(
+            CPLRealloc(papszItemName, sizeof(char *) * nItemMax));
+        papszItemValue = static_cast<char **>(
+            CPLRealloc(papszItemValue, sizeof(char *) * nItemMax));
+        papoItemChild = static_cast<ERSHdrNode **>(
+            CPLRealloc(papoItemChild, sizeof(ERSHdrNode *) * nItemMax));
     }
 }
 
@@ -428,11 +402,11 @@ ERSHdrNode *ERSHdrNode::FindNode(const char *pszPath)
 
 {
     std::string osPathFirst, osPathRest;
-    const std::string osPath = pszPath;
-    size_t iDot = osPath.find_first_of('.');
+    std::string osPath = pszPath;
+    const size_t iDot = osPath.find('.');
     if (iDot == std::string::npos)
     {
-        osPathFirst = osPath;
+        osPathFirst = std::move(osPath);
     }
     else
     {

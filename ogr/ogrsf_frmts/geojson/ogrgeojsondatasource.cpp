@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Mateusz Loskot
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -39,6 +23,7 @@
 #include "cpl_conv.h"
 #include "cpl_error.h"
 #include "cpl_http.h"
+#include "cpl_multiproc.h"  // CPLSleep()
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 #include "cpl_vsi_error.h"
@@ -51,10 +36,12 @@
 #include "ogr_feature.h"
 #include "ogr_geometry.h"
 #include "ogr_spatialref.h"
+#include "ogrlibjsonutils.h"
 #include "ogrgeojsonreader.h"
 #include "ogrgeojsonutils.h"
 #include "ogrgeojsonwriter.h"
 #include "ogrsf_frmts.h"
+#include "ogr_schema_override.h"
 
 // #include "symbol_renames.h"
 
@@ -100,6 +87,46 @@ CPLErr OGRGeoJSONDataSource::Close()
             eErr = CE_Failure;
     }
     return eErr;
+}
+
+/************************************************************************/
+/*                 DealWithOgrSchemaOpenOption()                       */
+/************************************************************************/
+
+bool OGRGeoJSONDataSource::DealWithOgrSchemaOpenOption(
+    const GDALOpenInfo *poOpenInfo)
+{
+    const std::string osFieldsSchemaOverrideParam =
+        CSLFetchNameValueDef(poOpenInfo->papszOpenOptions, "OGR_SCHEMA", "");
+
+    if (!osFieldsSchemaOverrideParam.empty())
+    {
+
+        if (poOpenInfo->eAccess == GA_Update)
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "OGR_SCHEMA open option is not supported in update mode.");
+            return false;
+        }
+
+        OGRSchemaOverride oSchemaOverride;
+        const auto nErrorCount = CPLGetErrorCounter();
+        if (!oSchemaOverride.LoadFromJSON(osFieldsSchemaOverrideParam) ||
+            !oSchemaOverride.IsValid())
+        {
+            if (nErrorCount == CPLGetErrorCounter())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Content of OGR_SCHEMA in %s is not valid",
+                         osFieldsSchemaOverrideParam.c_str());
+            }
+            return false;
+        }
+
+        if (!oSchemaOverride.DefaultApply(this, "GeoJSON"))
+            return false;
+    }
+    return true;
 }
 
 /************************************************************************/
@@ -190,13 +217,21 @@ int OGRGeoJSONDataSource::Open(GDALOpenInfo *poOpenInfo,
 
     SetDescription(poOpenInfo->pszFilename);
     LoadLayers(poOpenInfo, nSrcType, pszUnprefixed, pszJSonFlavor);
+
+    if (!DealWithOgrSchemaOpenOption(poOpenInfo))
+    {
+        Clear();
+        return FALSE;
+    }
+
     if (nLayers_ == 0)
     {
         bool bEmitError = true;
         if (eGeoJSONSourceService == nSrcType)
         {
-            const CPLString osTmpFilename = CPLSPrintf(
-                "/vsimem/%p/%s", this, CPLGetFilename(poOpenInfo->pszFilename));
+            const CPLString osTmpFilename =
+                VSIMemGenerateHiddenFilename(CPLSPrintf(
+                    "geojson_%s", CPLGetFilename(poOpenInfo->pszFilename)));
             VSIFCloseL(VSIFileFromMemBuffer(osTmpFilename, (GByte *)pszGeoData_,
                                             nGeoDataLen_, TRUE));
             pszGeoData_ = nullptr;
@@ -218,19 +253,10 @@ int OGRGeoJSONDataSource::Open(GDALOpenInfo *poOpenInfo,
 }
 
 /************************************************************************/
-/*                           GetName()                                  */
-/************************************************************************/
-
-const char *OGRGeoJSONDataSource::GetName()
-{
-    return pszName_ ? pszName_ : "";
-}
-
-/************************************************************************/
 /*                           GetLayerCount()                            */
 /************************************************************************/
 
-int OGRGeoJSONDataSource::GetLayerCount()
+int OGRGeoJSONDataSource::GetLayerCount() const
 {
     return nLayers_;
 }
@@ -239,7 +265,7 @@ int OGRGeoJSONDataSource::GetLayerCount()
 /*                           GetLayer()                                 */
 /************************************************************************/
 
-OGRLayer *OGRGeoJSONDataSource::GetLayer(int nLayer)
+const OGRLayer *OGRGeoJSONDataSource::GetLayer(int nLayer) const
 {
     if (0 <= nLayer && nLayer < nLayers_)
     {
@@ -644,13 +670,14 @@ OGRGeoJSONDataSource::ICreateLayer(const char *pszNameIn,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRGeoJSONDataSource::TestCapability(const char *pszCap)
+int OGRGeoJSONDataSource::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
         return fpOut_ != nullptr && nLayers_ == 0;
-    else if (EQUAL(pszCap, ODsCZGeometries) ||
-             EQUAL(pszCap, ODsCMeasuredGeometries))
-        return TRUE;
+    else if (EQUAL(pszCap, ODsCMeasuredGeometries))
+        return m_bSupportsMGeometries;
+    else if (EQUAL(pszCap, ODsCZGeometries))
+        return m_bSupportsZGeometries;
 
     return FALSE;
 }
@@ -834,27 +861,9 @@ int OGRGeoJSONDataSource::ReadFromService(GDALOpenInfo *poOpenInfo,
     /* -------------------------------------------------------------------- */
     /*      Fetch the GeoJSON result.                                        */
     /* -------------------------------------------------------------------- */
-    char *papsOptions[] = {
-        const_cast<char *>("HEADERS=Accept: text/plain, application/json"),
-        nullptr};
-
-    CPLHTTPResult *pResult = CPLHTTPFetch(pszSource, papsOptions);
-
-    /* -------------------------------------------------------------------- */
-    /*      Try to handle CURL/HTTP errors.                                 */
-    /* -------------------------------------------------------------------- */
-    if (nullptr == pResult || 0 == pResult->nDataLen ||
-        0 != CPLGetLastErrorNo())
+    CPLHTTPResult *pResult = GeoJSONHTTPFetchWithContentTypeHeader(pszSource);
+    if (!pResult)
     {
-        CPLHTTPDestroyResult(pResult);
-        return FALSE;
-    }
-
-    if (0 != pResult->nStatus)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Curl reports error: %d: %s",
-                 pResult->nStatus, pResult->pszErrBuf);
-        CPLHTTPDestroyResult(pResult);
         return FALSE;
     }
 
@@ -1139,6 +1148,29 @@ void OGRGeoJSONDataSource::SetOptionsOnReader(GDALOpenInfo *poOpenInfo,
     poReader->SetDateAsString(CPLTestBool(CSLFetchNameValueDef(
         poOpenInfo->papszOpenOptions, "DATE_AS_STRING",
         CPLGetConfigOption("OGR_GEOJSON_DATE_AS_STRING", "NO"))));
+
+    const char *pszForeignMembers = CSLFetchNameValueDef(
+        poOpenInfo->papszOpenOptions, "FOREIGN_MEMBERS", "AUTO");
+    if (EQUAL(pszForeignMembers, "AUTO"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::AUTO);
+    }
+    else if (EQUAL(pszForeignMembers, "ALL"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::ALL);
+    }
+    else if (EQUAL(pszForeignMembers, "NONE"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::NONE);
+    }
+    else if (EQUAL(pszForeignMembers, "STAC"))
+    {
+        poReader->SetForeignMemberProcessing(
+            OGRGeoJSONBaseReader::ForeignMemberProcessing::STAC);
+    }
 }
 
 /************************************************************************/

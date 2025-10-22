@@ -8,27 +8,12 @@
  * Copyright (c) 1999, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -46,7 +31,7 @@ class EIRDataset final : public RawDataset
 
     VSILFILE *fpImage = nullptr;  // image data file
     bool bGotTransform = false;
-    double adfGeoTransform[6] = {0, 0, 0, 0, 0, 0};
+    GDALGeoTransform m_gt{};
     bool bHDRDirty = false;
     CPLStringList aosHDR{};
     char **papszExtraFiles = nullptr;
@@ -64,7 +49,7 @@ class EIRDataset final : public RawDataset
     EIRDataset();
     ~EIRDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     char **GetFileList() override;
 
@@ -109,7 +94,7 @@ CPLErr EIRDataset::Close()
         if (nBands > 0 && GetAccess() == GA_Update)
         {
             RawRasterBand *poBand =
-                reinterpret_cast<RawRasterBand *>(GetRasterBand(1));
+                cpl::down_cast<RawRasterBand *>(GetRasterBand(1));
 
             int bNoDataSet = FALSE;
             const double dfNoData = poBand->GetNoDataValue(&bNoDataSet);
@@ -201,16 +186,16 @@ void EIRDataset::ResetKeyValue(const char *pszKey, const char *pszValue)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr EIRDataset::GetGeoTransform(double *padfTransform)
+CPLErr EIRDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGotTransform)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
-    return GDALPamDataset::GetGeoTransform(padfTransform);
+    return GDALPamDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -296,9 +281,9 @@ GDALDataset *EIRDataset::Open(GDALOpenInfo *poOpenInfo)
     CPLStringList aosHDR;
 
     // default raster file: same name with no extension
-    const CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
-    const CPLString osName = CPLGetBasename(poOpenInfo->pszFilename);
-    CPLString osRasterFilename = CPLFormCIFilename(osPath, osName, "");
+    const CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
+    const CPLString osName = CPLGetBasenameSafe(poOpenInfo->pszFilename);
+    CPLString osRasterFilename = CPLFormCIFilenameSafe(osPath, osName, "");
 
     // parse the header file
     const char *pszLine = nullptr;
@@ -343,7 +328,13 @@ GDALDataset *EIRDataset::Open(GDALOpenInfo *poOpenInfo)
         }
         else if (EQUAL(aosTokens[0], "PIXEL_FILES"))
         {
-            osRasterFilename = CPLFormCIFilename(osPath, aosTokens[1], "");
+            if (CPLHasPathTraversal(aosTokens[1]))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", aosTokens[1]);
+                return nullptr;
+            }
+            osRasterFilename = CPLFormCIFilenameSafe(osPath, aosTokens[1], "");
         }
         else if (EQUAL(aosTokens[0], "FORMAT"))
         {
@@ -434,9 +425,7 @@ GDALDataset *EIRDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The EIR driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("EIR");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
@@ -551,11 +540,11 @@ GDALDataset *EIRDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (!poDS->bGotTransform)
         poDS->bGotTransform = CPL_TO_BOOL(GDALReadWorldFile(
-            poOpenInfo->pszFilename, nullptr, poDS->adfGeoTransform));
+            poOpenInfo->pszFilename, nullptr, poDS->m_gt.data()));
 
     if (!poDS->bGotTransform)
         poDS->bGotTransform = CPL_TO_BOOL(GDALReadWorldFile(
-            poOpenInfo->pszFilename, "wld", poDS->adfGeoTransform));
+            poOpenInfo->pszFilename, "wld", poDS->m_gt.data()));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */

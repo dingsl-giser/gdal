@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR samples
 # Purpose:  Merge the content of several vector datasets into a single one.
@@ -11,23 +10,7 @@
 # Copyright (c) 2017, Even Rouault <even dot rouault at spatialys dot com>
 # Copyright (c) 2021, Idan Miara <idan@miara.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import glob
@@ -43,7 +26,7 @@ from osgeo_utils.auxiliary.util import GetOutputDriverFor, enable_gdal_exception
 
 def Usage(isError):
     f = sys.stderr if isError else sys.stdout
-    print("Usage: ogrmerge.py [--help] [--help-general]", file=f)
+    print("Usage: ogrmerge [--help] [--help-general]", file=f)
     print("            -o <out_dsname> <src_dsname> [<src_dsname>]...", file=f)
     print("            [-f <format>] [-single] [-nln <layer_name_template>]", file=f)
     print("            [-update | -overwrite_ds] [-append | -overwrite_layer]", file=f)
@@ -58,7 +41,7 @@ def Usage(isError):
     print("            [-src_layer_field_content <layer_name_template>]", file=f)
     print("", file=f)
     print(
-        "* layer_name_template can contain the following substituable " "variables:",
+        "* layer_name_template can contain the following substitutable " "variables:",
         file=f,
     )
     print(
@@ -113,7 +96,7 @@ def _Esc(x):
     return gdal.EscapeString(x, gdal.CPLES_XML).decode("UTF-8")
 
 
-class XMLWriter(object):
+class XMLWriter:
     def __init__(self, f):
         self.f = f
         self.inc = 0
@@ -228,12 +211,27 @@ def process(argv, progress=None, progress_arg=None):
         elif arg == "-a_srs" and i + 1 < len(argv):
             i = i + 1
             a_srs = argv[i]
+            srs = osr.SpatialReference()
+            try:
+                srs.SetFromUserInput(a_srs)
+            except Exception:
+                raise ValueError("Invalid value for -a_srs")
         elif arg == "-s_srs" and i + 1 < len(argv):
             i = i + 1
             s_srs = argv[i]
+            srs = osr.SpatialReference()
+            try:
+                srs.SetFromUserInput(s_srs)
+            except Exception:
+                raise ValueError("Invalid value for -s_srs")
         elif arg == "-t_srs" and i + 1 < len(argv):
             i = i + 1
             t_srs = argv[i]
+            srs = osr.SpatialReference()
+            try:
+                srs.SetFromUserInput(t_srs)
+            except Exception:
+                raise ValueError("Invalid value for -t_srs")
         elif arg == "-nln" and i + 1 < len(argv):
             i = i + 1
             layer_name_template = argv[i]

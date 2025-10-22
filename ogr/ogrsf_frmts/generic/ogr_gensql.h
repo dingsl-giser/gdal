@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Classes related to generic implementation of ExecuteSQL().
@@ -9,23 +8,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_GENSQL_H_INCLUDED
@@ -83,14 +66,14 @@ class OGRGenSQLResultsLayer final : public OGRLayer
     bool m_bOrderByValid = false;
 
     GIntBig m_nNextIndexFID = 0;
-    std::unique_ptr<OGRFeature> m_poSummaryFeature{};
+    mutable std::unique_ptr<OGRFeature> m_poSummaryFeature{};
 
     int m_iFIDFieldIndex = 0;
 
     GIntBig m_nIteratedFeatures = -1;
     std::vector<std::string> m_aosDistinctList{};
 
-    bool PrepareSummary();
+    bool PrepareSummary() const;
 
     std::unique_ptr<OGRFeature> TranslateFeature(std::unique_ptr<OGRFeature>);
     void CreateOrderByIndex();
@@ -108,7 +91,7 @@ class OGRGenSQLResultsLayer final : public OGRLayer
     void ExploreExprForIgnoredFields(swq_expr_node *expr, CPLHashSet *hSet);
     void AddFieldDefnToSet(int iTable, int iColumn, CPLHashSet *hSet);
 
-    int ContainGeomSpecialField(swq_expr_node *expr);
+    int ContainGeomSpecialField(const swq_expr_node *expr) const;
 
     void InvalidateOrderByIndex();
 
@@ -121,36 +104,45 @@ class OGRGenSQLResultsLayer final : public OGRLayer
                           std::unique_ptr<swq_select> &&pSelectInfo,
                           const OGRGeometry *poSpatFilter, const char *pszWHERE,
                           const char *pszDialect);
-    virtual ~OGRGenSQLResultsLayer();
+    ~OGRGenSQLResultsLayer() override;
 
-    virtual OGRGeometry *GetSpatialFilter() override;
+    OGRGeometry *GetSpatialFilter() override;
 
-    virtual void ResetReading() override;
-    virtual OGRFeature *GetNextFeature() override;
-    virtual OGRErr SetNextByIndex(GIntBig nIndex) override;
-    virtual OGRFeature *GetFeature(GIntBig nFID) override;
+    void ResetReading() override;
+    OGRFeature *GetNextFeature() override;
+    OGRErr SetNextByIndex(GIntBig nIndex) override;
+    OGRFeature *GetFeature(GIntBig nFID) override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
+    GIntBig GetFeatureCount(int bForce = TRUE) override;
 
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override
-    {
-        return GetExtent(0, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce = TRUE) override;
+    int TestCapability(const char *) const override;
 
-    virtual int TestCapability(const char *) override;
+    virtual OGRErr ISetSpatialFilter(int iGeomField,
+                                     const OGRGeometry *) override;
+    OGRErr SetAttributeFilter(const char *) override;
 
-    virtual void SetSpatialFilter(OGRGeometry *poGeom) override
-    {
-        SetSpatialFilter(0, poGeom);
-    }
+    bool GetArrowStream(struct ArrowArrayStream *out_stream,
+                        CSLConstList papszOptions = nullptr) override;
 
-    virtual void SetSpatialFilter(int iGeomField, OGRGeometry *) override;
-    virtual OGRErr SetAttributeFilter(const char *) override;
+    int GetArrowSchema(struct ArrowArrayStream *stream,
+                       struct ArrowSchema *out_schema) override;
+
+  protected:
+    friend struct OGRGenSQLResultsLayerArrowStreamPrivateData;
+
+    int GetArrowSchemaForwarded(struct ArrowArrayStream *stream,
+                                struct ArrowSchema *out_schema) const;
+
+    int GetNextArrowArray(struct ArrowArrayStream *stream,
+                          struct ArrowArray *out_array) override;
+
+    int GetNextArrowArrayForwarded(struct ArrowArrayStream *stream,
+                                   struct ArrowArray *out_array);
 };
 
 /*! @endcond */

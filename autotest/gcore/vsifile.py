@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test VSI file primitives
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -35,7 +18,6 @@ import time
 
 import gdaltest
 import pytest
-from lxml import etree
 
 from osgeo import gdal, ogr
 
@@ -148,21 +130,70 @@ def vsifile_generic(filename, options=[]):
         if fp:
             gdal.VSIFCloseL(fp)
 
+    dirname = os.path.dirname(filename)
+    if dirname == "/vsimem":
+        dirname += "/"
+    d = gdal.OpenDir(dirname)
+    assert d
+    content = []
+    try:
+        while True:
+            entry = gdal.GetNextDirEntry(d)
+            if not entry:
+                break
+            content.append(entry.name)
+    finally:
+        gdal.CloseDir(d)
+
+    assert content == ["vsifile.bin"]
+
+    gdal.Unlink(filename)
+
+    if not filename.startswith("/vsicrypt/"):
+        assert gdal.RmdirRecursive(filename + "/i_dont_exist") == -1
+
+        subdir = filename + "/subdir"
+        assert gdal.MkdirRecursive(subdir + "/subsubdir", 0o755) == 0
+
+        assert gdal.VSIStatL(subdir) is not None
+        assert gdal.VSIStatL(subdir + "/subsubdir") is not None
+
+        if not filename.startswith("/vsimem/"):
+            assert gdal.Rmdir(subdir) == -1
+            assert gdal.VSIStatL(subdir) is not None
+
+        # Safety belt...
+        assert "pytest-of" in filename or filename.startswith("/vsimem/")
+        assert gdal.RmdirRecursive(filename) == 0
+
+        assert gdal.VSIStatL(subdir) is None
+        assert gdal.VSIStatL(subdir + "/subsubdir") is None
+
 
 ###############################################################################
 # Test /vsimem
 
 
-def test_vsifile_1():
-    vsifile_generic("/vsimem/vsifile_1.bin")
+def test_vsifile_vsimem(tmp_vsimem):
+    vsifile_generic(f"{tmp_vsimem}/vsifile.bin")
 
 
 ###############################################################################
 # Test regular file system
 
 
-def test_vsifile_2():
-    vsifile_generic("tmp/vsifile_2.bin")
+def test_vsifile_regular_filesystem(tmp_path):
+    vsifile_generic(f"{tmp_path}/vsifile.bin")
+
+
+###############################################################################
+# Test regular file system
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows specific test")
+def test_vsifile_regular_filesystem_non_utf8(tmp_path):
+    with gdal.config_option("GDAL_FILENAME_IS_UTF8", "NO"):
+        vsifile_generic(f"{tmp_path}/vsifile.bin")
 
 
 ###############################################################################
@@ -170,8 +201,8 @@ def test_vsifile_2():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows specific test")
-def test_vsifile_WRITE_THROUGH():
-    vsifile_generic("tmp/vsifile_WRITE_THROUGH.bin", ["WRITE_THROUGH=YES"])
+def test_vsifile_WRITE_THROUGH(tmp_path):
+    vsifile_generic(f"{tmp_path}/vsifile.bin", ["WRITE_THROUGH=YES"])
 
 
 ###############################################################################
@@ -231,16 +262,16 @@ def test_vsifile_4():
 # Test vsicache
 
 
-@pytest.mark.parametrize("cache_size", ("0", "65536", None))
-def test_vsifile_5(cache_size):
+@pytest.mark.parametrize("cache_size", ("0", "64kb", None))
+def test_vsifile_5(tmp_path, cache_size):
 
-    fp = gdal.VSIFOpenL("tmp/vsifile_5.bin", "wb")
+    fp = gdal.VSIFOpenL(tmp_path / "vsifile_5.bin", "wb")
     ref_data = "".join(["%08X" % i for i in range(5 * 32768)])
     gdal.VSIFWriteL(ref_data, 1, len(ref_data), fp)
     gdal.VSIFCloseL(fp)
 
     with gdal.config_options({"VSI_CACHE": "YES", "VSI_CACHE_SIZE": cache_size}):
-        fp = gdal.VSIFOpenL("tmp/vsifile_5.bin", "rb")
+        fp = gdal.VSIFOpenL(tmp_path / "vsifile_5.bin", "rb")
 
         gdal.VSIFSeekL(fp, 50000, 0)
         if gdal.VSIFTellL(fp) != 50000:
@@ -270,8 +301,6 @@ def test_vsifile_5(cache_size):
             pytest.fail()
 
         gdal.VSIFCloseL(fp)
-
-    gdal.Unlink("tmp/vsifile_5.bin")
 
 
 ###############################################################################
@@ -680,6 +709,15 @@ def test_vsifile_14():
 
 
 ###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/10821
+
+
+def test_vsifile_vsitar_of_vsitar():
+
+    gdal.Open("/vsitar/{/vsitar/data/tar_of_tar_gzip.tar}/byte_tif.tar.gz/byte.tif")
+
+
+###############################################################################
 # Test issue with Error() not detecting end of corrupted gzip stream (#6944)
 
 
@@ -756,7 +794,13 @@ def test_vsifile_18():
 # Test gdal.GetFileSystemOptions()
 
 
+@pytest.mark.skipif(
+    gdaltest.is_travis_branch("mingw64"),
+    reason="Crashes for unknown reason",
+)
 def test_vsifile_19():
+
+    from lxml import etree
 
     for prefix in gdal.GetFileSystemsPrefixes():
         options = gdal.GetFileSystemOptions(prefix)
@@ -774,12 +818,8 @@ def test_vsifile_19():
 
 def test_vsifile_20():
 
-    try:
+    with pytest.raises(Exception):
         gdal.VSIFReadL(1, 1, None)
-    except ValueError:
-        return
-
-    pytest.fail()
 
 
 ###############################################################################
@@ -1215,6 +1255,27 @@ def test_vsifile_vsizip_stored():
     assert gdal.VSIFEofL(f) == 1
     assert gdal.VSIFErrorL(f) == 0
     gdal.VSIFCloseL(f)
+
+
+###############################################################################
+# Test creating a file in a ZIP with non-Latin1 character
+
+
+def test_vsifile_vsizip_non_latin1_char(tmp_vsimem):
+
+    gdal.ErrorReset()
+    with gdal.VSIFile(
+        f"/vsizip/{tmp_vsimem}/test.zip/" + b"\xE5\xAE\x89.txt".decode("UTF-8"), "wb"
+    ) as f:
+        f.close()
+        assert gdal.GetLastErrorMsg() == ""
+
+    assert gdal.ReadDir(f"/vsizip/{tmp_vsimem}/test.zip") == [
+        b"\xE5\xAE\x89.txt".decode("UTF-8")
+    ]
+
+    with gdal.VSIFile(f"{tmp_vsimem}/test.zip", "rb") as f:
+        assert b"0xE50xAE0x89" in f.read()
 
 
 ###############################################################################
@@ -1708,7 +1769,7 @@ def test_vsifile_MultipartUpload():
         with gdal.quiet_errors():
             assert gdal.MultipartUploadGetCapabilities("foo") is None
     with gdal.ExceptionMgr(useExceptions=True):
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadGetCapabilities(None)
 
         with pytest.raises(
@@ -1717,7 +1778,7 @@ def test_vsifile_MultipartUpload():
         ):
             gdal.MultipartUploadGetCapabilities("foo")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadStart(None)
 
         with pytest.raises(
@@ -1726,9 +1787,9 @@ def test_vsifile_MultipartUpload():
         ):
             gdal.MultipartUploadStart("foo")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadAddPart(None, "", 1, 0, b"")
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadAddPart("", None, 1, 0, b"")
 
         with pytest.raises(
@@ -1737,9 +1798,9 @@ def test_vsifile_MultipartUpload():
         ):
             gdal.MultipartUploadAddPart("", "", 1, 0, b"")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadEnd(None, "", [], 0)
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadEnd("", None, [], 0)
 
         with pytest.raises(
@@ -1748,9 +1809,9 @@ def test_vsifile_MultipartUpload():
         ):
             gdal.MultipartUploadEnd("", "", [], 0)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadAbort(None, "")
-        with pytest.raises(ValueError):
+        with pytest.raises(Exception):
             gdal.MultipartUploadAbort("", None)
 
         with pytest.raises(
@@ -1758,3 +1819,70 @@ def test_vsifile_MultipartUpload():
             match=r"MultipartUploadAbort\(\) not supported by this file system",
         ):
             gdal.MultipartUploadAbort("", "")
+
+
+def test_vsifile_move(tmp_path, tmp_vsimem):
+
+    tab_pct = [0]
+
+    def myProgress(pct, msg, user_data):
+        tab_pct[0] = pct
+        return True
+
+    gdal.FileFromMemBuffer(tmp_vsimem / "a", "foo")
+
+    assert gdal.Move(tmp_vsimem / "a", tmp_vsimem / "a") == 0
+
+    tab_pct = [0]
+    assert gdal.Move(tmp_vsimem / "a", tmp_path, callback=myProgress) == 0
+    assert tab_pct[0] == 1
+    assert gdal.VSIStatL(tmp_vsimem / "a") is None
+    assert gdal.VSIStatL(tmp_path / "a").size == 3
+
+    assert gdal.Move(tmp_path / "a", tmp_path / "i_do" / "not" / "exist") == -1
+
+    tab_pct = [0]
+    assert gdal.Move(tmp_path / "a", tmp_path / "b", callback=myProgress) == 0
+    assert tab_pct[0] == 1
+
+    assert gdal.VSIStatL(tmp_path / "a") is None
+    assert gdal.VSIStatL(tmp_path / "b").size == 3
+
+    gdal.Mkdir(tmp_vsimem / "dir", 0o755)
+
+    tab_pct = [0]
+    assert gdal.Move(tmp_vsimem / "dir", tmp_path, callback=myProgress) == 0
+    assert tab_pct[0] == 1
+    assert gdal.VSIStatL(tmp_vsimem / "dir") is None
+    assert gdal.VSIStatL(tmp_path / "dir") is not None
+
+    assert gdal.Move(tmp_path / "dir", tmp_vsimem) == 0
+
+    gdal.FileFromMemBuffer(tmp_vsimem / "dir" / "myfile", "bar")
+
+    tab_pct = [0]
+    assert gdal.Move(tmp_vsimem / "dir", tmp_path, callback=myProgress) == 0
+    assert tab_pct[0] == 1
+    assert gdal.VSIStatL(tmp_vsimem / "dir") is None
+    assert gdal.VSIStatL(tmp_path / "dir") is not None
+    assert gdal.VSIStatL(tmp_path / "dir" / "myfile").size == 3
+
+
+###############################################################################
+# Test that Rename() can rename on top of an existing file
+
+
+@pytest.mark.parametrize(
+    "source,dest", [("src.bin", "dst.bin"), ("srcé.bin", "dsté.bin")]
+)
+def test_vsifile_rename_on_top_of_existing_file(tmp_path, source, dest):
+
+    with gdal.VSIFile(tmp_path / dest, "wb") as f:
+        f.write(b"a")
+
+    with gdal.VSIFile(tmp_path / source, "wb") as f:
+        f.write(b"bc")
+
+    assert gdal.Rename(tmp_path / source, tmp_path / dest) == 0
+
+    assert gdal.VSIStatL(tmp_path / dest).size == 2

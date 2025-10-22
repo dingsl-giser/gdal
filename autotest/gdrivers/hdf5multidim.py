@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test multidimensional support in HDF5 driver
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2019, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import struct
@@ -377,6 +360,17 @@ def test_hdf5_multidim_read_array():
         buffer_datatype=gdal.ExtendedDataType.Create(gdal.GDT_UInt16),
     )
     assert struct.unpack("H" * (len(data) // 2), data) == got_data_ref
+
+
+def test_hdf5_multidim_read_stride():
+
+    ds = gdal.OpenEx("HDF5:data/netcdf/alldatatypes.nc", gdal.OF_MULTIDIM_RASTER)
+    rg = ds.GetRootGroup()
+
+    var = rg.OpenMDArray("ubyte_z2_y2_x2_var")
+    assert struct.unpack("B" * 119, var.Read(buffer_stride=[3 * 4 * 2, 4 * 2, 1 * 2]))[
+        ::2
+    ] == struct.unpack("B" * 60, var.Read())
 
 
 def test_hdf5_multidim_attr_alldatatypes():
@@ -903,4 +897,38 @@ def test_hdf5_multidim_read_cfloat16():
         23.0,
         24.0,
         24.0,
+    )
+
+
+##############################################################################
+# Test opening a HDF5EOS grid file
+
+
+def test_hdf5_multimdim_eos_grid_VIIRS_Grid_IMG_2D_issue_12941():
+
+    ds = gdal.OpenEx(
+        "data/hdf5/dummy_HDFEOS_IIRS_Grid_IMG_2D_issue_1294.h5", gdal.OF_MULTIDIM_RASTER
+    )
+    ar = ds.GetRootGroup().OpenMDArrayFromFullname(
+        "/HDFEOS/GRIDS/test/Data Fields/test"
+    )
+    dims = ar.GetDimensions()
+    assert len(dims) == 2
+    assert dims[0].GetName() == "YDim"
+    assert dims[0].GetFullName() == "/HDFEOS/GRIDS/test/YDim"
+    assert dims[0].GetType() == "HORIZONTAL_Y"
+    assert dims[0].GetSize() == 5
+    assert dims[1].GetName() == "XDim"
+    assert dims[1].GetFullName() == "/HDFEOS/GRIDS/test/XDim"
+    assert dims[1].GetType() == "HORIZONTAL_X"
+    assert dims[1].GetSize() == 4
+    ydim_var = dims[0].GetIndexingVariable()
+    assert ydim_var
+    assert struct.unpack("d" * 5, ydim_var.Read())[0:2] == pytest.approx(
+        (5448557.5463664, 5226167.4424332)
+    )
+    xdim_var = dims[1].GetIndexingVariable()
+    assert xdim_var
+    assert struct.unpack("d" * 4, xdim_var.Read())[0:2] == pytest.approx(
+        (-972956.7047086251, -694969.0747918751)
     )

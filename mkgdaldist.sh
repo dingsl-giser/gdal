@@ -1,7 +1,5 @@
 #!/bin/sh
 #
-# $Id$
-#
 # mkgdaldist.sh - prepares GDAL source distribution package
 
 set -eu
@@ -99,10 +97,10 @@ cd dist_wrk
 
 if test "$TAG" != ""; then
    echo "Generating package '${GDAL_VERSION}' from '${TAG}' tag"
-   git clone "${GITURL}" gdal
+   git clone --depth 1 --branch "${TAG}" "${GITURL}" gdal
 else
    echo "Generating package '${GDAL_VERSION}' from '${BRANCH}' branch"
-   git clone -b "${BRANCH}" --single-branch "${GITURL}" gdal
+   git clone -b "${BRANCH}" --single-branch "${GITURL}" gdal --depth 1
 fi
 
 if [ ! -d gdal ] ; then
@@ -139,18 +137,31 @@ rm -rf ci
 CWD=${PWD}
 
 #
-# Generate man pages
+# Generate man pages and doc snapshot
 #
-echo "* Generating man pages..."
+echo "* Generating man pages and doc snapshot..."
 
-(cd doc; SPHINXOPTS='--keep-going -j auto' make man)
+mkdir cmake-build-doc
+cmake -DCMAKE_BUILD_TYPE=Debug \
+      -DGDAL_BUILD_OPTIONAL_DRIVERS=OFF \
+      -DOGR_BUILD_OPTIONAL_DRIVERS=OFF \
+      -DBUILD_APPS=ON \
+      -DBUILD_TESTING=OFF \
+      -DBUILD_PYTHON_BINDINGS=ON \
+      -DBUILD_JAVA_BINDINGS=ON \
+      -DGDAL_JAVA_GENERATE_JAVADOC=ON \
+      -DGDAL_ENABLE_DRIVER_GTI=ON \
+      -DOGR_ENABLE_DRIVER_GPKG=ON \
+      -DOGR_ENABLE_DRIVER_OPENFILEGDB=ON \
+      -B cmake-build-doc -S .
+cmake --build cmake-build-doc --target man doczip -j$(nproc)
 mkdir -p man/man1
-cp doc/build/man/*.1 man/man1
-rm -rf doc/build
-rm -f doc/.doxygen_up_to_date
+cp cmake-build-doc/doc/build/man/*.1 man/man1
+cp cmake-build-doc/doc/gdal*doc.zip "${CWD}/../.."
+rm -rf cmake-build-doc
 
 if test ! -f "man/man1/gdalinfo.1"; then
-    echo " make man failed"
+    echo " man build failed"
 fi
 
 cd "$CWD"
@@ -197,10 +208,7 @@ $MD5 "gdal-${GDAL_VERSION}${RC}.tar.xz" > "gdal-${GDAL_VERSION}${RC}.tar.xz.md5"
 $MD5 "gdal-${GDAL_VERSION}${RC}.tar.gz" > "gdal-${GDAL_VERSION}${RC}.tar.gz.md5"
 $MD5 "gdal${COMPRESSED_VERSION}${RC}.zip" > "gdal${COMPRESSED_VERSION}${RC}.zip.md5"
 
-
 echo "* Signing..."
-GPG_TTY=$(tty)
-export GPG_TTY
 for file in "gdal-${GDAL_VERSION}${RC}.tar.xz" "gdal-${GDAL_VERSION}${RC}.tar.gz" "gdal${COMPRESSED_VERSION}${RC}.zip"; do \
   gpg2 --output ${file}.sig --detach-sig $file ; \
 done

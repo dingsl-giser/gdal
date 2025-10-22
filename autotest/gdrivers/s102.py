@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for S102 driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -211,34 +194,43 @@ def test_s102_multidim():
 ###############################################################################
 
 
-def test_s102_QualityOfSurvey():
+@pytest.mark.parametrize(
+    "filename,quality_group_name",
+    [
+        (
+            "data/s102/test_s102_v2.2_with_QualityOfSurvey_nodata_0.h5",
+            "QualityOfSurvey",
+        ),
+        (
+            "data/s102/test_s102_v3.0_with_QualityOfBathymetryCoverage.h5",
+            "QualityOfBathymetryCoverage",
+        ),
+    ],
+)
+def test_s102_QualityOfSurvey(filename, quality_group_name):
 
-    ds = gdal.Open("data/s102/test_s102_v2.2_with_QualityOfSurvey.h5")
+    ds = gdal.Open(filename)
     assert ds.GetSubDatasets() == [
         (
-            'S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":BathymetryCoverage',
+            f'S102:"{filename}":BathymetryCoverage',
             "Bathymetric gridded data",
         ),
         (
-            'S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":QualityOfSurvey',
-            "Georeferenced metadata QualityOfSurvey",
+            f'S102:"{filename}":{quality_group_name}',
+            f"Georeferenced metadata {quality_group_name}",
         ),
     ]
 
     with pytest.raises(Exception, match="Unsupported subdataset component"):
-        gdal.Open('S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":invalid')
+        gdal.Open(f'S102:"{filename}":invalid')
 
-    ds = gdal.Open(
-        'S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":BathymetryCoverage'
-    )
+    ds = gdal.Open(f'S102:"{filename}":BathymetryCoverage')
     assert len(ds.GetSubDatasets()) == 0
     assert ds.RasterCount == 2
     assert ds.RasterXSize == 3
     assert ds.RasterYSize == 2
 
-    ds = gdal.Open(
-        'S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":QualityOfSurvey'
-    )
+    ds = gdal.Open(f'S102:"{filename}":{quality_group_name}')
     assert len(ds.GetSubDatasets()) == 0
     assert ds.RasterCount == 1
     assert ds.RasterXSize == 3
@@ -278,7 +270,7 @@ def test_s102_QualityOfSurvey():
     assert rat.GetValueAsString(4, 2) == "e"
 
     ds = gdal.OpenEx(
-        'S102:"data/s102/test_s102_v2.2_with_QualityOfSurvey.h5":QualityOfSurvey',
+        f'S102:"{filename}":{quality_group_name}',
         open_options=["NORTH_UP=NO"],
     )
     assert ds.GetGeoTransform() == pytest.approx((1.8, 0.4, 0.0, 47.75, 0.0, 0.5))
@@ -292,13 +284,15 @@ def test_s102_QualityOfSurvey():
 def test_s102_QualityOfSurvey_multidim():
 
     ds = gdal.OpenEx(
-        "data/s102/test_s102_v2.2_with_QualityOfSurvey.h5", gdal.OF_MULTIDIM_RASTER
+        "data/s102/test_s102_v2.2_with_QualityOfSurvey_nodata_0.h5",
+        gdal.OF_MULTIDIM_RASTER,
     )
     rg = ds.GetRootGroup()
     ar = rg.OpenMDArrayFromFullname(
         "/QualityOfSurvey/QualityOfSurvey.01/Group_001/values"
     )
     assert ar.GetSpatialRef().GetAuthorityCode(None) == "4326"
+    assert ar.GetNoDataValue() == 0
 
     assert ar.GetDimensions()[0].GetName() == "Y"
     y = ar.GetDimensions()[0].GetIndexingVariable()
@@ -365,3 +359,74 @@ def test_s102_metadata_compute_stats_after(tmp_path):
     with gdal.Open(out_filename) as ds:
         assert ds.GetRasterBand(1).GetMetadataItem("STATISTICS_MINIMUM") is not None
         assert ds.GetMetadataItem("foo") == "bar"
+
+
+###############################################################################
+
+
+def test_s102_no_uncertainty():
+
+    ds = gdal.Open("data/s102/test_s102_v3.0_without_uncertainty_nodata_0.h5")
+    assert ds.RasterCount == 1
+    assert struct.unpack("f" * 6, ds.ReadRaster()) == (1e6, 4, 5, 0, 1, 2)
+    assert ds.GetRasterBand(1).GetNoDataValue() == 0
+
+
+###############################################################################
+
+
+def test_s102_multiple_feature_instance_groups():
+
+    ds = gdal.Open("data/s102/multiple_feature_instance_groups.h5")
+    assert ds.GetSubDatasets() == [
+        (
+            'S102:"data/s102/multiple_feature_instance_groups.h5":BathymetryCoverage.01',
+            "Bathymetric gridded data, instance BathymetryCoverage.01, vertical datum meanLowerLowWater (MLLW)",
+        ),
+        (
+            'S102:"data/s102/multiple_feature_instance_groups.h5":BathymetryCoverage.02',
+            "Bathymetric gridded data, instance BathymetryCoverage.02, vertical datum lowWater (LW)",
+        ),
+        (
+            'S102:"data/s102/multiple_feature_instance_groups.h5":QualityOfBathymetryCoverage',
+            "Georeferenced metadata QualityOfBathymetryCoverage",
+        ),
+    ]
+    assert ds.RasterCount == 0
+
+    ds = gdal.Open(
+        'S102:"data/s102/multiple_feature_instance_groups.h5":BathymetryCoverage.01'
+    )
+    assert ds.GetSubDatasets() == []
+    assert ds.RasterCount == 1
+    assert ds.RasterYSize == 2
+    assert ds.RasterXSize == 4
+    assert struct.unpack("f" * 8, ds.ReadRaster()) == (4, 5, 6, 7, 0, 1, 2, 3)
+    assert ds.GetMetadataItem("VERTICAL_DATUM_MEANING") == "meanLowerLowWater"
+
+    ds = gdal.Open(
+        'S102:"data/s102/multiple_feature_instance_groups.h5":BathymetryCoverage.02'
+    )
+    assert ds.GetSubDatasets() == []
+    assert ds.RasterCount == 1
+    assert ds.RasterYSize == 2
+    assert ds.RasterXSize == 4
+    assert struct.unpack("f" * 8, ds.ReadRaster()) == (40, 50, 60, 70, 0, 10, 20, 30)
+    assert ds.GetMetadataItem("VERTICAL_DATUM_MEANING") == "lowWater"
+
+    ds = gdal.Open(
+        'S102:"data/s102/multiple_feature_instance_groups.h5":QualityOfBathymetryCoverage'
+    )
+    assert ds.GetSubDatasets() == []
+    assert ds.RasterCount == 1
+    assert ds.RasterYSize == 2
+    assert ds.RasterXSize == 4
+    assert struct.unpack("i" * 8, ds.ReadRaster()) == (5, 6, 7, 8, 1, 2, 3, 4)
+
+    with pytest.raises(
+        Exception,
+        match="Cannot find BathymetryCoverage.03 group in BathymetryCoverage group",
+    ):
+        gdal.Open(
+            'S102:"data/s102/multiple_feature_instance_groups.h5":BathymetryCoverage.03'
+        )

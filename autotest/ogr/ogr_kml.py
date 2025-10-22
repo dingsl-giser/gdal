@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  KML Driver testing.
@@ -11,23 +10,7 @@
 # Copyright (c) 2007, Matuesz Loskot <mateusz@loskot.net>
 # Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import gdaltest
@@ -79,30 +62,27 @@ def test_ogr_kml_attributes_1():
 
     assert feat.GetField("Name") == "Simple placemark", "Wrong name field value"
 
-    if feat.GetField("description")[:23] != "Attached to the ground.":
-        print("got: ", feat.GetField("description")[:23])
-        pytest.fail("Wrong description field value")
+    assert (
+        feat.GetField("description")
+        == "Attached to the ground. Intelligently places itself at the\nheight of the underlying terrain."
+    )
 
     feat = lyr.GetNextFeature()
     assert feat is not None, "expected feature not found."
 
     assert feat.GetField("Name") == "Floating placemark", "Wrong name field value"
 
-    if feat.GetField("description")[:25] != "Floats a defined distance":
-        print("got: ", feat.GetField("description")[:25])
-        pytest.fail("Wrong description field value")
+    assert feat.GetField("description") == "Floats a defined distance above the ground."
 
     feat = lyr.GetNextFeature()
     assert feat is not None, "expected feature not found."
 
     assert feat.GetField("Name") == "Extruded placemark", "Wrong name field value"
 
-    if (
+    assert (
         feat.GetField("description")
-        != 'Tethered to the ground by a customizable "tail"'
-    ):
-        print("got: ", feat.GetField("description"))
-        pytest.fail("Wrong description field value")
+        == 'Tethered to the ground by a customizable\n"tail"'
+    )
 
 
 ###############################################################################
@@ -593,7 +573,7 @@ def test_ogr_kml_write_schema(tmp_vsimem):
     <SimpleField name="realfield" type="float"></SimpleField>
 </Schema>
 <Folder><name>lyr</name>
-  <Placemark>
+  <Placemark id="lyr.1">
     <ExtendedData><SchemaData schemaUrl="#lyr">
         <SimpleData name="strfield">strfield_val</SimpleData>
         <SimpleData name="intfield">1</SimpleData>
@@ -664,7 +644,7 @@ def test_ogr_kml_two_layers(tmp_vsimem):
 <Folder><name>empty</name>
 </Folder>
 <Folder><name>lyr</name>
-  <Placemark>
+  <Placemark id="lyr.1">
     <ExtendedData><SchemaData schemaUrl="#lyr">
         <SimpleData name="foo">bar</SimpleData>
     </SchemaData></ExtendedData>

@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2023, kikitte.lee <kikitte.lee@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /*! @cond Doxygen_Suppress */
@@ -460,13 +444,42 @@ bool Polygonizer<PolyIdType, DataType>::processLine(
 template <typename DataType>
 OGRPolygonWriter<DataType>::OGRPolygonWriter(OGRLayerH hOutLayer,
                                              int iPixValField,
-                                             double *padfGeoTransform)
+                                             const GDALGeoTransform &gt,
+                                             int nCommitInterval)
     : PolygonReceiver<DataType>(), poOutLayer_(OGRLayer::FromHandle(hOutLayer)),
-      iPixValField_(iPixValField), padfGeoTransform_(padfGeoTransform)
+      poOutDS_(poOutLayer_->GetDataset()), iPixValField_(iPixValField), gt_(gt),
+      nCommitInterval_(nCommitInterval)
 {
+    if (nCommitInterval_ != 0)
+    {
+        CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+        if (!(poOutDS_ && poOutDS_->TestCapability(ODsCTransactions) &&
+              poOutDS_->StartTransaction(false) == OGRERR_NONE))
+        {
+            nCommitInterval_ = 0;
+        }
+    }
     poFeature_ = std::make_unique<OGRFeature>(poOutLayer_->GetLayerDefn());
     poPolygon_ = new OGRPolygon();
     poFeature_->SetGeometryDirectly(poPolygon_);
+}
+
+template <typename DataType> OGRPolygonWriter<DataType>::~OGRPolygonWriter()
+{
+    OGRPolygonWriter::Finalize();
+}
+
+template <typename DataType> bool OGRPolygonWriter<DataType>::Finalize()
+{
+    if (nFeaturesWrittenInTransaction_)
+    {
+        nFeaturesWrittenInTransaction_ = 0;
+        if (poOutDS_->CommitTransaction() != OGRERR_NONE)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 template <typename DataType>
@@ -474,7 +487,6 @@ void OGRPolygonWriter<DataType>::receive(RPolygon *poPolygon,
                                          DataType nPolygonCellValue)
 {
     std::vector<bool> oAccessedArc(poPolygon->oArcs.size(), false);
-    double *padfGeoTransform = padfGeoTransform_;
 
     OGRLinearRing *poFirstRing = poPolygon_->getExteriorRing();
     if (poFirstRing && poPolygon_->getNumInteriorRings() == 0)
@@ -488,8 +500,8 @@ void OGRPolygonWriter<DataType>::receive(RPolygon *poPolygon,
     }
 
     auto AddRingToPolygon =
-        [this, &poPolygon, &oAccessedArc,
-         padfGeoTransform](std::size_t iFirstArcIndex, OGRLinearRing *poRing)
+        [this, &poPolygon, &oAccessedArc](std::size_t iFirstArcIndex,
+                                          OGRLinearRing *poRing)
     {
         std::unique_ptr<OGRLinearRing> poNewRing;
         if (!poRing)
@@ -498,8 +510,7 @@ void OGRPolygonWriter<DataType>::receive(RPolygon *poPolygon,
             poRing = poNewRing.get();
         }
 
-        auto AddArcToRing =
-            [&poPolygon, poRing, padfGeoTransform](std::size_t iArcIndex)
+        auto AddArcToRing = [this, &poPolygon, poRing](std::size_t iArcIndex)
         {
             const auto &oArc = poPolygon->oArcs[iArcIndex];
             const bool bArcFollowRighthand = oArc.bFollowRighthand;
@@ -518,14 +529,9 @@ void OGRPolygonWriter<DataType>::receive(RPolygon *poPolygon,
                                       ? i
                                       : (nArcPointCount - i - 1)];
 
-                const double dfX = padfGeoTransform[0] +
-                                   oPixel[1] * padfGeoTransform[1] +
-                                   oPixel[0] * padfGeoTransform[2];
-                const double dfY = padfGeoTransform[3] +
-                                   oPixel[1] * padfGeoTransform[4] +
-                                   oPixel[0] * padfGeoTransform[5];
-
-                poRing->setPoint(nDstPointIdx, dfX, dfY);
+                const auto oGeoreferenced = gt_.Apply(oPixel[1], oPixel[0]);
+                poRing->setPoint(nDstPointIdx, oGeoreferenced.first,
+                                 oGeoreferenced.second);
                 ++nDstPointIdx;
             }
             return true;
@@ -581,11 +587,28 @@ void OGRPolygonWriter<DataType>::receive(RPolygon *poPolygon,
     if (poOutLayer_->CreateFeature(poFeature_.get()) != OGRERR_NONE)
         eErr_ = CE_Failure;
 
-    // Shouldn't happen for well behaved drivers, but better check...
-    else if (poFeature_->GetGeometryRef() != poPolygon_)
+    else
     {
-        poPolygon_ = new OGRPolygon();
-        poFeature_->SetGeometryDirectly(poPolygon_);
+        if (nCommitInterval_ != 0)
+        {
+            ++nFeaturesWrittenInTransaction_;
+            if (nFeaturesWrittenInTransaction_ == nCommitInterval_)
+            {
+                if (poOutDS_->CommitTransaction() != OGRERR_NONE ||
+                    poOutDS_->StartTransaction(false) != OGRERR_NONE)
+                {
+                    eErr_ = CE_Failure;
+                }
+                nFeaturesWrittenInTransaction_ = 0;
+            }
+        }
+
+        // Shouldn't happen for well behaved drivers, but better check...
+        if (poFeature_->GetGeometryRef() != poPolygon_)
+        {
+            poPolygon_ = new OGRPolygon();
+            poFeature_->SetGeometryDirectly(poPolygon_);
+        }
     }
 }
 

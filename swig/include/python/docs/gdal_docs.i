@@ -1,3 +1,8 @@
+// Note: Many functions in the gdal module are renamed from their
+// C/C++ equivalents, for example GDALAllRegister -> AllRegister.
+// It is the _original_ function name that must be used with
+// the "docstring" feature below.
+
 // gdal.AllRegister
 %feature("docstring") GDALAllRegister "
 
@@ -10,6 +15,38 @@ See :cpp:func:`GDALAllRegister`.
 See Also
 --------
 :py:func:`Driver.Register`
+";
+
+// gdal.ApplyGeoTransform
+%feature("docstring") GDALApplyGeoTransform "
+
+Apply a geotransform to convert a (col, row) location
+into a georeferenced (x, y) coordinate. To perform the
+inverse transformation, see :py:func:`InvGeoTransform`.
+
+See :cpp:func:`GDALApplyGeoTransform`.
+
+Parameters
+----------
+gt : tuple
+   Geotransform array, as described in :ref:`geotransforms_tut`.
+dfPixel : float
+   (Fractional) column in image coordinates (0.0 at the left edge of the image)
+dfLine : float
+   (Fractional) row in image coordinates (0.0 at the top of the image)
+
+Returns
+-------
+List
+   x, y values corresponding to the input location
+
+Examples
+--------
+>>> ds = gdal.Open('byte.tif')
+>>> gt = ds.GetGeoTransform()
+>>> gdal.ApplyGeoTransform(gt, 5, 7)
+[441020.0, 3750900.0]
+
 ";
 
 // gdal.GetCacheMax
@@ -157,12 +194,15 @@ See :cpp:func:`GDALGetDriverCount`.
 
 Examples
 --------
->>> gdal.GetDriverCount()
-227
->>> gdal.GetDriverByName('ESRI Shapefile').Deregister()
->>> gdal.GetDriverCount()
-226
 
+.. testsetup::
+    >>> pytest.skip()
+
+>>> gdal.GetDriverCount()
+>>> 124
+>>> gdal.GetDriverByName('MapInfo File').Deregister()
+>>> gdal.GetDriverCount()
+>>> 123
 ";
 
 // gdal.GetGlobalConfigOption
@@ -228,6 +268,33 @@ str
 
 ";
 
+// gdal.InvGeoTransform
+%feature("docstring") GDALInvGeoTransform "
+
+Invert a geotransform array so that it represents a conversion
+from georeferenced (x, y) coordinates to image (col, row) coordinates.
+
+Parameters
+----------
+gt : tuple
+   Geotransform array, as described in :ref:`geotransforms_tut`.
+
+Returns
+-------
+tuple
+   Geotransform array representing the inverse transformation
+
+Examples
+--------
+>>> ds = gdal.Open('byte.tif')
+>>> inv_gt = gdal.InvGeoTransform(ds.GetGeoTransform())
+>>> inv_gt
+(-7345.333333333333, 0.016666666666666666, 0.0, 62522.0, 0.0, -0.016666666666666666)
+>>> gdal.ApplyGeoTransform(inv_gt, 441020, 3750900)
+[5.0, 7.0]
+
+"
+
 // gdal.Open
 %feature("docstring") Open "
 
@@ -243,7 +310,8 @@ eAccess : int, default = :py:const:`gdal.GA_ReadOnly`
 
 Returns
 -------
-Dataset, or ``None`` on failure
+Dataset or None
+    A dataset if successful, or ``None`` on failure.
 
 See Also
 --------
@@ -267,14 +335,15 @@ flags : int
         may be combined using the ``|`` operator. See :cpp:func:`GDALOpenEx`.
 allowed_drivers : list, optional
         A list of the names of drivers that may attempt to open the dataset.
-open_options : dict/list, optional
+open_options : dict or list, optional
         A dict or list of name=value driver-specific opening options.
-sibling_files: list, optional
+sibling_files : list, optional
         A list of filenames that are auxiliary to the main filename
 
 Returns
 -------
-Dataset, or ``None`` on failure.
+Dataset or None
+    A dataset if successful, or ``None`` on failure.
 
 See Also
 --------
@@ -298,7 +367,8 @@ eAccess : int, default = :py:const:`gdal.GA_ReadOnly`
 
 Returns
 -------
-Dataset, or ``None`` on failure
+Dataset or None
+    A dataset if successful, or ``None`` on failure.
 
 See Also
 --------
@@ -315,7 +385,7 @@ See :cpp:func:`GDALSetCacheMax`.
 
 Parameters
 ----------
-nBytes: int
+nBytes : int
     Cache size in bytes
 
 See Also

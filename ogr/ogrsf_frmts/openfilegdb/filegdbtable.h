@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Implements reading of FileGDB tables
@@ -8,29 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef FILEGDBTABLE_H_INCLUDED
 #define FILEGDBTABLE_H_INCLUDED
 
 #include "ogr_core.h"
+#include "cpl_progress.h"
 #include "cpl_vsi.h"
 #include "ogr_geometry.h"
 
@@ -92,7 +76,7 @@ typedef enum
 class FileGDBTable;
 class FileGDBIndex;
 
-class FileGDBField
+class FileGDBField /* non final */
 {
     friend class FileGDBTable;
 
@@ -196,7 +180,7 @@ class FileGDBField
 /*                         FileGDBGeomField                             */
 /************************************************************************/
 
-class FileGDBGeomField : public FileGDBField
+class FileGDBGeomField /* non final */ : public FileGDBField
 {
     friend class FileGDBTable;
 
@@ -232,9 +216,7 @@ class FileGDBGeomField : public FileGDBField
                      double dfYOrigin, double dfXYScale, double dfXYTolerance,
                      const std::vector<double> &adfSpatialIndexGridResolution);
 
-    virtual ~FileGDBGeomField()
-    {
-    }
+    ~FileGDBGeomField() override;
 
     const std::string &GetWKT() const
     {
@@ -362,7 +344,7 @@ class FileGDBGeomField : public FileGDBField
 /*                         FileGDBRasterField                           */
 /************************************************************************/
 
-class FileGDBRasterField : public FileGDBGeomField
+class FileGDBRasterField final : public FileGDBGeomField
 {
   public:
     enum class Type
@@ -388,9 +370,7 @@ class FileGDBRasterField : public FileGDBGeomField
     {
     }
 
-    virtual ~FileGDBRasterField()
-    {
-    }
+    ~FileGDBRasterField() override;
 
     const std::string &GetRasterColumnName() const
     {
@@ -414,13 +394,9 @@ class FileGDBIndex
     std::string m_osExpression{};
 
   public:
-    FileGDBIndex()
-    {
-    }
+    FileGDBIndex() = default;
 
-    virtual ~FileGDBIndex()
-    {
-    }
+    ~FileGDBIndex();
 
     const std::string &GetIndexName() const
     {
@@ -627,7 +603,7 @@ class FileGDBTable
     bool SetTextUTF16();
 
     bool Sync(VSILFILE *fpTable = nullptr, VSILFILE *fpTableX = nullptr);
-    bool Repack();
+    bool Repack(GDALProgressFunc pfnProgress, void *pProgressData);
     void RecomputeExtent();
 
     //! Object should no longer be used after Close()
@@ -802,12 +778,10 @@ typedef enum
 /*                           FileGDBIterator                            */
 /************************************************************************/
 
-class FileGDBIterator
+class FileGDBIterator /* non final */
 {
   public:
-    virtual ~FileGDBIterator()
-    {
-    }
+    virtual ~FileGDBIterator() = default;
 
     virtual FileGDBTable *GetTable() = 0;
     virtual void Reset() = 0;
@@ -843,10 +817,13 @@ class FileGDBIterator
 /*                      FileGDBSpatialIndexIterator                     */
 /************************************************************************/
 
-class FileGDBSpatialIndexIterator : virtual public FileGDBIterator
+class FileGDBSpatialIndexIterator /* non final */
+    : virtual public FileGDBIterator
 {
   public:
     virtual bool SetEnvelope(const OGREnvelope &sFilterEnvelope) = 0;
+
+    ~FileGDBSpatialIndexIterator() override;
 
     static FileGDBSpatialIndexIterator *
     Build(FileGDBTable *poParent, const OGREnvelope &sFilterEnvelope);
@@ -856,12 +833,10 @@ class FileGDBSpatialIndexIterator : virtual public FileGDBIterator
 /*                       FileGDBOGRGeometryConverter                    */
 /************************************************************************/
 
-class FileGDBOGRGeometryConverter
+class FileGDBOGRGeometryConverter /* non final */
 {
   public:
-    virtual ~FileGDBOGRGeometryConverter()
-    {
-    }
+    virtual ~FileGDBOGRGeometryConverter();
 
     virtual OGRGeometry *GetAsGeometry(const OGRField *psField) = 0;
 

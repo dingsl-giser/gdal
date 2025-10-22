@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /* WARNING: VERY IMPORTANT NOTE: This file MUST not be directly compiled as */
@@ -153,7 +137,8 @@ static pcre2_code *re_compile_with_cache(sqlite3_context *ctx, const char *re)
 /*                         OGRSQLiteREGEXPFunction()                    */
 /************************************************************************/
 
-static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx, CPL_UNUSED int argc,
+static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx,
+                                    [[maybe_unused]] int argc,
                                     sqlite3_value **argv)
 {
     CPLAssert(argc == 2);
@@ -162,13 +147,14 @@ static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx, CPL_UNUSED int argc,
         reinterpret_cast<const char *>(sqlite3_value_text(argv[0]));
     if (!re)
     {
-        sqlite3_result_error(ctx, "no regexp", -1);
+        CPLDebug("SQLITE", "REGEXP: no regexp");
+        sqlite3_result_null(ctx);
         return;
     }
 
     if (sqlite3_value_type(argv[1]) == SQLITE_NULL)
     {
-        sqlite3_result_int(ctx, 0);
+        sqlite3_result_null(ctx);
         return;
     }
 
@@ -176,7 +162,8 @@ static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx, CPL_UNUSED int argc,
         reinterpret_cast<const char *>(sqlite3_value_text(argv[1]));
     if (!str)
     {
-        sqlite3_result_error(ctx, "no string", -1);
+        CPLDebug("SQLITE", "REGEXP: no string");
+        sqlite3_result_null(ctx);
         return;
     }
 
@@ -200,6 +187,9 @@ static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx, CPL_UNUSED int argc,
 #ifdef HAVE_GCC_DIAGNOSTIC_PUSH
 #pragma GCC diagnostic pop
 #endif
+
+    pcre2_match_data_free(md);
+
     sqlite3_result_int(ctx, rc >= 0);
 }
 
@@ -220,33 +210,38 @@ constexpr int CACHE_SIZE = 16;
 /*                         OGRSQLiteREGEXPFunction()                    */
 /************************************************************************/
 
-static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx, CPL_UNUSED int argc,
+static void OGRSQLiteREGEXPFunction(sqlite3_context *ctx,
+                                    [[maybe_unused]] int argc,
                                     sqlite3_value **argv)
 {
     CPLAssert(argc == 2);
 
-    const char *re = (const char *)sqlite3_value_text(argv[0]);
+    const char *re =
+        reinterpret_cast<const char *>(sqlite3_value_text(argv[0]));
     if (!re)
     {
-        sqlite3_result_error(ctx, "no regexp", -1);
+        CPLDebug("SQLITE", "REGEXP: no regexp");
+        sqlite3_result_null(ctx);
         return;
     }
 
     if (sqlite3_value_type(argv[1]) == SQLITE_NULL)
     {
-        sqlite3_result_int(ctx, 0);
+        sqlite3_result_null(ctx);
         return;
     }
 
-    const char *str = (const char *)sqlite3_value_text(argv[1]);
+    const char *str =
+        reinterpret_cast<const char *>(sqlite3_value_text(argv[1]));
     if (!str)
     {
-        sqlite3_result_error(ctx, "no string", -1);
+        CPLDebug("SQLITE", "REGEXP: no string");
+        sqlite3_result_null(ctx);
         return;
     }
 
     /* simple LRU cache */
-    cache_entry *cache = (cache_entry *)sqlite3_user_data(ctx);
+    cache_entry *cache = static_cast<cache_entry *>(sqlite3_user_data(ctx));
     CPLAssert(cache);
 
     bool found = false;

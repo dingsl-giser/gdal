@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test NetCDF driver support.
@@ -12,23 +11,7 @@
 # Copyright (c) 2008-2016, Even Rouault <even.rouault at spatialys.com>
 # Copyright (c) 2010, Kyle Shannon <kyle at pobox dot com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
@@ -562,7 +545,9 @@ def test_netcdf_11():
 
 def test_netcdf_cf_geog_with_srs():
 
+    gdal.ErrorReset()
     ds = gdal.Open("data/netcdf/cf_geog_with_srs.nc")
+    assert gdal.GetLastErrorMsg() == ""
 
     gt = ds.GetGeoTransform()
     assert gt == pytest.approx([-0.1, 0.2, 0, -79.1, 0, -0.2], rel=1e-5)
@@ -1190,6 +1175,10 @@ def test_netcdf_28(tmp_path):
 # metadata to netcdf file with SetMetadata() and SetMetadataItem()).
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_netcdf_29(tmp_path):
 
     # create tif file using gdalwarp
@@ -1451,6 +1440,10 @@ def test_netcdf_38():
 # Test VRT and NETCDF:
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_netcdf_39():
 
     shutil.copy("data/netcdf/two_vars_scale_offset.nc", "tmp")
@@ -1482,6 +1475,10 @@ def test_netcdf_39():
     assert cs == 65463
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_netcdf_39_absolute():
 
     if (
@@ -2431,6 +2428,21 @@ def test_netcdf_57(tmp_path):
 
 
 ###############################################################################
+# Test one layer per file creation
+
+
+@gdaltest.enable_exceptions()
+def test_netcdf_one_layer_per_file_failure(tmp_path):
+
+    ds = ogr.GetDriverByName("netCDF").CreateDataSource(
+        tmp_path / "my_subdir",
+        options=["MULTIPLE_LAYERS=SEPARATE_FILES", "GEOMETRY_ENCODING=WKT"],
+    )
+    with pytest.raises(Exception, match="Illegal characters"):
+        ds.CreateLayer("slash/not_allowed")
+
+
+###############################################################################
 # Test one layer per group (NC4)
 
 
@@ -2923,10 +2935,8 @@ def test_netcdf_66(tmp_path):
 
 def test_netcdf_67():
 
-    try:
-        import numpy
-    except ImportError:
-        pytest.skip()
+    gdaltest.importorskip_gdal_array()
+    numpy = pytest.importorskip("numpy")
 
     # disable bottom-up mode to use the real file's blocks size
     with gdal.config_option("GDAL_NETCDF_BOTTOMUP", "NO"):
@@ -4104,7 +4114,7 @@ def test_flipped_axis():
     assert ft_wkt == "POLYGON ((0 0,1 0,1 1,0 0))"
 
 
-def test_arbitrary_3Daxis_order_():
+def test_arbitrary_3Daxis_order():
 
     polygon = ogr.Open("data/netcdf-sg/arbitrary_axis_order_test.nc")
     assert polygon != None
@@ -6546,7 +6556,7 @@ def test_netcdf_create_metadata_with_equal_sign(tmp_path):
 # Test force opening a HDF55 file with netCDF driver
 
 
-def test_netcdf_force_opening_hdf5_file(tmp_vsimem):
+def test_netcdf_force_opening_hdf5_file():
 
     ds = gdal.OpenEx("data/hdf5/groups.h5", allowed_drivers=["netCDF"])
     assert ds.GetDriver().GetDescription() == "netCDF"
@@ -6563,3 +6573,270 @@ def test_netcdf_force_opening_no_match():
 
     drv = gdal.IdentifyDriverEx("data/byte.tif", allowed_drivers=["netCDF"])
     assert drv is None
+
+
+###############################################################################
+
+
+def test_netcdf_extra_dim_no_georef(tmp_path):
+
+    fname = tmp_path / "out.nc"
+
+    src_ds = gdal.Translate("", "../gcore/data/stefan_full_rgba.tif", format="MEM")
+    size_z = 4
+    src_ds.SetMetadataItem("NETCDF_DIM_EXTRA", "{Z}")
+    src_ds.SetMetadataItem("NETCDF_DIM_Z_DEF", f"{{{size_z},4}}")
+    src_ds.SetMetadataItem("NETCDF_DIM_Z_VALUES", "{0,1,2,3}")
+    src_ds.SetMetadataItem("Z#axis", "Z")
+
+    # Create netCDF file
+    gdal.GetDriverByName("netCDF").CreateCopy(fname, src_ds)
+
+    ds = gdal.Open(fname)
+    assert ds.RasterCount == 4
+    assert ds.ReadRaster() == src_ds.ReadRaster()
+
+
+###############################################################################
+# Verify that we can generate an output that is byte-identical to the expected golden file.
+# (might be risky depending on libopenjp2...)
+
+
+@pytest.mark.parametrize(
+    "src_filename,golden_file,creation_options",
+    [
+        # Created with gdal_translate gdal_translate autotest/gcore/data/byte.tif autotest/gdrivers/data/netcdf/byte_nc3_golden.nc  -co WRITE_GDAL_VERSION=NO  -co WRITE_GDAL_HISTORY=NO -co FORMAT=NC
+        (
+            "../gcore/data/byte.tif",
+            "data/netcdf/byte_nc3_golden.nc",
+            ["WRITE_GDAL_VERSION=NO", "WRITE_GDAL_HISTORY=NO", "FORMAT=NC"],
+        ),
+    ],
+)
+# I've that feeling that netCDF might be host endianness dependent...
+@pytest.mark.skipif(
+    sys.byteorder != "little", reason="only supported on little-endian hosts"
+)
+def test_netcdf_write_check_golden_file(
+    tmp_path, src_filename, golden_file, creation_options
+):
+
+    out_filename = str(tmp_path / "test.nc")
+    with gdal.Open(src_filename) as src_ds:
+        gdal.GetDriverByName("netCDF").CreateCopy(
+            out_filename, src_ds, options=creation_options
+        )
+    assert os.stat(golden_file).st_size == os.stat(out_filename).st_size
+    assert open(golden_file, "rb").read() == open(out_filename, "rb").read()
+
+
+###############################################################################
+# Test we identify a geolocation array for a variable that lacks a
+# "coordinates" attribute, but that has side "lon" and "lat" 2D variables
+# whose dimensions are the same as the last 2 ones of the variable of interest
+
+
+def test_netcdf_var_with_geoloc_array_but_no_coordinates_attr():
+
+    ds = gdal.Open(
+        "NETCDF:data/netcdf/var_with_geoloc_array_but_no_coordinates_attr.nc:NO2"
+    )
+    got_md = ds.GetMetadata("GEOLOCATION")
+    assert got_md
+    assert (
+        got_md["X_DATASET"]
+        == 'NETCDF:"data/netcdf/var_with_geoloc_array_but_no_coordinates_attr.nc":lon'
+    )
+
+
+###############################################################################
+# Test reporting of values of an extra dimension which is unlimited
+
+
+def test_netcdf_var_extra_dim_unlimited():
+
+    ds = gdal.Open("data/netcdf/extra_dim_unlimited.nc")
+    assert ds.GetMetadataItem("NETCDF_DIM_time_VALUES") == "{17927,17955}"
+
+    with gdal.config_option("GDAL_NETCDF_REPORT_EXTRA_DIM_VALUES", "YES"):
+        ds = gdal.Open("data/netcdf/extra_dim_unlimited.nc")
+    assert ds.GetMetadataItem("NETCDF_DIM_time_VALUES") == "{17927,17955}"
+
+    with gdal.config_option("GDAL_NETCDF_REPORT_EXTRA_DIM_VALUES", "NO"):
+        ds = gdal.Open("data/netcdf/extra_dim_unlimited.nc")
+    assert ds.GetMetadataItem("NETCDF_DIM_time_VALUES") is None
+
+
+###############################################################################
+# Test reporting of values of an extra dimension which is unlimited
+
+
+@pytest.mark.require_curl()
+@pytest.mark.skipif(sys.platform != "linux", reason="Incorrect platform")
+def test_netcdf_var_extra_dim_unlimited_network():
+
+    import webserver
+
+    webserver_process = None
+    webserver_port = 0
+
+    (webserver_process, webserver_port) = webserver.launch(
+        handler=webserver.DispatcherHttpHandler
+    )
+    if webserver_port == 0:
+        pytest.skip()
+
+    filename = "data/netcdf/extra_dim_unlimited.nc"
+
+    gdal.VSICurlClearCache()
+
+    try:
+        filesize = gdal.VSIStatL(filename).size
+        handler = webserver.SequentialHandler()
+        handler.add("HEAD", "/test.nc", 200, {"Content-Length": "%d" % filesize})
+
+        def method(request):
+            # sys.stderr.write('%s\n' % str(request.headers))
+
+            if request.headers["Range"].startswith("bytes="):
+                rng = request.headers["Range"][len("bytes=") :]
+                assert len(rng.split("-")) == 2
+                start = int(rng.split("-")[0])
+                end = int(rng.split("-")[1])
+
+                request.protocol_version = "HTTP/1.1"
+                request.send_response(206)
+                request.send_header("Content-type", "application/octet-stream")
+                request.send_header(
+                    "Content-Range", "bytes %d-%d/%d" % (start, end, filesize)
+                )
+                request.send_header("Content-Length", end - start + 1)
+                request.send_header("Connection", "close")
+                request.end_headers()
+                with open(filename, "rb") as f:
+                    f.seek(start, 0)
+                    request.wfile.write(f.read(end - start + 1))
+
+        handler.add("GET", "/test.nc", custom_method=method)
+
+        handler.add("HEAD", "/test.nc.aux.xml", 404)
+        handler.add("GET", "/", 404)
+        handler.add("HEAD", "/test.aux", 404)
+        handler.add("HEAD", "/test.AUX", 404)
+        handler.add("HEAD", "/test.nc.aux", 404)
+        handler.add("HEAD", "/test.nc.AUX", 404)
+
+        with webserver.install_http_handler(handler):
+            with gdal.quiet_errors():
+                ds = gdal.Open("/vsicurl/http://127.0.0.1:%d/test.nc" % webserver_port)
+            if ds is None:
+                pytest.skip("cannot open /vsicurl/ netCDF file")
+            assert ds.GetMetadataItem("NETCDF_DIM_time_VALUES") is None
+
+    finally:
+        webserver.server_stop(webserver_process, webserver_port)
+
+        gdal.VSICurlClearCache()
+
+
+###############################################################################
+# Test LIST_ALL_ARRAYS open option
+
+
+def test_netcdf_LIST_ALL_ARRAYS():
+
+    ds = gdal.OpenEx("data/netcdf/byte.nc", open_options=["LIST_ALL_ARRAYS=YES"])
+    assert set(ds.GetSubDatasets()) == set(
+        [
+            (
+                'NETCDF:"data/netcdf/byte.nc":x',
+                "[20] projection_x_coordinate (64-bit floating-point)",
+            ),
+            (
+                'NETCDF:"data/netcdf/byte.nc":y',
+                "[20] projection_y_coordinate (64-bit floating-point)",
+            ),
+            ('NETCDF:"data/netcdf/byte.nc":Band1', "[20x20] Band1 (8-bit integer)"),
+        ]
+    )
+
+
+def test_netcdf_LIST_ALL_ARRAYS_on_dataset_without_2D_arrays(tmp_path):
+
+    gdal.Run(
+        "mdim",
+        "convert",
+        input="data/netcdf/byte.nc",
+        output=tmp_path / "out.nc",
+        array="x",
+    )
+
+    ds = gdal.OpenEx(tmp_path / "out.nc", open_options=["LIST_ALL_ARRAYS=YES"])
+    assert len(ds.GetSubDatasets()) == 1
+
+
+###############################################################################
+# Test use of GeoTransform attribute to avoid precision loss
+# https://github.com/OSGeo/gdal/issues/11993
+
+
+def test_netcdf_geotransform_preserved_createcopy(tmp_path):
+
+    src = gdal.GetDriverByName("MEM").Create("", 3600, 3600)
+    src.SetProjection("EPSG:4326")
+    res = 1.0 / 3600
+    src.SetGeoTransform((25 - res / 2, res, 0, 80 + res / 2, 0, -res))
+
+    dst = gdal.GetDriverByName("netCDF").CreateCopy(tmp_path / "test.nc", src)
+
+    assert dst.GetGeoTransform() == src.GetGeoTransform()
+
+
+###############################################################################
+#
+
+
+@pytest.mark.require_proj(8, 2)
+def test_netcdf_read_rotated_pole_without_geogcrs_def():
+
+    ds = gdal.Open("data/netcdf/rotated_pole_without_geogcrs_def.nc")
+    assert ds.GetSpatialRef().IsDerivedGeographic()
+    assert [x for x in ds.GetGeoTransform()] == pytest.approx(
+        [144.0, 0.1, 0.0, -27.9, 0.0, -0.1]
+    )
+
+
+###############################################################################
+#
+
+
+def test_netcdf_open_fake_PACE_OCI():
+
+    ds = gdal.Open("data/netcdf/fake_PACE_OCI.nc")
+    assert ds.RasterCount == 4
+    assert ds.RasterXSize == 3
+    assert ds.RasterYSize == 2
+
+
+###############################################################################
+#
+
+
+def test_netcdf_open_y_x_other_dim_thanks_to_geolocation():
+
+    ds = gdal.Open("data/netcdf/y_x_other_dim_thanks_to_geolocation.nc")
+    assert ds.RasterCount == 4
+    assert ds.RasterXSize == 3
+    assert ds.RasterYSize == 2
+
+
+###############################################################################
+# Cf https://github.com/OSGeo/gdal/issues/12865
+
+
+def test_netcdf_open_bad_x_y_actual_range():
+
+    ds = gdal.Open("data/netcdf/bad_x_y_actual_range.nc")
+    assert [x for x in ds.GetGeoTransform()] == pytest.approx(
+        [440720.0, 60.0, 0.0, 3751320.0, 0.0, -60.0]
+    )

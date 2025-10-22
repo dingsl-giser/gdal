@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test aspects of EPSG code lookup.
@@ -11,23 +10,7 @@
 # Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 
@@ -473,6 +456,16 @@ def test_osr_epsg_area_of_use():
 ###############################################################################
 
 
+def test_osr_epsg_celestial_body_name():
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(2154)
+    assert srs.GetCelestialBodyName() == "Earth"
+
+
+###############################################################################
+
+
 def test_osr_GetCRSInfoListFromDatabase():
 
     l = osr.GetCRSInfoListFromDatabase("EPSG")
@@ -489,6 +482,7 @@ def test_osr_GetCRSInfoListFromDatabase():
             assert record.north_lat_degree == 51.56
             assert "France" in record.area_name
             assert record.projection_method == "Lambert Conic Conformal (2SP)"
+            assert record.celestial_body_name == "Earth"
             found = True
     assert found
 
@@ -561,3 +555,31 @@ def test_osr_epsg_EPSGTreatsAsLatLong_for_CompoundCRS():
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(6697)
     assert srs.EPSGTreatsAsLatLong() == 1
+
+
+###############################################################################
+#   Test importing a ESRI code as a EPSG code
+
+
+@pytest.mark.require_proj(9)
+def test_osr_epsg_import_esri_code():
+
+    srs = osr.SpatialReference()
+    with gdal.quiet_errors():
+        srs.ImportFromEPSG(104905)
+
+    assert srs.GetAuthorityName(None) == "ESRI"
+    assert srs.GetAuthorityCode(None) == "104905"
+
+
+###############################################################################
+#   Test importing a non-existent ESRI code presented as a EPSG code
+
+
+def test_osr_epsg_import_invalid_code_that_might_have_been_esri():
+
+    srs = osr.SpatialReference()
+    with pytest.raises(
+        Exception, match="PROJ: proj_create_from_database: crs not found"
+    ):
+        srs.ImportFromEPSG(987654)

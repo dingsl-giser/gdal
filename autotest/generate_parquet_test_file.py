@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read functionality for OGR Parquet driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2022, Planet Labs
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 wkt_epsg_4326 = (
@@ -1100,6 +1083,11 @@ def generate_nested_types():
         type=pa.list_(pa.list_(pa.string())),
     )
 
+    list_list_binary = pa.array(
+        [[["a"], None, ["b", None, "cd"]], None, [[b"\x01\x02"]], [], []],
+        type=pa.list_(pa.list_(pa.binary())),
+    )
+
     list_list_large_string = pa.array(
         [[["a"], None, ["b", None, "cd"]], None, [["efg"]], [], []],
         type=pa.list_(pa.list_(pa.large_string())),
@@ -1160,6 +1148,7 @@ def generate_nested_types():
         "list_list_decimal256",
         "list_list_string",
         "list_list_large_string",
+        "list_list_binary",
         "list_large_list_string",
         "list_fixed_size_list_string",
         "list_map_string",
@@ -1245,6 +1234,110 @@ def generate_extension_json():
     )
 
 
+def generate_arrow_stringview():
+    import pathlib
+
+    import pyarrow as pa
+    import pyarrow.feather as feather
+
+    stringview = pa.array(["foo", "bar", "looooooooooong string"], pa.string_view())
+    list_stringview = pa.array(
+        [None, [None], ["foo", "bar", "looooooooooong string"]],
+        pa.list_(pa.string_view()),
+    )
+    list_of_list_stringview = pa.array(
+        [None, [None], [["foo", "bar", "looooooooooong string"]]],
+        pa.list_(pa.list_(pa.string_view())),
+    )
+    map_stringview = pa.array(
+        [None, [], [("x", "x_val"), ("y", None)]],
+        type=pa.map_(pa.string_view(), pa.string_view()),
+    )
+
+    names = [
+        "stringview",
+        "list_stringview",
+        "list_of_list_stringview",
+        "map_stringview",
+    ]
+
+    locals_ = locals()
+    table = pa.table([locals_[x] for x in names], names=names)
+
+    HERE = pathlib.Path(__file__).parent
+    feather.write_feather(table, HERE / "ogr/data/arrow/stringview.feather")
+
+
+def generate_arrow_binaryview():
+    import pathlib
+
+    import pyarrow as pa
+    import pyarrow.feather as feather
+
+    binaryview = pa.array([b"foo", b"bar", b"looooooooooong binary"], pa.binary_view())
+
+    names = ["binaryview"]
+
+    locals_ = locals()
+    table = pa.table([locals_[x] for x in names], names=names)
+
+    HERE = pathlib.Path(__file__).parent
+    feather.write_feather(table, HERE / "ogr/data/arrow/binaryview.feather")
+
+
+def generate_arrow_listview():
+    import pathlib
+
+    import pyarrow as pa
+    import pyarrow.feather as feather
+
+    listview = pa.array([[1]], pa.list_view(pa.int32()))
+
+    names = ["listview"]
+
+    locals_ = locals()
+    table = pa.table([locals_[x] for x in names], names=names)
+
+    HERE = pathlib.Path(__file__).parent
+    feather.write_feather(table, HERE / "ogr/data/arrow/listview.feather")
+
+
+def generate_arrow_largelistview():
+    import pathlib
+
+    import pyarrow as pa
+    import pyarrow.feather as feather
+
+    largelistview = pa.array([[1]], pa.large_list_view(pa.int32()))
+
+    names = ["largelistview"]
+
+    locals_ = locals()
+    table = pa.table([locals_[x] for x in names], names=names)
+
+    HERE = pathlib.Path(__file__).parent
+    feather.write_feather(table, HERE / "ogr/data/arrow/largelistview.feather")
+
+
+def generate_parquet_list_binary():
+    import pathlib
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    list_binary = pa.array(
+        [None, [None], ["foo", "bar", b"\x01"]],
+        pa.list_(pa.binary()),
+    )
+    names = ["list_binary"]
+
+    locals_ = locals()
+    table = pa.table([locals_[x] for x in names], names=names)
+
+    HERE = pathlib.Path(__file__).parent
+    pq.write_table(table, HERE / "ogr/data/parquet/list_binary.parquet")
+
+
 if __name__ == "__main__":
     generate_test_parquet()
     generate_all_geoms_parquet()
@@ -1252,3 +1345,8 @@ if __name__ == "__main__":
     generate_nested_types()
     generate_extension_custom()
     generate_extension_json()
+    generate_arrow_stringview()
+    generate_arrow_binaryview()
+    generate_arrow_listview()
+    generate_arrow_largelistview()
+    generate_parquet_list_binary()

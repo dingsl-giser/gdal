@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef INCLUDE_SEGMENT_PCIDSKSEGMENT_H
@@ -49,12 +33,12 @@ namespace PCIDSK
 /*      options.                                                        */
 /************************************************************************/
 
-    class CPCIDSKSegment : virtual public PCIDSKSegment
+    class CPCIDSKSegment /* non final */: virtual public PCIDSKSegment
     {
     public:
         CPCIDSKSegment( PCIDSKFile *file, int segment,
             const char *segment_pointer );
-        virtual ~CPCIDSKSegment();
+        ~CPCIDSKSegment() override;
 
         void        LoadSegmentPointer( const char *segment_pointer ) override final;
         void        LoadSegmentHeader();
@@ -81,14 +65,14 @@ namespace PCIDSK
         void        SetMetadataValue( const std::string &key, const std::string &value ) override;
         std::vector<std::string> GetMetadataKeys() const override;
 
-        virtual void Synchronize() override {}
+        void Synchronize() override {}
 
         std::vector<std::string> GetHistoryEntries() const override;
         void SetHistoryEntries( const std::vector<std::string> &entries ) override;
         void PushHistory(const std::string &app,
                          const std::string &message) override;
 
-        virtual std::string ConsistencyCheck() override { return ""; }
+        std::string ConsistencyCheck() override { return ""; }
 
     protected:
         PCIDSKFile *file;

@@ -7,27 +7,16 @@
  ******************************************************************************
  * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_json.h"
 #include "cpl_http.h"
+#include "gdal_frmts.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "vrtdataset.h"
 #include "ogr_spatialref.h"
 
@@ -60,7 +49,7 @@ struct AssetSetByProjection
 struct Asset
 {
     std::string osName{};
-    CPLJSONArray eoBands{};
+    CPLJSONArray bands{};
     std::map<std::string, AssetSetByProjection> assets{};
 };
 
@@ -87,6 +76,7 @@ class STACITDataset final : public VRTDataset
 
   public:
     STACITDataset();
+    ~STACITDataset() override;
 
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *OpenStatic(GDALOpenInfo *poOpenInfo);
@@ -101,6 +91,8 @@ STACITDataset::STACITDataset() : VRTDataset(0, 0)
     poDriver = nullptr;  // cancel what the VRTDataset did
     SetWritable(false);
 }
+
+STACITDataset::~STACITDataset() = default;
 
 /************************************************************************/
 /*                             Identify()                               */
@@ -125,6 +117,9 @@ int STACITDataset::Identify(GDALOpenInfo *poOpenInfo)
         return false;
     }
 
+    if (poOpenInfo->IsExtensionEqualToCI("zarr"))
+        return false;
+
     for (int i = 0; i < 2; i++)
     {
         // TryToIngest() may reallocate pabyHeader, so do not move this
@@ -139,10 +134,19 @@ int STACITDataset::Identify(GDALOpenInfo *poOpenInfo)
             return pszHeader[0] == '{';
         }
 
-        if (strstr(pszHeader, "\"stac_version\"") != nullptr &&
-            strstr(pszHeader, "\"proj:transform\"") != nullptr)
+        if (strstr(pszHeader, "\"stac_version\"") != nullptr)
         {
-            return true;
+            int nTransformBBOXShapeCount = 0;
+            for (const char *pszItem :
+                 {"\"proj:transform\"", "\"proj:bbox\"", "\"proj:shape\""})
+            {
+                if (strstr(pszHeader, pszItem))
+                    nTransformBBOXShapeCount++;
+            }
+            if (nTransformBBOXShapeCount >= 2)
+            {
+                return true;
+            }
         }
 
         if (i == 0)
@@ -217,7 +221,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
 
     const auto osAssetName = jAsset.GetName();
 
-    const auto osHref = jAsset["href"].ToString();
+    std::string osHref = jAsset["href"].ToString();
     if (osHref.empty())
     {
         CPLError(CE_Warning, CPLE_AppDefined, "Missing href on asset %s",
@@ -234,34 +238,44 @@ static void ParseAsset(const CPLJSONObject &jAsset,
         return oProperties[pszName];
     };
 
-    auto oProjEPSG = GetAssetOrFeatureProperty("proj:epsg");
     std::string osProjUserString;
-    if (oProjEPSG.IsValid() && oProjEPSG.GetType() != CPLJSONObject::Type::Null)
+    const auto oProjCode = GetAssetOrFeatureProperty("proj:code");
+    if (oProjCode.IsValid() && oProjCode.GetType() != CPLJSONObject::Type::Null)
     {
-        osProjUserString = "EPSG:" + oProjEPSG.ToString();
+        osProjUserString = oProjCode.ToString();
     }
     else
     {
-        auto oProjWKT2 = GetAssetOrFeatureProperty("proj:wkt2");
-        if (oProjWKT2.IsValid() &&
-            oProjWKT2.GetType() == CPLJSONObject::Type::String)
+        const auto oProjEPSG = GetAssetOrFeatureProperty("proj:epsg");
+        if (oProjEPSG.IsValid() &&
+            oProjEPSG.GetType() != CPLJSONObject::Type::Null)
         {
-            osProjUserString = oProjWKT2.ToString();
+            osProjUserString = "EPSG:" + oProjEPSG.ToString();
         }
         else
         {
-            auto oProjPROJJSON = GetAssetOrFeatureProperty("proj:projjson");
-            if (oProjPROJJSON.IsValid() &&
-                oProjPROJJSON.GetType() == CPLJSONObject::Type::Object)
+            const auto oProjWKT2 = GetAssetOrFeatureProperty("proj:wkt2");
+            if (oProjWKT2.IsValid() &&
+                oProjWKT2.GetType() == CPLJSONObject::Type::String)
             {
-                osProjUserString = oProjPROJJSON.ToString();
+                osProjUserString = oProjWKT2.ToString();
             }
             else
             {
-                CPLDebug("STACIT",
-                         "Skipping asset %s that lacks a valid CRS member",
-                         osAssetName.c_str());
-                return;
+                const auto oProjPROJJSON =
+                    GetAssetOrFeatureProperty("proj:projjson");
+                if (oProjPROJJSON.IsValid() &&
+                    oProjPROJJSON.GetType() == CPLJSONObject::Type::Object)
+                {
+                    osProjUserString = oProjPROJJSON.ToString();
+                }
+                else
+                {
+                    CPLDebug("STACIT",
+                             "Skipping asset %s that lacks a valid CRS member",
+                             osAssetName.c_str());
+                    return;
+                }
             }
         }
     }
@@ -273,7 +287,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     }
 
     AssetItem item;
-    item.osFilename = osHref;
+    item.osFilename = std::move(osHref);
     item.osDateTime = oProperties["datetime"].ToString();
 
     // Figure out item bounds and width/height
@@ -396,7 +410,9 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     {
         Asset asset;
         asset.osName = osAssetName;
-        asset.eoBands = jAsset.GetArray("eo:bands");
+        asset.bands = jAsset.GetArray("bands");
+        if (!asset.bands.IsValid())
+            asset.bands = jAsset.GetArray("eo:bands");
 
         collection.assets[osAssetName] = std::move(asset);
     }
@@ -412,7 +428,7 @@ static void ParseAsset(const CPLJSONObject &jAsset,
     auto &assets = asset.assets[osProjUserString];
 
     // Add item
-    assets.assets.emplace_back(item);
+    assets.assets.emplace_back(std::move(item));
 }
 
 /************************************************************************/
@@ -474,6 +490,12 @@ bool STACITDataset::SetupDataset(
     }
 
     // Set raster size
+    if (dfXRes == 0 || dfYRes == 0)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Invalid computed dataset dimensions");
+        return false;
+    }
     double dfXSize = std::round((dfXMax - dfXMin) / dfXRes);
     double dfYSize = std::round((dfYMax - dfYMin) / dfYRes);
     if (dfXSize <= 0 || dfYSize <= 0 || dfXSize > INT_MAX || dfYSize > INT_MAX)
@@ -486,14 +508,8 @@ bool STACITDataset::SetupDataset(
     nRasterYSize = static_cast<int>(dfYSize);
 
     // Set geotransform
-    double adfGeoTransform[6];
-    adfGeoTransform[0] = dfXMin;
-    adfGeoTransform[1] = dfXRes;
-    adfGeoTransform[2] = 0;
-    adfGeoTransform[3] = dfYMax;
-    adfGeoTransform[4] = 0;
-    adfGeoTransform[5] = -dfYRes;
-    SetGeoTransform(adfGeoTransform);
+    GDALGeoTransform gt{dfXMin, dfXRes, 0, dfYMax, 0, -dfYRes};
+    SetGeoTransform(gt);
 
     // Set SRS
     OGRSpatialReference oSRS;
@@ -536,19 +552,9 @@ bool STACITDataset::SetupDataset(
                 osRet += osFilename;
             }
         }
-        else if (STARTS_WITH(osFilename.c_str(), "file://"))
-        {
-            osRet = osFilename.substr(strlen("file://"));
-        }
-        else if (STARTS_WITH(osFilename.c_str(), "s3://"))
-        {
-            osRet = "/vsis3/";
-            osRet += osFilename.substr(strlen("s3://"));
-        }
-
         else
         {
-            osRet = osFilename;
+            osRet = VSIURIToVSIPath(osFilename);
         }
         return osRet;
     };
@@ -594,34 +600,33 @@ bool STACITDataset::SetupDataset(
             poVRTBand->SetColorInterpretation(eInterp);
 
         // Set band properties
-        if (asset.eoBands.IsValid() &&
-            asset.eoBands.Size() == poItemDS->GetRasterCount())
+        if (asset.bands.IsValid() &&
+            asset.bands.Size() == poItemDS->GetRasterCount())
         {
-            const auto &eoBand = asset.eoBands[i];
-            const auto osBandName = eoBand["name"].ToString();
+            const auto &band = asset.bands[i];
+            const auto osBandName = band["name"].ToString();
             if (!osBandName.empty())
                 poVRTBand->SetDescription(osBandName.c_str());
 
-            if (eInterp != GCI_Undefined)
+            auto osCommonName = band["eo:common_name"].ToString();
+            if (osCommonName.empty())
+                osCommonName = band["common_name"].ToString();
+            if (!osCommonName.empty())
             {
-                const auto osCommonName = eoBand["common_name"].ToString();
-                if (osCommonName == "red")
-                    poVRTBand->SetColorInterpretation(GCI_RedBand);
-                else if (osCommonName == "green")
-                    poVRTBand->SetColorInterpretation(GCI_GreenBand);
-                else if (osCommonName == "blue")
-                    poVRTBand->SetColorInterpretation(GCI_BlueBand);
-                else if (osCommonName == "alpha")
-                    poVRTBand->SetColorInterpretation(GCI_AlphaBand);
+                const auto eInterpFromCommonName =
+                    GDALGetColorInterpFromSTACCommonName(osCommonName.c_str());
+                if (eInterpFromCommonName != GCI_Undefined)
+                    poVRTBand->SetColorInterpretation(eInterpFromCommonName);
             }
 
-            for (const auto &eoBandChild : eoBand.GetChildren())
+            for (const auto &bandChild : band.GetChildren())
             {
-                const auto osChildName = eoBandChild.GetName();
-                if (osChildName != "name" && osChildName != "common_name")
+                const auto osChildName = bandChild.GetName();
+                if (osChildName != "name" && osChildName != "common_name" &&
+                    osChildName != "eo:common_name")
                 {
                     poVRTBand->SetMetadataItem(osChildName.c_str(),
-                                               eoBandChild.ToString().c_str());
+                                               bandChild.ToString().c_str());
                 }
             }
         }

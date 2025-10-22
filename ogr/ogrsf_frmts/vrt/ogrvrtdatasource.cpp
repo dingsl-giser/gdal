@@ -8,23 +8,7 @@
  * Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -48,110 +32,13 @@
 #include "ogrunionlayer.h"
 #include "ogrwarpedlayer.h"
 #include "ogrsf_frmts.h"
-
-/************************************************************************/
-/*                       OGRVRTGetGeometryType()                        */
-/************************************************************************/
-
-#define STRINGIFY(x) x, #x
-
-static const struct
-{
-    OGRwkbGeometryType eType;
-    const char *pszName;
-    bool bIsoFlags;
-} asGeomTypeNames[] = {
-    {STRINGIFY(wkbUnknown), false},
-
-    {STRINGIFY(wkbPoint), false},
-    {STRINGIFY(wkbLineString), false},
-    {STRINGIFY(wkbPolygon), false},
-    {STRINGIFY(wkbMultiPoint), false},
-    {STRINGIFY(wkbMultiLineString), false},
-    {STRINGIFY(wkbMultiPolygon), false},
-    {STRINGIFY(wkbGeometryCollection), false},
-
-    {STRINGIFY(wkbCircularString), true},
-    {STRINGIFY(wkbCompoundCurve), true},
-    {STRINGIFY(wkbCurvePolygon), true},
-    {STRINGIFY(wkbMultiCurve), true},
-    {STRINGIFY(wkbMultiSurface), true},
-    {STRINGIFY(wkbCurve), true},
-    {STRINGIFY(wkbSurface), true},
-    {STRINGIFY(wkbPolyhedralSurface), true},
-    {STRINGIFY(wkbTIN), true},
-    {STRINGIFY(wkbTriangle), true},
-
-    {STRINGIFY(wkbNone), false},
-    {STRINGIFY(wkbLinearRing), false},
-};
-
-OGRwkbGeometryType OGRVRTGetGeometryType(const char *pszGType, int *pbError)
-{
-    if (pbError)
-        *pbError = FALSE;
-
-    for (const auto &entry : asGeomTypeNames)
-    {
-        if (EQUALN(pszGType, entry.pszName, strlen(entry.pszName)))
-        {
-            OGRwkbGeometryType eGeomType = entry.eType;
-
-            if (strstr(pszGType, "25D") != nullptr ||
-                strstr(pszGType, "Z") != nullptr)
-                eGeomType = wkbSetZ(eGeomType);
-            if (pszGType[strlen(pszGType) - 1] == 'M' ||
-                pszGType[strlen(pszGType) - 2] == 'M')
-                eGeomType = wkbSetM(eGeomType);
-            return eGeomType;
-        }
-    }
-
-    if (pbError)
-        *pbError = TRUE;
-    return wkbUnknown;
-}
-
-/************************************************************************/
-/*                     OGRVRTGetSerializedGeometryType()                */
-/************************************************************************/
-
-CPLString OGRVRTGetSerializedGeometryType(OGRwkbGeometryType eGeomType)
-{
-    for (const auto &entry : asGeomTypeNames)
-    {
-        if (entry.eType == wkbFlatten(eGeomType))
-        {
-            CPLString osRet(entry.pszName);
-            if (entry.bIsoFlags || OGR_GT_HasM(eGeomType))
-            {
-                if (OGR_GT_HasZ(eGeomType))
-                {
-                    osRet += "Z";
-                }
-                if (OGR_GT_HasM(eGeomType))
-                {
-                    osRet += "M";
-                }
-            }
-            else if (OGR_GT_HasZ(eGeomType))
-            {
-                osRet += "25D";
-            }
-            return osRet;
-        }
-    }
-    return CPLString();
-}
+#include "ogrvrtgeometrytypes.h"
 
 /************************************************************************/
 /*                          OGRVRTDataSource()                          */
 /************************************************************************/
 
 OGRVRTDataSource::OGRVRTDataSource(GDALDriver *poDriverIn)
-    : papoLayers(nullptr), paeLayerType(nullptr), nLayers(0), pszName(nullptr),
-      psTree(nullptr), nCallLevel(0), poLayerPool(nullptr), poParentDS(nullptr),
-      bRecursionDetected(false)
 {
     poDriver = poDriverIn;
 }
@@ -163,16 +50,12 @@ OGRVRTDataSource::OGRVRTDataSource(GDALDriver *poDriverIn)
 OGRVRTDataSource::~OGRVRTDataSource()
 
 {
-    CPLFree(pszName);
-
     OGRVRTDataSource::CloseDependentDatasets();
 
     CPLFree(paeLayerType);
 
     if (psTree != nullptr)
         CPLDestroyXMLNode(psTree);
-
-    delete poLayerPool;
 }
 
 /************************************************************************/
@@ -762,19 +645,20 @@ OGRVRTDataSource::InstantiateLayerInternal(CPLXMLNode *psLTree,
 /*                        OGRVRTOpenProxiedLayer()                      */
 /************************************************************************/
 
-typedef struct
+struct PooledInitData
 {
-    OGRVRTDataSource *poDS;
-    CPLXMLNode *psNode;
-    char *pszVRTDirectory;
-    bool bUpdate;
-} PooledInitData;
+    OGRVRTDataSource *poDS = nullptr;
+    CPLXMLNode *psNode = nullptr;
+    std::string osVRTDirectory{};
+    bool bUpdate = false;
+};
 
 static OGRLayer *OGRVRTOpenProxiedLayer(void *pUserData)
 {
-    PooledInitData *pData = static_cast<PooledInitData *>(pUserData);
+    const PooledInitData *pData =
+        static_cast<const PooledInitData *>(pUserData);
     return pData->poDS->InstantiateLayerInternal(
-        pData->psNode, pData->pszVRTDirectory, pData->bUpdate, 0);
+        pData->psNode, pData->osVRTDirectory.c_str(), pData->bUpdate, 0);
 }
 
 /************************************************************************/
@@ -783,9 +667,7 @@ static OGRLayer *OGRVRTOpenProxiedLayer(void *pUserData)
 
 static void OGRVRTFreeProxiedLayerUserData(void *pUserData)
 {
-    PooledInitData *pData = static_cast<PooledInitData *>(pUserData);
-    CPLFree(pData->pszVRTDirectory);
-    CPLFree(pData);
+    delete static_cast<PooledInitData *>(pUserData);
 }
 
 /************************************************************************/
@@ -798,14 +680,14 @@ OGRLayer *OGRVRTDataSource::InstantiateLayer(CPLXMLNode *psLTree,
 {
     if (poLayerPool != nullptr && EQUAL(psLTree->pszValue, "OGRVRTLayer"))
     {
-        PooledInitData *pData =
-            (PooledInitData *)CPLMalloc(sizeof(PooledInitData));
+        auto pData = std::make_unique<PooledInitData>();
         pData->poDS = this;
         pData->psNode = psLTree;
-        pData->pszVRTDirectory = CPLStrdup(pszVRTDirectory);
+        pData->osVRTDirectory = pszVRTDirectory ? pszVRTDirectory : "";
         pData->bUpdate = CPL_TO_BOOL(bUpdate);
-        return new OGRProxiedLayer(poLayerPool, OGRVRTOpenProxiedLayer,
-                                   OGRVRTFreeProxiedLayerUserData, pData);
+        return new OGRProxiedLayer(poLayerPool.get(), OGRVRTOpenProxiedLayer,
+                                   OGRVRTFreeProxiedLayerUserData,
+                                   pData.release());
     }
 
     return InstantiateLayerInternal(psLTree, pszVRTDirectory, bUpdate,
@@ -816,7 +698,7 @@ OGRLayer *OGRVRTDataSource::InstantiateLayer(CPLXMLNode *psLTree,
 /*                           CountOGRVRTLayers()                        */
 /************************************************************************/
 
-static int CountOGRVRTLayers(CPLXMLNode *psTree)
+static int CountOGRVRTLayers(const CPLXMLNode *psTree)
 {
     if (psTree->eType != CXT_Element)
         return 0;
@@ -825,7 +707,7 @@ static int CountOGRVRTLayers(CPLXMLNode *psTree)
     if (EQUAL(psTree->pszValue, "OGRVRTLayer"))
         ++nCount;
 
-    for (CPLXMLNode *psNode = psTree->psChild; psNode != nullptr;
+    for (const CPLXMLNode *psNode = psTree->psChild; psNode != nullptr;
          psNode = psNode->psNext)
     {
         nCount += CountOGRVRTLayers(psNode);
@@ -850,9 +732,7 @@ bool OGRVRTDataSource::Initialize(CPLXMLNode *psTreeIn, const char *pszNewName,
 
     // Set name, and capture the directory path so we can use it
     // for relative datasources.
-    CPLString osVRTDirectory = CPLGetPath(pszNewName);
-
-    pszName = CPLStrdup(pszNewName);
+    CPLString osVRTDirectory = CPLGetPathSafe(pszNewName);
 
     // Look for the OGRVRTDataSource node, it might be after an <xml> node.
     CPLXMLNode *psVRTDSXML = CPLGetXMLNode(psTree, "=OGRVRTDataSource");
@@ -870,7 +750,7 @@ bool OGRVRTDataSource::Initialize(CPLXMLNode *psTreeIn, const char *pszNewName,
     const int nMaxSimultaneouslyOpened =
         std::max(atoi(CPLGetConfigOption("OGR_VRT_MAX_OPENED", "100")), 1);
     if (nOGRVRTLayerCount > nMaxSimultaneouslyOpened)
-        poLayerPool = new OGRLayerPool(nMaxSimultaneouslyOpened);
+        poLayerPool = std::make_unique<OGRLayerPool>(nMaxSimultaneouslyOpened);
 
     // Apply any dataset level metadata.
     oMDMD.XMLInit(psVRTDSXML, TRUE);
@@ -916,7 +796,7 @@ bool OGRVRTDataSource::Initialize(CPLXMLNode *psTreeIn, const char *pszNewName,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRVRTDataSource::TestCapability(const char *pszCap)
+int OGRVRTDataSource::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCCurveGeometries))
         return true;
@@ -932,7 +812,7 @@ int OGRVRTDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRVRTDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRVRTDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || iLayer >= nLayers)
@@ -966,7 +846,7 @@ bool OGRVRTDataSource::IsInForbiddenNames(const char *pszOtherDSName) const
 char **OGRVRTDataSource::GetFileList()
 {
     CPLStringList oList;
-    oList.AddString(GetName());
+    oList.AddString(GetDescription());
     for (int i = 0; i < nLayers; i++)
     {
         OGRLayer *poLayer = papoLayers[i];
@@ -974,11 +854,12 @@ char **OGRVRTDataSource::GetFileList()
         switch (paeLayerType[nLayers - 1])
         {
             case OGR_VRT_PROXIED_LAYER:
-                poVRTLayer = (OGRVRTLayer *)((OGRProxiedLayer *)poLayer)
-                                 ->GetUnderlyingLayer();
+                poVRTLayer = cpl::down_cast<OGRVRTLayer *>(
+                    cpl::down_cast<OGRProxiedLayer *>(poLayer)
+                        ->GetUnderlyingLayer());
                 break;
             case OGR_VRT_LAYER:
-                poVRTLayer = (OGRVRTLayer *)poLayer;
+                poVRTLayer = cpl::down_cast<OGRVRTLayer *>(poLayer);
                 break;
             default:
                 break;

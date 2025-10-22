@@ -9,26 +9,11 @@
 ###############################################################################
 # Copyright (c) 2024, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import base64
+import os
 import shutil
 
 import gdaltest
@@ -42,6 +27,11 @@ pytestmark = pytest.mark.require_driver("AVIF")
 def has_avif_encoder():
     drv = gdal.GetDriverByName("AVIF")
     return drv is not None and drv.GetMetadataItem("DMD_CREATIONOPTIONLIST") is not None
+
+
+def _has_geoheif_support():
+    drv = gdal.GetDriverByName("AVIF")
+    return drv and drv.GetMetadataItem("SUPPORTS_GEOHEIF", "AVIF")
 
 
 def test_avif_subdatasets(tmp_path):
@@ -271,3 +261,120 @@ def test_avif_creation_errors(tmp_vsimem):
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 1)
     with pytest.raises(Exception, match="Cannot create file /i_do/not/exist.avif"):
         gdal.GetDriverByName("AVIF").CreateCopy("/i_do/not/exist.avif", src_ds)
+
+
+@pytest.mark.skipif(
+    not _has_geoheif_support(),
+    reason="this libavif does not support opaque properties like geoheif",
+)
+def test_avif_geoheif_wkt2():
+    ds = gdal.Open("data/heif/geo_small.avif")
+    assert ds
+    assert ds.RasterCount == 3
+    assert ds.RasterXSize == 128
+    assert ds.RasterYSize == 76
+    assert ds.GetMetadataItem("NAME", "DESCRIPTION_en-AU") == "Copyright Statement"
+    assert (
+        ds.GetMetadataItem("DESCRIPTION", "DESCRIPTION_en-AU")
+        == 'CCBY "Jacobs Group (Australia) Pty Ltd and Australian Capital Territory"'
+    )
+    assert ds.GetMetadataItem("TAGS", "DESCRIPTION_en-AU") == "copyright"
+    assert ds.GetGeoTransform() is not None
+    assert ds.GetGeoTransform() == pytest.approx(
+        [691000.0, 0.1, 0.0, 6090000.0, 0.0, -0.1]
+    )
+    assert ds.GetSpatialRef() is not None
+    assert ds.GetSpatialRef().GetAuthorityName(None) == "EPSG"
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "28355"
+    assert ds.GetGCPCount() == 1
+    gcp = ds.GetGCPs()[0]
+    assert (
+        gcp.GCPPixel == pytest.approx(0, abs=1e-5)
+        and gcp.GCPLine == pytest.approx(0, abs=1e-5)
+        and gcp.GCPX == pytest.approx(691000.0, abs=1e-5)
+        and gcp.GCPY == pytest.approx(6090000.0, abs=1e-5)
+        and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+    )
+
+
+@pytest.mark.skipif(
+    not _has_geoheif_support(),
+    reason="this libavif does not support opaque properties like geoheif",
+)
+def test_avif_geoheif_uri():
+    ds = gdal.Open("data/heif/geo_crsu.avif")
+    assert ds
+    assert ds.RasterCount == 3
+    assert ds.RasterXSize == 256
+    assert ds.RasterYSize == 64
+    assert ds.GetMetadataItem("NAME", "DESCRIPTION_en-AU") == "Copyright Statement"
+    assert (
+        ds.GetMetadataItem("DESCRIPTION", "DESCRIPTION_en-AU")
+        == 'CCBY "Jacobs Group (Australia) Pty Ltd and Australian Capital Territory"'
+    )
+    assert ds.GetMetadataItem("TAGS", "DESCRIPTION_en-AU") == "copyright"
+    assert ds.GetGeoTransform() is not None
+    assert ds.GetGeoTransform() == pytest.approx(
+        [691051.2, 0.1, 0.0, 6090000.0, 0.0, -0.1]
+    )
+    assert ds.GetSpatialRef() is not None
+    assert ds.GetSpatialRef().GetAuthorityName(None) == "EPSG"
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "32755"
+
+    assert ds.GetGCPCount() == 1
+    gcp = ds.GetGCPs()[0]
+    assert (
+        gcp.GCPPixel == pytest.approx(0, abs=1e-5)
+        and gcp.GCPLine == pytest.approx(0, abs=1e-5)
+        and gcp.GCPX == pytest.approx(691051.2, abs=1e-5)
+        and gcp.GCPY == pytest.approx(6090000.0, abs=1e-5)
+        and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+    )
+
+
+@pytest.mark.skipif(
+    not _has_geoheif_support(),
+    reason="this libavif does not support opaque properties like geoheif",
+)
+def test_avif_geoheif_curie():
+    ds = gdal.Open("data/heif/geo_curi.avif")
+    assert ds
+    assert ds.RasterCount == 3
+    assert ds.RasterXSize == 256
+    assert ds.RasterYSize == 64
+    assert ds.GetMetadataItem("NAME", "DESCRIPTION_en-AU") == "Copyright Statement"
+    assert (
+        ds.GetMetadataItem("DESCRIPTION", "DESCRIPTION_en-AU")
+        == 'CCBY "Jacobs Group (Australia) Pty Ltd and Australian Capital Territory"'
+    )
+    assert ds.GetMetadataItem("TAGS", "DESCRIPTION_en-AU") == "copyright"
+    assert ds.GetSpatialRef() is not None
+    assert ds.GetSpatialRef().GetAuthorityName(None) == "EPSG"
+    assert ds.GetSpatialRef().GetAuthorityCode(None) == "32755"
+
+    assert ds.GetGeoTransform() is not None
+    assert ds.GetGeoTransform() == pytest.approx(
+        [691051.2, 0.1, 0.0, 6090000.0, 0.0, -0.1]
+    )
+    assert ds.GetGCPCount() == 1
+    gcp = ds.GetGCPs()[0]
+    assert (
+        gcp.GCPPixel == pytest.approx(0, abs=1e-5)
+        and gcp.GCPLine == pytest.approx(0, abs=1e-5)
+        and gcp.GCPX == pytest.approx(691051.2, abs=1e-5)
+        and gcp.GCPY == pytest.approx(6090000.0, abs=1e-5)
+        and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+    )
+
+
+###############################################################################
+
+
+@pytest.mark.skipif(not has_avif_encoder(), reason="libavif encoder missing")
+def test_avif_close(tmp_path):
+
+    ds = gdal.GetDriverByName("AVIF").CreateCopy(
+        tmp_path / "out.avif", gdal.Open("data/rgbsmall.tif")
+    )
+    ds.Close()
+    os.remove(tmp_path / "out.avif")

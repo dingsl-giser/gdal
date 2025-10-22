@@ -7,28 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 
 #include "gdal_priv.h"
+#include "gdal_frmts.h"
 #include "gtiff.h"
 #include "gt_overview.h"
 #include "gdal_utils.h"
@@ -40,11 +25,10 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 static bool gbHasLZW = false;
-
-extern "C" CPL_DLL void GDALRegister_COG();
 
 /************************************************************************/
 /*                        HasZSTDCompression()                          */
@@ -78,7 +62,8 @@ static CPLString GetTmpFilename(const char *pszFilename, const char *pszExt)
     if (!bSupportsRandomWrite ||
         CPLGetConfigOption("CPL_TMPDIR", nullptr) != nullptr)
     {
-        osTmpFilename = CPLGenerateTempFilename(CPLGetBasename(pszFilename));
+        osTmpFilename = CPLGenerateTempFilenameSafe(
+            CPLGetBasenameSafe(pszFilename).c_str());
     }
     else
         osTmpFilename = pszFilename;
@@ -94,7 +79,11 @@ static CPLString GetTmpFilename(const char *pszFilename, const char *pszExt)
 
 static const char *GetResampling(GDALDataset *poSrcDS)
 {
-    return poSrcDS->GetRasterBand(1)->GetColorTable() ? "NEAREST" : "CUBIC";
+    return poSrcDS->GetRasterBand(1)->GetColorTable() ||
+                   GDALDataTypeIsComplex(
+                       poSrcDS->GetRasterBand(1)->GetRasterDataType())
+               ? "NEAREST"
+               : "CUBIC";
 }
 
 /************************************************************************/
@@ -233,20 +222,17 @@ static bool COGGetWarpingCharacteristics(
     // Hack to compensate for GDALSuggestedWarpOutput2() failure (or not
     // ideal suggestion with PROJ 8) when reprojecting latitude = +/- 90 to
     // EPSG:3857.
-    double adfSrcGeoTransform[6];
+    GDALGeoTransform srcGT;
     std::unique_ptr<GDALDataset> poTmpDS;
-    if (nEPSGCode == 3857 &&
-        poSrcDS->GetGeoTransform(adfSrcGeoTransform) == CE_None &&
-        adfSrcGeoTransform[2] == 0 && adfSrcGeoTransform[4] == 0 &&
-        adfSrcGeoTransform[5] < 0)
+    if (nEPSGCode == 3857 && poSrcDS->GetGeoTransform(srcGT) == CE_None &&
+        srcGT[2] == 0 && srcGT[4] == 0 && srcGT[5] < 0)
     {
         const auto poSrcSRS = poSrcDS->GetSpatialRef();
         if (poSrcSRS && poSrcSRS->IsGeographic() &&
             !poSrcSRS->IsDerivedGeographic())
         {
-            double maxLat = adfSrcGeoTransform[3];
-            double minLat = adfSrcGeoTransform[3] +
-                            poSrcDS->GetRasterYSize() * adfSrcGeoTransform[5];
+            double maxLat = srcGT[3];
+            double minLat = srcGT[3] + poSrcDS->GetRasterYSize() * srcGT[5];
             // Corresponds to the latitude of below MAX_GM
             constexpr double MAX_LAT = 85.0511287798066;
             bool bModified = false;
@@ -266,13 +252,10 @@ static bool COGGetWarpingCharacteristics(
                 aosOptions.AddString("-of");
                 aosOptions.AddString("VRT");
                 aosOptions.AddString("-projwin");
-                aosOptions.AddString(
-                    CPLSPrintf("%.17g", adfSrcGeoTransform[0]));
+                aosOptions.AddString(CPLSPrintf("%.17g", srcGT[0]));
                 aosOptions.AddString(CPLSPrintf("%.17g", maxLat));
-                aosOptions.AddString(
-                    CPLSPrintf("%.17g", adfSrcGeoTransform[0] +
-                                            poSrcDS->GetRasterXSize() *
-                                                adfSrcGeoTransform[1]));
+                aosOptions.AddString(CPLSPrintf(
+                    "%.17g", srcGT[0] + poSrcDS->GetRasterXSize() * srcGT[1]));
                 aosOptions.AddString(CPLSPrintf("%.17g", minLat));
                 auto psOptions =
                     GDALTranslateOptionsNew(aosOptions.List(), nullptr);
@@ -490,10 +473,8 @@ static bool COGGetWarpingCharacteristics(
         {
             nTLTileX = (nTLTileX / nAccDivisor) * nAccDivisor;
             nTLTileY = (nTLTileY / nAccDivisor) * nAccDivisor;
-            nBRTileY =
-                ((nBRTileY + nAccDivisor - 1) / nAccDivisor) * nAccDivisor;
-            nBRTileX =
-                ((nBRTileX + nAccDivisor - 1) / nAccDivisor) * nAccDivisor;
+            nBRTileY = DIV_ROUND_UP(nBRTileY, nAccDivisor) * nAccDivisor;
+            nBRTileX = DIV_ROUND_UP(nBRTileX, nAccDivisor) * nAccDivisor;
         }
 
         if (nTLTileX < 0 || nTLTileY < 0 ||
@@ -779,6 +760,21 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         return nullptr;
     }
 
+    const CPLString osCompress = CSLFetchNameValueDef(
+        papszOptions, "COMPRESS", gbHasLZW ? "LZW" : "NONE");
+
+    const char *pszInterleave =
+        CSLFetchNameValueDef(papszOptions, "INTERLEAVE", "PIXEL");
+    if (EQUAL(osCompress, "WEBP"))
+    {
+        if (!EQUAL(pszInterleave, "PIXEL"))
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "COMPRESS=WEBP only supported for INTERLEAVE=PIXEL");
+            return nullptr;
+        }
+    }
+
     CPLConfigOptionSetter oSetterReportDirtyBlockFlushing(
         "GDAL_REPORT_DIRTY_BLOCK_FLUSHING", "NO", true);
 
@@ -852,15 +848,15 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         double dfSrcMinY = 0;
         double dfSrcMaxX = 0;
         double dfSrcMaxY = 0;
-        double adfSrcGT[6];
+        GDALGeoTransform srcGT;
         const int nSrcXSize = poCurDS->GetRasterXSize();
         const int nSrcYSize = poCurDS->GetRasterYSize();
-        if (poCurDS->GetGeoTransform(adfSrcGT) == CE_None)
+        if (poCurDS->GetGeoTransform(srcGT) == CE_None)
         {
-            dfSrcMinX = adfSrcGT[0];
-            dfSrcMaxY = adfSrcGT[3];
-            dfSrcMaxX = adfSrcGT[0] + nSrcXSize * adfSrcGT[1];
-            dfSrcMinY = adfSrcGT[3] + nSrcYSize * adfSrcGT[5];
+            dfSrcMinX = srcGT[0];
+            dfSrcMaxY = srcGT[3];
+            dfSrcMaxX = srcGT[0] + nSrcXSize * srcGT[1];
+            dfSrcMinY = srcGT[3] + nSrcYSize * srcGT[5];
         }
 
         if (nTargetXSize == nSrcXSize && nTargetYSize == nSrcYSize &&
@@ -893,9 +889,7 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         }
     }
 
-    CPLString osCompress = CSLFetchNameValueDef(papszOptions, "COMPRESS",
-                                                gbHasLZW ? "LZW" : "NONE");
-    if (EQUAL(osCompress, "JPEG") &&
+    if (EQUAL(osCompress, "JPEG") && EQUAL(pszInterleave, "PIXEL") &&
         (poCurDS->GetRasterCount() == 2 || poCurDS->GetRasterCount() == 4) &&
         poCurDS->GetRasterBand(poCurDS->GetRasterCount())
                 ->GetColorInterpretation() == GCI_AlphaBand)
@@ -963,12 +957,13 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         return true;
     };
 
-    if (bNeedStats && !bWrkHasStatistics)
+    if (bNeedStats)
     {
         if (poSrcDS == poCurDS && !CreateVRTWithOrWithoutStats())
         {
             return nullptr;
         }
+        poCurDS->ClearStatistics();
 
         // Avoid source files to be modified
         CPLConfigOptionSetter enablePamDirtyDisabler(
@@ -1154,6 +1149,7 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         }
     }
 
+    std::string osOverviewResampling;
     if (bGenerateOvr)
     {
         CPLDebug("COG", "Generating overviews of the imagery: start");
@@ -1161,7 +1157,7 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         std::vector<GDALRasterBand *> apoSrcBands;
         for (int i = 0; i < nBands; i++)
             apoSrcBands.push_back(poCurDS->GetRasterBand(i + 1));
-        const char *pszResampling = CSLFetchNameValueDef(
+        osOverviewResampling = CSLFetchNameValueDef(
             papszOptions, "OVERVIEW_RESAMPLING",
             CSLFetchNameValueDef(papszOptions, "RESAMPLING",
                                  GetResampling(poSrcDS)));
@@ -1185,8 +1181,8 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         CPLErr eErr = GTIFFBuildOverviewsEx(
             m_osTmpOverviewFilename, nBands, &apoSrcBands[0],
             static_cast<int>(asOverviewDims.size()), nullptr,
-            asOverviewDims.data(), pszResampling, aosOverviewOptions.List(),
-            GDALScaledProgress, pScaledProgress);
+            asOverviewDims.data(), osOverviewResampling.c_str(),
+            aosOverviewOptions.List(), GDALScaledProgress, pScaledProgress);
         CPLDebug("COG", "Generating overviews of the imagery: end");
 
         GDALDestroyScaledProgress(pScaledProgress);
@@ -1194,6 +1190,14 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         {
             return nullptr;
         }
+    }
+    else if (poSrcDS->GetRasterBand(1)->GetOverviewCount() > 0)
+    {
+        const char *pszResampling =
+            poSrcDS->GetRasterBand(1)->GetOverview(0)->GetMetadataItem(
+                "RESAMPLING");
+        if (pszResampling)
+            osOverviewResampling = pszResampling;
     }
 
     CPLStringList aosOptions;
@@ -1214,7 +1218,7 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
     if (EQUAL(osCompress, "JPEG"))
     {
         aosOptions.SetNameValue("JPEG_QUALITY", pszQuality);
-        if (nBands == 3)
+        if (nBands == 3 && EQUAL(pszInterleave, "PIXEL"))
             aosOptions.SetNameValue("PHOTOMETRIC", "YCBCR");
     }
     else if (EQUAL(osCompress, "WEBP"))
@@ -1275,6 +1279,11 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
     }
     else
     {
+        if (!osOverviewResampling.empty())
+        {
+            aosOptions.SetNameValue("@OVERVIEW_RESAMPLING",
+                                    osOverviewResampling.c_str());
+        }
         if (!m_osTmpOverviewFilename.empty())
         {
             aosOptions.SetNameValue("@OVERVIEW_DATASET",
@@ -1332,7 +1341,8 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
     }
 
     std::unique_ptr<CPLConfigOptionSetter> poPhotometricSetter;
-    if (nBands == 3 && EQUAL(pszOverviewCompress, "JPEG"))
+    if (nBands == 3 && EQUAL(pszOverviewCompress, "JPEG") &&
+        EQUAL(pszInterleave, "PIXEL"))
     {
         poPhotometricSetter.reset(
             new CPLConfigOptionSetter("PHOTOMETRIC_OVERVIEW", "YCBCR", true));
@@ -1363,15 +1373,26 @@ GDALDataset *GDALCOGCreator::Create(const char *pszFilename,
         aosOptions.AddNameValue("SRC_MDD", *papszSrcMDDIter);
     CSLDestroy(papszSrcMDD);
 
+    if (EQUAL(pszInterleave, "TILE"))
+    {
+        aosOptions.SetNameValue("INTERLEAVE", "BAND");
+        aosOptions.SetNameValue("@TILE_INTERLEAVE", "YES");
+    }
+    else
+    {
+        aosOptions.SetNameValue("INTERLEAVE", pszInterleave);
+    }
+
+    aosOptions.SetNameValue("@FLUSHCACHE", "YES");
+    aosOptions.SetNameValue("@SUPPRESS_ASAP",
+                            CSLFetchNameValue(papszOptions, "@SUPPRESS_ASAP"));
+
     CPLDebug("COG", "Generating final product: start");
     auto poRet =
         poGTiffDrv->CreateCopy(pszFilename, poCurDS, false, aosOptions.List(),
                                GDALScaledProgress, pScaledProgress);
 
     GDALDestroyScaledProgress(pScaledProgress);
-
-    if (poRet)
-        poRet->FlushCache(false);
 
     CPLDebug("COG", "Generating final product: end");
     return poRet;
@@ -1396,6 +1417,7 @@ static GDALDataset *COGCreateCopy(const char *pszFilename, GDALDataset *poSrcDS,
 
 class GDALCOGDriver final : public GDALDriver
 {
+    std::recursive_mutex m_oMutex{};
     bool m_bInitialized = false;
 
     bool bHasLZW = false;
@@ -1413,17 +1435,11 @@ class GDALCOGDriver final : public GDALDriver
     GDALCOGDriver();
 
     const char *GetMetadataItem(const char *pszName,
-                                const char *pszDomain) override
-    {
-        if (EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
-        {
-            InitializeCreationOptionList();
-        }
-        return GDALDriver::GetMetadataItem(pszName, pszDomain);
-    }
+                                const char *pszDomain) override;
 
     char **GetMetadata(const char *pszDomain) override
     {
+        std::lock_guard oLock(m_oMutex);
         InitializeCreationOptionList();
         return GDALDriver::GetMetadata(pszDomain);
     }
@@ -1439,6 +1455,17 @@ GDALCOGDriver::GDALCOGDriver()
                                               bHasZSTD, bHasJPEG, bHasWebP,
                                               bHasLERC, true /* bForCOG */);
     gbHasLZW = bHasLZW;
+}
+
+const char *GDALCOGDriver::GetMetadataItem(const char *pszName,
+                                           const char *pszDomain)
+{
+    std::lock_guard oLock(m_oMutex);
+    if (EQUAL(pszName, GDAL_DMD_CREATIONOPTIONLIST))
+    {
+        InitializeCreationOptionList();
+    }
+    return GDALDriver::GetMetadataItem(pszName, pszDomain);
 }
 
 void GDALCOGDriver::InitializeCreationOptionList()
@@ -1497,10 +1524,12 @@ void GDALCOGDriver::InitializeCreationOptionList()
         osOptions += "   <Option name='QUALITY' type='int' "
                      "description='" +
                      osJPEG_WEBP +
-                     " quality 1-100' default='75'/>"
+                     " quality 1-100' min='1' max='100' default='75'/>"
                      "   <Option name='OVERVIEW_QUALITY' type='int' "
                      "description='Overview " +
-                     osJPEG_WEBP + " quality 1-100' default='75'/>";
+                     osJPEG_WEBP +
+                     " quality 1-100' min='1' max='100' "
+                     "default='75'/>";
     }
     if (bHasLERC)
     {
@@ -1518,16 +1547,16 @@ void GDALCOGDriver::InitializeCreationOptionList()
         "   <Option name='JXL_LOSSLESS' type='boolean' description='Whether "
         "JPEGXL compression should be lossless' default='YES'/>"
         "   <Option name='JXL_EFFORT' type='int' description='Level of effort "
-        "1(fast)-9(slow)' default='5'/>"
+        "1(fast)-9(slow)' min='1' max='9' default='5'/>"
         "   <Option name='JXL_DISTANCE' type='float' description='Distance "
         "level for lossy compression (0=mathematically lossless, 1.0=visually "
-        "lossless, usual range [0.5,3])' default='1.0' min='0.1' max='15.0'/>";
+        "lossless, usual range [0.5,3])' default='1.0' min='0.01' max='25.0'/>";
 #ifdef HAVE_JxlEncoderSetExtraChannelDistance
     osOptions += "   <Option name='JXL_ALPHA_DISTANCE' type='float' "
                  "description='Distance level for alpha channel "
                  "(-1=same as non-alpha channels, "
                  "0=mathematically lossless, 1.0=visually lossless, "
-                 "usual range [0.5,3])' default='-1' min='-1' max='15.0'/>";
+                 "usual range [0.5,3])' default='-1' min='-1' max='25.0'/>";
 #endif
 #endif
     osOptions +=
@@ -1539,6 +1568,11 @@ void GDALCOGDriver::InitializeCreationOptionList()
         "(16)'/>"
         "   <Option name='BLOCKSIZE' type='int' "
         "description='Tile size in pixels' min='128' default='512'/>"
+        "   <Option name='INTERLEAVE' type='string-select' default='PIXEL'>"
+        "       <Value>BAND</Value>"
+        "       <Value>PIXEL</Value>"
+        "       <Value>TILE</Value>"
+        "   </Option>"
         "   <Option name='BIGTIFF' type='string-select' description='"
         "Force creation of BigTIFF file'>"
         "     <Value>YES</Value>"
@@ -1561,7 +1595,7 @@ void GDALCOGDriver::InitializeCreationOptionList()
         "   </Option>"
         "  <Option name='OVERVIEW_COUNT' type='int' min='0' "
         "description='Number of overviews'/>"
-        "  <Option name='TILING_SCHEME' type='string' description='"
+        "  <Option name='TILING_SCHEME' type='string-select' description='"
         "Which tiling scheme to use pre-defined value or custom inline/outline "
         "JSON definition' default='CUSTOM'>"
         "    <Value>CUSTOM</Value>";
@@ -1640,6 +1674,9 @@ void GDALRegister_COG()
                               "Cloud optimized GeoTIFF generator");
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/raster/cog.html");
     poDriver->SetMetadataItem(GDAL_DMD_EXTENSIONS, "tif tiff");
+    poDriver->SetMetadataItem(GDAL_DMD_OVERVIEW_CREATIONOPTIONLIST,
+                              "<OverviewCreationOptionList>"
+                              "</OverviewCreationOptionList>");
 
     poDriver->SetMetadataItem(
         GDAL_DMD_CREATIONDATATYPES,
@@ -1647,6 +1684,9 @@ void GDALRegister_COG()
         "Float64 CInt16 CInt32 CFloat32 CFloat64");
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_CREATE_ONLY_VISIBLE_AT_CLOSE_TIME,
+                              "YES");
+    poDriver->SetMetadataItem(GDAL_DCAP_CAN_READ_AFTER_DELETE, "YES");
 
     poDriver->SetMetadataItem(GDAL_DCAP_COORDINATE_EPOCH, "YES");
 

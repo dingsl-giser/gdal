@@ -39,7 +39,7 @@ or a GEOMETRYCOLLECTION of TIN representation for fans and meshes.
 
 If a .prj files in old Arc/Info style or new ESRI OGC WKT style is
 present, it will be read and used to associate a projection with
-features. Starting with GDAL 2.3, a match will be attempted with the
+features. A match will be attempted with the
 EPSG databases to identify the SRS of the .prj with an entry in the
 catalog.
 
@@ -166,9 +166,7 @@ terminated with an error.
 Note that this can make it very difficult to translate a mixed geometry
 layer from another format into Shapefile format using ogr2ogr, since
 ogr2ogr has no support for separating out geometries from a source
-layer. See the
-`FAQ <http://trac.osgeo.org/gdal/wiki/FAQVector#HowdoItranslateamixedgeometryfiletoshapefileformat>`__
-for a solution.
+layer.
 
 Shapefile feature attributes are stored in an associated .dbf file, and
 so attributes suffer a number of limitations:
@@ -219,8 +217,8 @@ if a feature geometry has been modified with SetFeature() and resulted
 in a change of the size the binary encoding of the geometry in the .shp
 file.
 
-Starting with GDAL 2.2, REPACK is also done automatically at file
-closing, or at FlushCache()/SyncToDisk() time, since shapefiles with
+REPACK is also done automatically at file closing, or at
+FlushCache()/SyncToDisk() time, since shapefiles with
 holes can cause interoperability issues with other software.
 
 Field sizes
@@ -356,8 +354,7 @@ The following layer creation options are supported:
       MULTIPOINT for 2D; POINTZ, ARCZ, POLYGONZ, MULTIPOINTZ or MULTIPATCH
       for 3D; POINTM, ARCM, POLYGONM or MULTIPOINTM for measured
       geometries; and POINTZM, ARCZM, POLYGONZM or MULTIPOINTZM for 3D
-      measured geometries. The measure support was added in GDAL 2.1.
-      MULTIPATCH files are supported since GDAL 2.2.
+      measured geometries.
 
 -  .. lco:: ENCODING
 
@@ -484,5 +481,3 @@ See Also
 --------
 
 -  `Shapelib Page <http://shapelib.maptools.org/>`__
--  `User Notes on OGR Shapefile
-   Driver <http://trac.osgeo.org/gdal/wiki/UserDocs/Shapefiles>`__

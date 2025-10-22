@@ -7,47 +7,13 @@
  ******************************************************************************
  * Copyright (c) 1999, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_geometry.h"
 #include "ogr_p.h"
 
 //! @cond Doxygen_Suppress
-
-/************************************************************************/
-/*                                OGRCurve()                            */
-/************************************************************************/
-
-OGRCurve::OGRCurve() = default;
-
-/************************************************************************/
-/*                               ~OGRCurve()                            */
-/************************************************************************/
-
-OGRCurve::~OGRCurve() = default;
-
-/************************************************************************/
-/*                       OGRCurve( const OGRCurve& )                    */
-/************************************************************************/
-
-OGRCurve::OGRCurve(const OGRCurve &) = default;
 
 /************************************************************************/
 /*                       operator=( const OGRCurve& )                   */
@@ -234,7 +200,6 @@ int OGRCurve::get_IsClosed() const
  *
  * @return a line string approximating the curve
  *
- * @since GDAL 2.0
  */
 
 /**
@@ -252,7 +217,6 @@ int OGRCurve::get_IsClosed() const
  *
  * @return the number of points of the curve.
  *
- * @since GDAL 2.0
  */
 
 /**
@@ -266,7 +230,6 @@ int OGRCurve::get_IsClosed() const
  *
  * @return a point iterator over the curve.
  *
- * @since GDAL 2.0
  */
 
 /**
@@ -282,7 +245,6 @@ int OGRCurve::get_IsClosed() const
  * @see get_GeodesicArea() for an alternative method returning areas
  * computed on the ellipsoid, and in square meters.
  *
- * @since GDAL 2.0
  */
 
 /**
@@ -327,7 +289,6 @@ int OGRCurve::get_IsClosed() const
  * @return the area of the feature in square units of the spatial reference
  * system in use.
  *
- * @since GDAL 2.0
  */
 
 /************************************************************************/
@@ -339,7 +300,6 @@ int OGRCurve::get_IsClosed() const
  *
  * @return TRUE if the curve forms a convex shape.
  *
- * @since GDAL 2.0
  */
 
 OGRBoolean OGRCurve::IsConvex() const
@@ -384,7 +344,6 @@ OGRBoolean OGRCurve::IsConvex() const
  * @param poCurve the input geometry - ownership is passed to the method.
  * @return new geometry
  *
- * @since GDAL 2.0
  */
 
 OGRCompoundCurve *OGRCurve::CastToCompoundCurve(OGRCurve *poCurve)
@@ -415,7 +374,6 @@ OGRCompoundCurve *OGRCurve::CastToCompoundCurve(OGRCurve *poCurve)
  * @param poCurve the input geometry - ownership is passed to the method.
  * @return new geometry.
  *
- * @since GDAL 2.0
  */
 
 OGRLineString *OGRCurve::CastToLineString(OGRCurve *poCurve)
@@ -437,7 +395,6 @@ OGRLineString *OGRCurve::CastToLineString(OGRCurve *poCurve)
  * @param poCurve the input geometry - ownership is passed to the method.
  * @return new geometry.
  *
- * @since GDAL 2.0
  */
 
 OGRLinearRing *OGRCurve::CastToLinearRing(OGRCurve *poCurve)
@@ -458,7 +415,6 @@ OGRLinearRing *OGRCurve::CastToLinearRing(OGRCurve *poCurve)
  * @param p the point to test
  * @return TRUE if it is inside the curve, FALSE otherwise or -1 if unknown.
  *
- * @since GDAL 2.0
  */
 
 int OGRCurve::ContainsPoint(CPL_UNUSED const OGRPoint *p) const
@@ -478,7 +434,6 @@ int OGRCurve::ContainsPoint(CPL_UNUSED const OGRPoint *p) const
  * @param p the point to test
  * @return TRUE if it intersects the curve, FALSE otherwise or -1 if unknown.
  *
- * @since GDAL 2.3
  */
 
 int OGRCurve::IntersectsPoint(CPL_UNUSED const OGRPoint *p) const
@@ -501,7 +456,6 @@ OGRPointIterator::~OGRPointIterator() = default;
  *
  * @return TRUE in case of success, or FALSE if the end of the curve is reached.
  *
- * @since GDAL 2.0
  */
 
 /************************************************************************/
@@ -511,7 +465,6 @@ OGRPointIterator::~OGRPointIterator() = default;
 /**
  * \brief Destroys a point iterator.
  *
- * @since GDAL 2.0
  */
 void OGRPointIterator::destroy(OGRPointIterator *poIter)
 {
@@ -521,6 +474,8 @@ void OGRPointIterator::destroy(OGRPointIterator *poIter)
 /************************************************************************/
 /*                     OGRSimpleCurve::Iterator                         */
 /************************************************************************/
+
+OGRIteratedPoint::~OGRIteratedPoint() = default;
 
 void OGRIteratedPoint::setX(double xIn)
 {
@@ -790,7 +745,7 @@ int OGRCurve::isClockwise() const
     for (int i = 1; i < nPointCount - 1; i++)
     {
         ++oIter;
-        OGRPoint oPointCur = *oIter;
+        const OGRPoint oPointCur = *oIter;
         if (bNextPointIsNextSel)
         {
             oPointNextSel = oPointCur;

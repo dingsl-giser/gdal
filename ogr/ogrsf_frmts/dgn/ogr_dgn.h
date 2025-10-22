@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  OGR Driver for DGN Reader.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2000, Frank Warmerdam (warmerdam@pobox.com)
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_DGN_H_INCLUDED
@@ -42,14 +25,14 @@ class OGRDGNDataSource;
 class OGRDGNLayer final : public OGRLayer
 {
     OGRDGNDataSource *m_poDS = nullptr;
-    OGRFeatureDefn *poFeatureDefn;
+    OGRFeatureDefn *poFeatureDefn{};
 
-    int iNextShapeId;
+    int iNextShapeId{};
 
-    DGNHandle hDGN;
-    int bUpdate;
+    DGNHandle hDGN{};
+    int bUpdate{};
 
-    char *pszLinkFormat;
+    char *pszLinkFormat{};
 
     OGRFeature *ElementToFeature(DGNElemCore *, int nRecLevel);
 
@@ -61,41 +44,35 @@ class OGRDGNLayer final : public OGRLayer
 
     // Unused:
     // int                 bHaveSimpleQuery;
-    OGRFeature *poEvalFeature;
+    OGRFeature *poEvalFeature{};
 
     OGRErr CreateFeatureWithGeom(OGRFeature *, const OGRGeometry *);
+
+    CPL_DISALLOW_COPY_ASSIGN(OGRDGNLayer)
 
   public:
     OGRDGNLayer(OGRDGNDataSource *poDS, const char *pszName, DGNHandle hDGN,
                 int bUpdate);
-    virtual ~OGRDGNLayer();
+    ~OGRDGNLayer() override;
 
-    void SetSpatialFilter(OGRGeometry *) override;
-
-    virtual void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override
-    {
-        OGRLayer::SetSpatialFilter(iGeomField, poGeom);
-    }
+    OGRErr ISetSpatialFilter(int iGeomField,
+                             const OGRGeometry *poGeom) override;
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
     OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual GIntBig GetFeatureCount(int bForce = TRUE) override;
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
+    GIntBig GetFeatureCount(int bForce = TRUE) override;
 
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
@@ -106,42 +83,38 @@ class OGRDGNLayer final : public OGRLayer
 /*                          OGRDGNDataSource                            */
 /************************************************************************/
 
-class OGRDGNDataSource final : public OGRDataSource
+class OGRDGNDataSource final : public GDALDataset
 {
     OGRDGNLayer **papoLayers = nullptr;
     int nLayers = 0;
 
-    char *pszName = nullptr;
     DGNHandle hDGN = nullptr;
 
     char **papszOptions = nullptr;
 
     std::string m_osEncoding{};
 
+    CPL_DISALLOW_COPY_ASSIGN(OGRDGNDataSource)
+
   public:
     OGRDGNDataSource();
-    ~OGRDGNDataSource();
+    ~OGRDGNDataSource() override;
 
     bool Open(GDALOpenInfo *poOpenInfo);
-    bool PreCreate(const char *, char **);
+    void PreCreate(CSLConstList);
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList) override;
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return nLayers;
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     const std::string &GetEncoding() const
     {

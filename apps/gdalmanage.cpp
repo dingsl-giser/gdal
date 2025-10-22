@@ -9,23 +9,7 @@
  * Copyright (c) 2007, Frank Warmerdam
  * Copyright (c) 2008-2009, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -82,8 +66,8 @@ static void ProcessIdentifyTarget(const char *pszTarget,
         if (EQUAL(papszSiblingList[i], "..") || EQUAL(papszSiblingList[i], "."))
             continue;
 
-        CPLString osSubTarget =
-            CPLFormFilename(pszTarget, papszSiblingList[i], nullptr);
+        const CPLString osSubTarget =
+            CPLFormFilenameSafe(pszTarget, papszSiblingList[i], nullptr);
 
         ProcessIdentifyTarget(osSubTarget, papszSiblingList, bRecursive,
                               bReportFailures, bForceRecurse);
@@ -107,13 +91,19 @@ GDALManageAppOptionsGetParser(GDALManageOptions *psOptions)
                             "for the gdalmanage utility "
                             "https://gdal.org/programs/gdalmanage.html"));
 
-    auto addCommonOptions = [psOptions](GDALArgumentParser *subParser)
+    auto addCommonOptions =
+        [psOptions](GDALArgumentParser *subParser, const char *helpMessageSrc)
     {
         subParser->add_argument("-f")
             .metavar("<format>")
             .store_into(psOptions->osDriverName)
             .help(_("Specify format of raster file if unknown by the "
                     "application."));
+
+        subParser->add_argument("datasetname")
+            .metavar("<datasetname>")
+            .store_into(psOptions->osDatasetName)
+            .help(helpMessageSrc);
 
         subParser->add_argument("newdatasetname")
             .metavar("<newdatasetname>")
@@ -157,12 +147,7 @@ GDALManageAppOptionsGetParser(GDALManageOptions *psOptions)
     copyParser->add_description(
         _("Create a copy of the raster file with a new name."));
 
-    addCommonOptions(copyParser);
-
-    copyParser->add_argument("datasetname")
-        .metavar("<datasetname>")
-        .store_into(psOptions->osDatasetName)
-        .help(_("Name of the file to copy."));
+    addCommonOptions(copyParser, _("Name of the file to copy."));
 
     // Rename
 
@@ -170,12 +155,7 @@ GDALManageAppOptionsGetParser(GDALManageOptions *psOptions)
         argParser->add_subparser("rename", /* bForBinary */ true);
     renameParser->add_description(_("Change the name of the raster file."));
 
-    addCommonOptions(renameParser);
-
-    renameParser->add_argument("datasetname")
-        .metavar("<datasetname>")
-        .store_into(psOptions->osDatasetName)
-        .help(_("Name of the file to rename."));
+    addCommonOptions(renameParser, _("Name of the file to rename."));
 
     // Delete
 
@@ -290,13 +270,13 @@ MAIN_START(argc, argv)
     }
     else if (argParser->is_subcommand_used("copy"))
     {
-        GDALCopyDatasetFiles(hDriver, psOptions.osDatasetName.c_str(),
-                             psOptions.osNewName.c_str());
+        GDALCopyDatasetFiles(hDriver, psOptions.osNewName.c_str(),
+                             psOptions.osDatasetName.c_str());
     }
     else if (argParser->is_subcommand_used("rename"))
     {
-        GDALRenameDataset(hDriver, psOptions.osDatasetName.c_str(),
-                          psOptions.osNewName.c_str());
+        GDALRenameDataset(hDriver, psOptions.osNewName.c_str(),
+                          psOptions.osDatasetName.c_str());
     }
     else if (argParser->is_subcommand_used("delete"))
     {

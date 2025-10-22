@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Private definitions for OGR/PostgreSQL dump driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_PGDUMP_H_INCLUDED
@@ -93,6 +76,8 @@ class OGRPGDumpGeomFieldDefn final : public OGRGeomFieldDefn
     {
     }
 
+    ~OGRPGDumpGeomFieldDefn() override;
+
     int m_nSRSId;
     int m_nGeometryTypeFlags;
 };
@@ -124,6 +109,7 @@ class OGRPGDumpLayer final : public OGRLayer
     bool m_bCopyActive = false;
     bool m_bFIDColumnInCopyFields = false;
     int m_bCreateTable = false;
+    bool m_bSkipConflicts = false;
     int m_nUnknownSRSId = -1;
     int m_nForcedSRSId = -1;
     int m_nForcedGeometryTypeFlags = -2;
@@ -156,40 +142,41 @@ class OGRPGDumpLayer final : public OGRLayer
   public:
     OGRPGDumpLayer(OGRPGDumpDataSource *poDS, const char *pszSchemaName,
                    const char *pszLayerName, const char *pszFIDColumn,
-                   int bWriteAsHexIn, int bCreateTable);
-    virtual ~OGRPGDumpLayer();
+                   int bWriteAsHexIn, int bCreateTable, bool bSkipConflicts);
+    ~OGRPGDumpLayer() override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    using OGRLayer::GetLayerDefn;
+
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
 
-    virtual const char *GetFIDColumn() override
+    const char *GetFIDColumn() const override
     {
         return m_pszFIDColumn ? m_pszFIDColumn : "";
     }
 
-    virtual void ResetReading() override
+    void ResetReading() override
     {
     }
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
-    virtual OGRErr CreateFeatureViaInsert(OGRFeature *poFeature);
-    virtual OGRErr CreateFeatureViaCopy(OGRFeature *poFeature);
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    OGRErr CreateFeatureViaInsert(OGRFeature *poFeature);
+    OGRErr CreateFeatureViaCopy(OGRFeature *poFeature);
 
     virtual OGRErr CreateField(const OGRFieldDefn *poField,
                                int bApproxOK = TRUE) override;
     virtual OGRErr CreateGeomField(const OGRGeomFieldDefn *poGeomField,
                                    int bApproxOK = TRUE) override;
 
-    virtual OGRFeature *GetNextFeature() override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual CPLErr SetMetadata(char **papszMD,
-                               const char *pszDomain = "") override;
-    virtual CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
-                                   const char *pszDomain = "") override;
+    CPLErr SetMetadata(char **papszMD, const char *pszDomain = "") override;
+    CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
+                           const char *pszDomain = "") override;
 
     GDALDataset *GetDataset() override;
 
@@ -282,22 +269,22 @@ class OGRPGDumpDataSource final : public GDALDataset
 
   public:
     OGRPGDumpDataSource(const char *pszName, char **papszOptions);
-    virtual ~OGRPGDumpDataSource();
+    ~OGRPGDumpDataSource() override;
 
     bool Log(const char *pszStr, bool bAddSemiColumn = true);
 
-    virtual int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    virtual OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
     virtual OGRLayer *ICreateLayer(const char *pszName,
                                    const OGRGeomFieldDefn *poGeomFieldDefn,
                                    CSLConstList papszOptions) override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     void LogStartTransaction();
     void LogCommit();

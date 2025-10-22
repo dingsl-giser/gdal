@@ -7,23 +7,7 @@
  **********************************************************************
  * Copyright (c) 2015, Even Rouault, <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -186,11 +170,8 @@ bool CPLWorkerThreadPool::SubmitJob(std::function<void()> task)
     if (static_cast<int>(aWT.size()) < m_nMaxThreads)
     {
         // CPLDebug("CPL", "Starting new thread...");
-        std::unique_ptr<CPLWorkerThread> wt(new CPLWorkerThread);
-        wt->pfnInitFunc = nullptr;
-        wt->pInitData = nullptr;
+        auto wt = std::make_unique<CPLWorkerThread>();
         wt->poTP = this;
-        wt->bMarkedAsWaiting = false;
         //ABELL - Why should this fail? And this is a *pool* thread, not necessarily
         //  tied to the submitted job. The submitted job still needs to run, even if
         //  this fails. If we can't create a thread, should the entire pool become invalid?
@@ -227,16 +208,21 @@ bool CPLWorkerThreadPool::SubmitJob(std::function<void()> task)
         CPLDebug("JOB", "Waking up %p", psWorkerThread);
 #endif
 
+#ifdef __COVERITY__
+        CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+#else
         {
             std::lock_guard<std::mutex> oGuardWT(psWorkerThread->m_mutex);
-            // coverity[ uninit_use_in_call]
+            // coverity[uninit_use_in_call]
             oGuard.unlock();
             psWorkerThread->m_cv.notify_one();
         }
+#endif
 
         CPLFree(psToFree);
     }
 
+    // coverity[double_unlock]
     return true;
 }
 
@@ -279,10 +265,7 @@ bool CPLWorkerThreadPool::SubmitJobs(CPLThreadFunc pfnFunc,
         if (static_cast<int>(aWT.size()) < m_nMaxThreads)
         {
             std::unique_ptr<CPLWorkerThread> wt(new CPLWorkerThread);
-            wt->pfnInitFunc = nullptr;
-            wt->pInitData = nullptr;
             wt->poTP = this;
-            wt->bMarkedAsWaiting = false;
             wt->hThread =
                 CPLCreateJoinableThread(WorkerThreadFunction, wt.get());
             if (wt->hThread == nullptr)
@@ -322,7 +305,7 @@ bool CPLWorkerThreadPool::SubmitJobs(CPLThreadFunc pfnFunc,
 #endif
             {
                 std::lock_guard<std::mutex> oGuardWT(psWorkerThread->m_mutex);
-                // coverity[ uninit_use_in_call]
+                // coverity[uninit_use_in_call]
                 oGuard.unlock();
                 psWorkerThread->m_cv.notify_one();
             }
@@ -362,7 +345,8 @@ void CPLWorkerThreadPool::WaitCompletion(int nMaxRemainingJobs)
 /*                            WaitEvent()                               */
 /************************************************************************/
 
-/** Wait for completion of at least one job, if there are any remaining
+/** Wait for completion of at least one job, if there are any remaining,
+ * or for WakeUpWaitEvent() to have been called.
  */
 void CPLWorkerThreadPool::WaitEvent()
 {
@@ -374,7 +358,25 @@ void CPLWorkerThreadPool::WaitEvent()
         return;
     const int nPendingJobsBefore = nPendingJobs;
     m_cv.wait(oGuard, [this, nPendingJobsBefore]
-              { return nPendingJobs < nPendingJobsBefore; });
+              { return nPendingJobs < nPendingJobsBefore || m_bNotifyEvent; });
+    m_bNotifyEvent = false;
+}
+
+/************************************************************************/
+/*                          WakeUpWaitEvent()                           */
+/************************************************************************/
+
+/** Wake-up WaitEvent().
+ *
+ * This method is thread-safe.
+ *
+ * @since GDAL 3.12
+ */
+void CPLWorkerThreadPool::WakeUpWaitEvent()
+{
+    std::unique_lock<std::mutex> oGuard(m_mutex);
+    m_bNotifyEvent = true;
+    m_cv.notify_one();
 }
 
 /************************************************************************/
@@ -425,10 +427,6 @@ bool CPLWorkerThreadPool::Setup(int nThreads, CPLThreadFunc pfnInitFunc,
         wt->pfnInitFunc = pfnInitFunc;
         wt->pInitData = pasInitData ? pasInitData[i] : nullptr;
         wt->poTP = this;
-        {
-            std::lock_guard<std::mutex> oGuard(wt->m_mutex);
-            wt->bMarkedAsWaiting = false;
-        }
         wt->hThread = CPLCreateJoinableThread(WorkerThreadFunction, wt.get());
         if (wt->hThread == nullptr)
         {
@@ -479,9 +477,9 @@ void CPLWorkerThreadPool::DeclareJobFinished()
 std::function<void()>
 CPLWorkerThreadPool::GetNextJob(CPLWorkerThread *psWorkerThread)
 {
+    std::unique_lock<std::mutex> oGuard(m_mutex);
     while (true)
     {
-        std::unique_lock<std::mutex> oGuard(m_mutex);
         if (eState == CPLWTS_STOP)
             return std::function<void()>();
 
@@ -526,13 +524,17 @@ CPLWorkerThreadPool::GetNextJob(CPLWorkerThread *psWorkerThread)
         CPLDebug("JOB", "%p sleeping", psWorkerThread);
 #endif
 
+#ifdef __COVERITY__
+        CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+#else
         std::unique_lock<std::mutex> oGuardThisThread(psWorkerThread->m_mutex);
         // coverity[uninit_use_in_call]
         oGuard.unlock();
-        while (psWorkerThread->bMarkedAsWaiting && eState != CPLWTS_STOP)
-        {
-            psWorkerThread->m_cv.wait(oGuardThisThread);
-        }
+        // coverity[wait_not_in_locked_loop]
+        psWorkerThread->m_cv.wait(oGuardThisThread);
+        // coverity[lock_order]
+        oGuard.lock();
+#endif
     }
 }
 
@@ -610,14 +612,14 @@ bool CPLJobQueue::SubmitJob(std::function<void()> task)
         m_nPendingJobs++;
     }
 
-    // cppcheck-suppress knownConditionTrueFalse
     // coverity[uninit_member,copy_constructor_call]
-    return m_poPool->SubmitJob(
-        [this, task]
-        {
-            task();
-            DeclareJobFinished();
-        });
+    const auto lambda = [this, capturedTask = std::move(task)]
+    {
+        capturedTask();
+        DeclareJobFinished();
+    };
+    // cppcheck-suppress knownConditionTrueFalse
+    return m_poPool->SubmitJob(std::move(lambda));
 }
 
 /************************************************************************/

@@ -10,23 +10,7 @@
  * Copyright (c) 2007, Adam Nowacki
  * Copyright (c) 2011-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 //
@@ -61,6 +45,9 @@
 
 #include "wmsdriver.h"
 #include "minidriver_tiled_wms.h"
+
+#include "gdal_colortable.h"
+#include "gdal_cpp_functions.h"
 
 #include <set>
 
@@ -222,7 +209,7 @@ static int FindBbox(CPLString in)
     size_t pos = in.ifind("&bbox=");
     if (pos == std::string::npos)
         return -1;
-    return (int)pos + 6;
+    return static_cast<int>(pos) + 6;
 }
 
 /************************************************************************/
@@ -377,7 +364,7 @@ CPLErr WMSMiniDriver_TiledWMS::Initialize(CPLXMLNode *config,
         // First process the changes from open options, if present
         changes = CSLFetchNameValueMultiple(OpenOptions, "Change");
         // Transfer them to subst list
-        for (int i = 0; changes && changes[i] != nullptr; i++)
+        for (int i = 0; i < changes.size(); i++)
         {
             char *key = nullptr;
             const char *value = CPLParseNameValue(changes[i], &key);
@@ -403,16 +390,17 @@ CPLErr WMSMiniDriver_TiledWMS::Initialize(CPLXMLNode *config,
         m_parent_dataset->SetMetadataItem("ServerURL", m_base_url, nullptr);
         m_parent_dataset->SetMetadataItem("TiledGroupName", tiledGroupName,
                                           nullptr);
-        for (int i = 0, n = CSLCount(substs); i < n && substs; i++)
-            m_parent_dataset->SetMetadataItem("Change", substs[i], nullptr);
+        for (const char *subst : substs)
+            m_parent_dataset->SetMetadataItem("Change", subst, nullptr);
 
-        const CPLString GTS(CPLGetXMLValue(config, "Configuration", ""));
+        const char *pszConfiguration =
+            CPLGetXMLValue(config, "Configuration", nullptr);
         CPLString decodedGTS;
 
-        if (GTS.size() != 0)
+        if (pszConfiguration)
         {  // Probably XML encoded because it is XML itself
-            decodedGTS =
-                GTS;  // The copy will be replaced by the decoded result
+            // The copy will be replaced by the decoded result
+            decodedGTS = pszConfiguration;
             WMSUtilDecode(decodedGTS,
                           CPLGetXMLValue(config, "Configuration.encoding", ""));
         }
@@ -829,9 +817,9 @@ CPLErr WMSMiniDriver_TiledWMS::Initialize(CPLXMLNode *config,
                         nodechange = nodechange->psNext;
                     }
 
-                    for (int i = 0, n = substs.size(); i < n && substs; i++)
+                    for (const char *subst : substs)
                     {
-                        CPLString kv(substs[i]);
+                        CPLString kv(subst);
                         auto sep_pos =
                             kv.find_first_of("=:");  // It should find it
                         if (sep_pos == CPLString::npos)

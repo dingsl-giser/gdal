@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test GEOS integration in OGR - geometric operations.
@@ -331,7 +330,13 @@ def test_ogr_geos_pointzm_empty():
 
     # GEOS 3.12 returns MULTIPOINT ZM EMPTY, but also accept POINT ZM EMPTY
     # to be future proof...
-    assert g2.ExportToIsoWkt() in ("MULTIPOINT ZM EMPTY", "POINT ZM EMPTY")
+    # Also accept "POINT EMPTY", as returned by GEOS 3.13.1
+    # (cf https://github.com/libgeos/geos/issues/1248)
+    assert g2.ExportToIsoWkt() in (
+        "POINT EMPTY",
+        "MULTIPOINT ZM EMPTY",
+        "POINT ZM EMPTY",
+    )
 
 
 ###############################################################################
@@ -597,6 +602,45 @@ def test_ogr_geos_DelaunayTriangulation():
         triangulation.ExportToWkt()
         == "GEOMETRYCOLLECTION (POLYGON ((0 1,0 0,1 0,0 1)),POLYGON ((0 1,1 0,1 1,0 1)))"
     ), ("Got: %s" % triangulation.ExportToWkt())
+
+
+###############################################################################
+
+
+def test_ogr_geos_ConstrainedDelaunayTriangulation():
+
+    # polygon input
+    in_wkt = "POLYGON ((10 10, 20 40, 90 90, 90 10, 10 10))"
+    g = ogr.CreateGeometryFromWkt(in_wkt)
+
+    gdal.ErrorReset()
+    tri = g.ConstrainedDelaunayTriangulation()
+    if tri is None:
+        assert "GEOS" in gdal.GetLastErrorMsg()
+        pytest.skip()
+
+    assert (
+        tri.ExportToWkt()
+        == "GEOMETRYCOLLECTION (POLYGON ((90 10,20 40,90 90,90 10)),POLYGON ((20 40,90 10,10 10,20 40)))"
+    ), ("Got: %s" % tri.ExportToWkt())
+
+    # multipolygon input
+    in_wkt = "MULTIPOLYGON (((10 10, 20 50, 50 50, 40 20, 10 10)), ((20 60, 60 60, 90 20, 90 90, 20 60)), ((10 90, 10 70, 40 70, 50 90, 10 90)))"
+    g = ogr.CreateGeometryFromWkt(in_wkt)
+    tri = g.ConstrainedDelaunayTriangulation()
+
+    assert tri is not None
+    assert tri.GetGeometryType() == ogr.wkbGeometryCollection
+    assert tri.GetGeometryCount() == 6
+
+    # non-polygon input
+    in_wkt = "MULTIPOINT(0 0,0 1,1 1,1 0)"
+    g = ogr.CreateGeometryFromWkt(in_wkt)
+    tri = g.ConstrainedDelaunayTriangulation()
+
+    assert tri.ExportToWkt() == "GEOMETRYCOLLECTION EMPTY", (
+        "Got: %s" % tri.ExportToWkt()
+    )
 
 
 ###############################################################################

@@ -8,29 +8,17 @@
  * Copyright (c) 2001, Atlantis Scientific, Inc.
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "adsrange.hpp"
 #include "rawdataset.h"
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_srs_api.h"
 #include "timedelta.hpp"
 
@@ -51,7 +39,7 @@ class MerisL2FlagBand final : public GDALPamRasterBand
   public:
     MerisL2FlagBand(GDALDataset *, int, VSILFILE *, vsi_l_offset, int);
     ~MerisL2FlagBand() override;
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 
   private:
     vsi_l_offset nImgOffset;
@@ -173,13 +161,13 @@ class EnvisatDataset final : public RawDataset
 
   public:
     EnvisatDataset();
-    virtual ~EnvisatDataset();
+    ~EnvisatDataset() override;
 
-    virtual int GetGCPCount() override;
+    int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
-    virtual const GDAL_GCP *GetGCPs() override;
-    virtual char **GetMetadataDomainList() override;
-    virtual char **GetMetadata(const char *pszDomain) override;
+    const GDAL_GCP *GetGCPs() override;
+    char **GetMetadataDomainList() override;
+    char **GetMetadata(const char *pszDomain) override;
 
     static GDALDataset *Open(GDALOpenInfo *);
 };
@@ -444,8 +432,7 @@ void EnvisatDataset::ScanForGCPs_MERIS()
         return;
 
     int nTPPerColumn = nNumDSR;
-    int nTPPerLine =
-        (GetRasterXSize() + nSamplesPerTiePoint - 1) / nSamplesPerTiePoint;
+    int nTPPerLine = DIV_ROUND_UP(GetRasterXSize(), nSamplesPerTiePoint);
 
     /* -------------------------------------------------------------------- */
     /*      Find a measurement type dataset to use as a reference raster    */
@@ -538,12 +525,14 @@ void EnvisatDataset::ScanForGCPs_MERIS()
 
     GByte *pabyRecord = (GByte *)CPLMalloc(nDSRSize - 13);
 
-    GUInt32 *tpLat = ((GUInt32 *)pabyRecord) + nTPPerLine * 0; /* latitude */
-    GUInt32 *tpLon = ((GUInt32 *)pabyRecord) + nTPPerLine * 1; /* longitude */
-    GUInt32 *tpLtc =
-        ((GUInt32 *)pabyRecord) + nTPPerLine * 4; /* lat. DEM correction */
-    GUInt32 *tpLnc =
-        ((GUInt32 *)pabyRecord) + nTPPerLine * 5; /* lon. DEM correction */
+    GUInt32 *tpLat =
+        reinterpret_cast<GUInt32 *>(pabyRecord) + nTPPerLine * 0; /* latitude */
+    GUInt32 *tpLon = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 1; /* longitude */
+    GUInt32 *tpLtc = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 4; /* lat. DEM correction */
+    GUInt32 *tpLnc = reinterpret_cast<GUInt32 *>(pabyRecord) +
+                     nTPPerLine * 5; /* lon. DEM correction */
 
     nGCPCount = 0;
     pasGCPList = (GDAL_GCP *)CPLCalloc(
@@ -915,9 +904,7 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         EnvisatFile_Close(hEnvisatFile);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The ENVISAT driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("ENVISAT");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
@@ -980,8 +967,8 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
             eDataType = GDT_Byte;
     }
 
-    int nPrefixBytes =
-        dsr_size - ((GDALGetDataTypeSize(eDataType) / 8) * poDS->nRasterXSize);
+    const int nPrefixBytes =
+        dsr_size - (GDALGetDataTypeSizeBytes(eDataType) * poDS->nRasterXSize);
 
     /* -------------------------------------------------------------------- */
     /*      Fail out if we didn't get non-zero sizes.                       */
@@ -1029,7 +1016,7 @@ GDALDataset *EnvisatDataset::Open(GDALOpenInfo *poOpenInfo)
         {
             auto poBand = RawRasterBand::Create(
                 poDS.get(), iBand + 1, poDS->fpImage, ds_offset + nPrefixBytes,
-                GDALGetDataTypeSize(eDataType) / 8, dsr_size, eDataType,
+                GDALGetDataTypeSizeBytes(eDataType), dsr_size, eDataType,
                 RawRasterBand::ByteOrder::ORDER_BIG_ENDIAN,
                 RawRasterBand::OwnFP::NO);
             if (!poBand)

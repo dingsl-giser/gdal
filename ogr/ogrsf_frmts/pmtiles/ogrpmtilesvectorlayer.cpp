@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_pmtiles.h"
@@ -155,8 +139,8 @@ OGRwkbGeometryType OGRPMTilesVectorLayer::GuessGeometryType(
         }
         osTileData = *posStr;
 
-        std::string osTmpFilename =
-            CPLSPrintf("/vsimem/mvt_%p_%u_%u.pbf", poDS, sTile.x, sTile.y);
+        const std::string osTmpFilename = VSIMemGenerateHiddenFilename(
+            CPLSPrintf("pmtiles_%u_%u.pbf", sTile.x, sTile.y));
         VSIFCloseL(VSIFileFromMemBuffer(
             osTmpFilename.c_str(), reinterpret_cast<GByte *>(&osTileData[0]),
             osTileData.size(), false));
@@ -226,8 +210,8 @@ GIntBig OGRPMTilesVectorLayer::GetTotalFeatureCount() const
         }
         osTileData = *posStr;
 
-        std::string osTmpFilename = CPLSPrintf(
-            "/vsimem/mvt_%p_%u_%u_getfeaturecount.pbf", this, sTile.x, sTile.y);
+        const std::string osTmpFilename = VSIMemGenerateHiddenFilename(
+            CPLSPrintf("pmtiles_%u_%u_getfeaturecount.pbf", sTile.x, sTile.y));
         VSIFCloseL(VSIFileFromMemBuffer(
             osTmpFilename.c_str(), reinterpret_cast<GByte *>(&osTileData[0]),
             osTileData.size(), false));
@@ -300,8 +284,8 @@ OGRFeature *OGRPMTilesVectorLayer::GetFeature(GIntBig nFID)
     }
     std::string osTileData = *posStr;
 
-    std::string osTmpFilename = CPLSPrintf(
-        "/vsimem/mvt_%p_%u_%u_getfeature.pbf", this, sTile.x, sTile.y);
+    const std::string osTmpFilename = VSIMemGenerateHiddenFilename(
+        CPLSPrintf("pmtiles_getfeature_%u_%u.pbf", sTile.x, sTile.y));
     VSIFCloseL(VSIFileFromMemBuffer(osTmpFilename.c_str(),
                                     reinterpret_cast<GByte *>(&osTileData[0]),
                                     osTileData.size(), false));
@@ -387,6 +371,10 @@ std::unique_ptr<OGRFeature> OGRPMTilesVectorLayer::GetNextSrcFeature()
             m_nX = sTile.x;
             m_nY = sTile.y;
 
+            // Do the reset before the later 'm_osTileData = *posStr', otherwise
+            // the destructor might read file content that is no longer valid
+            m_poTileDS.reset();
+
             if (sTile.offset == m_nLastTileOffset)
             {
                 // In case of run-length encoded tiles, we do not need to
@@ -407,9 +395,8 @@ std::unique_ptr<OGRFeature> OGRPMTilesVectorLayer::GetNextSrcFeature()
                 m_osTileData = *posStr;
             }
 
-            m_poTileDS.reset();
-            const std::string osTmpFilename =
-                CPLSPrintf("/vsimem/mvt_%p_%u_%u.pbf", this, sTile.x, sTile.y);
+            const std::string osTmpFilename = VSIMemGenerateHiddenFilename(
+                CPLSPrintf("pmtiles_%u_%u.pbf", sTile.x, sTile.y));
             VSIFCloseL(VSIFileFromMemBuffer(
                 osTmpFilename.c_str(),
                 reinterpret_cast<GByte *>(&m_osTileData[0]),
@@ -490,7 +477,7 @@ OGRFeature *OGRPMTilesVectorLayer::GetNextRawFeature()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRPMTilesVectorLayer::TestCapability(const char *pszCap)
+int OGRPMTilesVectorLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCStringsAsUTF8) ||
         EQUAL(pszCap, OLCFastSpatialFilter) || EQUAL(pszCap, OLCFastGetExtent))
@@ -505,10 +492,11 @@ int OGRPMTilesVectorLayer::TestCapability(const char *pszCap)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                            IGetExtent()                              */
 /************************************************************************/
 
-OGRErr OGRPMTilesVectorLayer::GetExtent(OGREnvelope *psExtent, int)
+OGRErr OGRPMTilesVectorLayer::IGetExtent(int /* iGeomField */,
+                                         OGREnvelope *psExtent, bool)
 {
     *psExtent = m_sExtent;
     return OGRERR_NONE;
@@ -539,12 +527,13 @@ void OGRPMTilesVectorLayer::ExtentToTileExtent(const OGREnvelope &sEnvelope,
 }
 
 /************************************************************************/
-/*                         SetSpatialFilter()                           */
+/*                         ISetSpatialFilter()                           */
 /************************************************************************/
 
-void OGRPMTilesVectorLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
+OGRErr OGRPMTilesVectorLayer::ISetSpatialFilter(int iGeomField,
+                                                const OGRGeometry *poGeomIn)
 {
-    OGRLayer::SetSpatialFilter(poGeomIn);
+    OGRLayer::ISetSpatialFilter(iGeomField, poGeomIn);
 
     if (m_poFilterGeom != nullptr && m_sFilterEnvelope.MinX <= -MAX_GM &&
         m_sFilterEnvelope.MinY <= -MAX_GM && m_sFilterEnvelope.MaxX >= MAX_GM &&
@@ -591,4 +580,5 @@ void OGRPMTilesVectorLayer::SetSpatialFilter(OGRGeometry *poGeomIn)
         m_nFilterMaxX = (1 << m_nZoomLevel) - 1;
         m_nFilterMaxY = (1 << m_nZoomLevel) - 1;
     }
+    return OGRERR_NONE;
 }

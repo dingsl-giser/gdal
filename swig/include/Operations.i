@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     Operations.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Howard Butler
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %{
@@ -225,8 +208,9 @@ int  RasterizeLayer( GDALDatasetShadow *dataset,
         return CE_Failure;
     }
 
+    OGRLayerH hLayer = (OGRLayerH)layer;
     eErr = GDALRasterizeLayers( dataset, bands, band_list,
-                                1, &layer,
+                                1, &hLayer,
                                 NULL, NULL,
                                 burn_values_list, options,
                                 callback, callback_data );
@@ -269,8 +253,9 @@ int  RasterizeLayer( GDALDatasetShadow *dataset,
         return CE_Failure;
     }
 
+    OGRLayerH hLayer = (OGRLayerH)layer;
     eErr = GDALRasterizeLayers( dataset, bands, band_list,
-                                1, &layer,
+                                1, &hLayer,
                                 (GDALTransformerFunc) pfnTransformer,
                                 pTransformArg,
                                 burn_values_list, options,
@@ -333,7 +318,6 @@ int  FPolygonize( GDALRasterBandShadow *srcBand,
 /*                             FillNodata()                             */
 /************************************************************************/
 
-/* Interface method added for GDAL 1.7.0 */
 %apply Pointer NONNULL {GDALRasterBandShadow *targetBand};
 #ifndef SWIGJAVA
 %feature( "kwargs" ) FillNodata;
@@ -391,6 +375,8 @@ int  SieveFilter( GDALRasterBandShadow *srcBand,
 #endif /* SWIGJAVA */
 #ifndef SWIGCSHARP
 %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int overviewBandCount, GDALRasterBandShadow **overviewBands)};
+#else
+%apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow** overviewBands}
 #endif /* SWIGCSHARP */
 #ifdef SWIGJAVA
 %apply (const char* stringWithDefaultValue) {const char *resampling};
@@ -703,6 +689,8 @@ GDALDatasetShadow *AutoCreateWarpedVRT( GDALDatasetShadow *src_ds,
 %newobject CreatePansharpenedVRT;
 #ifndef SWIGCSHARP
 %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int nInputSpectralBands, GDALRasterBandShadow **ahInputSpectralBands)};
+#else
+%apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow** ahInputSpectralBands}
 #endif /* SWIGCSHARP */
 %apply Pointer NONNULL { GDALRasterBandShadow* panchroBand };
 
@@ -723,6 +711,9 @@ GDALDatasetShadow*  CreatePansharpenedVRT( const char* pszXML,
 /************************************************************************/
 /*                             Transformer                              */
 /************************************************************************/
+
+%rename (GetTranformerOptionList) GDALGetGenImgProjTranformerOptionList;
+const char* GDALGetGenImgProjTranformerOptionList();
 
 #ifndef SWIGPYTHON
 %rename (Transformer) GDALTransformerInfoShadow;
@@ -840,6 +831,8 @@ public:
 %}
 #endif
 
+%rename (WarpGetOptionList) GDALWarpGetOptionList;
+const char* GDALWarpGetOptionList();
 
 /************************************************************************/
 /*                        SuggestedWarpOutput()                         */
@@ -919,6 +912,7 @@ struct SuggestedWarpOutputRes
 #else
 %newobject SuggestedWarpOutput;
 #endif
+%apply Pointer NONNULL {GDALDatasetShadow *src};
 %inline %{
 #ifdef SWIGPYTHON
   SuggestedWarpOutputRes* SuggestedWarpOutputFromOptions( GDALDatasetShadow *src,
@@ -947,6 +941,7 @@ struct SuggestedWarpOutputRes
     return res;
   }
 %}
+%clear GDALDatasetShadow *src;
 
 #ifdef SWIGPYTHON
 
@@ -996,34 +991,36 @@ def SuggestedWarpOutput(*args):
     Parameters
     ----------
 
-    src: Dataset
+    src : Dataset
         Source dataset
-    transformer: Transformer
+    transformer : Transformer
         The return value of gdal.Transformer(src, None, options)
         (exclusive with below options parameter)
-    options: list[str]
+    options : list[str]
         List of strings that are the transforming options accepted by
         :cpp:func:`GDALCreateGenImgProjTransformer2` (e.g ``DST_SRS``)
         (exclusive with above transformer parameter)
 
     Returns
     -------
+    SuggestedWarpOutputRes
+        An instance of the SuggestedWarpOutputRes class with the following members:
 
-    A SuggestedWarpOutputRes class instance with the following members:
-    - width: number of pixels in width of the output dataset
-    - height: number of pixels in height of the output dataset
-    - xmin: minimum value of the georeferenced X coordinates
-    - ymin: maximum value of the georeferenced Y coordinates
-    - xmax: minimum value of the georeferenced X coordinates
-    - ymax: maximum value of the georeferenced Y coordinates
-    - geotransform: affine geotransformation matrix (6 values)
+        - ``width`` (int): Number of pixels in width of the output dataset.
+        - ``height`` (int): Number of pixels in height of the output dataset.
+        - ``xmin`` (float): Minimum value of the georeferenced X coordinates.
+        - ``ymin`` (float): Minimum value of the georeferenced Y coordinates.
+        - ``xmax`` (float): Maximum value of the georeferenced X coordinates.
+        - ``ymax`` (float): Maximum value of the georeferenced Y coordinates.
+        - ``geotransform`` (tuple of 6 floats): Affine geotransformation matrix.
 
-    Example
-    -------
+    Examples
+    --------
 
-    >>> ds = gdal.Open("my.tif")
-    ... res = gdal.SuggestedWarpOutput(ds, ["DST_SRS=EPSG:4326"])
-    ... print(res.width, res.height, res.xmin, res.ymin, res.xmax, res.ymax, res.geotransform)
+    >>> ds = gdal.Open("byte.tif")
+    >>> res = gdal.SuggestedWarpOutput(ds, ["DST_SRS=EPSG:4326"])
+    >>> print(res.width, res.height, res.xmin, res.ymin, res.xmax, res.ymax, res.geotransform)
+        22 18 -117.642 33.891 -117.629 33.902 (-117.642, 0.000598, 0.0, 33.902, 0.0, -0.000598)
 
     """
     if isinstance(args[1], GDALTransformerInfoShadow):

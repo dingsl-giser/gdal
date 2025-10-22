@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gpb.h"
@@ -67,6 +51,10 @@
 #include "osm_parser.h"
 #include "ogr_swq.h"
 #include "sqlite3.h"
+
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
+#endif
 
 #undef SQLITE_STATIC
 #define SQLITE_STATIC (static_cast<sqlite3_destructor_type>(nullptr))
@@ -194,7 +182,7 @@ static void AddInterestLayersForDSName(const CPLString &osDSName,
     oDSToBeOpened.nPID = CPLGetPID();
     oDSToBeOpened.osDSName = osDSName;
     oDSToBeOpened.osInterestLayers = osInterestLayers;
-    oListDSToBeOpened.push_back(oDSToBeOpened);
+    oListDSToBeOpened.push_back(std::move(oDSToBeOpened));
 }
 
 /************************************************************************/
@@ -241,8 +229,6 @@ OGROSMDataSource::~OGROSMDataSource()
 
 {
     m_apoLayers.clear();
-
-    CPLFree(m_pszName);
 
     if (m_psParser != nullptr)
         CPLDebug("OSM", "Number of bytes read in file : " CPL_FRMT_GUIB,
@@ -492,7 +478,7 @@ Bucket *OGROSMDataSource::AllocBucket(int iBucket)
         Bucket *psPrevBucket = GetBucket(iBucket - nRem);
         if (psPrevBucket->u.pabyBitmap == nullptr)
             psPrevBucket->u.pabyBitmap =
-                reinterpret_cast<GByte *>(VSI_CALLOC_VERBOSE(1, knPAGE_SIZE));
+                static_cast<GByte *>(VSI_CALLOC_VERBOSE(1, knPAGE_SIZE));
         GByte *pabyBitmap = psPrevBucket->u.pabyBitmap;
         Bucket *psBucket = GetBucket(iBucket);
         if (pabyBitmap != nullptr)
@@ -1480,7 +1466,7 @@ void OGROSMDataSource::UncompressWay(int nBytes, const GByte *pabyCompressedWay,
     if (pnTags)
         *pnTags = nTags;
 
-    // TODO: Some additional safety checks.
+    assert(nTags <= MAX_COUNT_FOR_TAGS_IN_WAY);
     for (unsigned int iTag = 0; iTag < nTags; iTag++)
     {
         const int nK = ReadVarInt32(&pabyPtr);
@@ -2643,7 +2629,6 @@ void OGROSMDataSource::ProcessPolygonsStandalone()
             int nBlobSize = sqlite3_column_bytes(m_pahSelectWayStmt[0], 1);
             const void *blob = sqlite3_column_blob(m_pahSelectWayStmt[0], 1);
 
-            // coverity[tainted_data]
             UncompressWay(nBlobSize, static_cast<const GByte *>(blob), nullptr,
                           m_asLonLatCache, &nTags, pasTags, &sInfo);
             CPLAssert(nTags <= MAX_COUNT_FOR_TAGS_IN_WAY);
@@ -2729,9 +2714,7 @@ int OGROSMDataSource::Open(const char *pszFilename,
                            CSLConstList papszOpenOptionsIn)
 
 {
-    m_pszName = CPLStrdup(pszFilename);
-
-    m_psParser = OSM_Open(m_pszName, OGROSMNotifyNodes, OGROSMNotifyWay,
+    m_psParser = OSM_Open(pszFilename, OGROSMNotifyNodes, OGROSMNotifyWay,
                           OGROSMNotifyRelation, OGROSMNotifyBounds, this);
     if (m_psParser == nullptr)
         return FALSE;
@@ -2885,7 +2868,7 @@ int OGROSMDataSource::Open(const char *pszFilename,
         }
 
         m_bInMemoryNodesFile = true;
-        m_osNodesFilename.Printf("/vsimem/osm_temp_nodes_%p", this);
+        m_osNodesFilename = VSIMemGenerateHiddenFilename("osm_temp_nodes");
         m_fpNodes = VSIFOpenL(m_osNodesFilename, "wb+");
         if (m_fpNodes == nullptr)
         {
@@ -2912,7 +2895,7 @@ int OGROSMDataSource::Open(const char *pszFilename,
             VSIUnlink(m_osNodesFilename);
 
             m_bInMemoryNodesFile = false;
-            m_osNodesFilename = CPLGenerateTempFilename("osm_tmp_nodes");
+            m_osNodesFilename = CPLGenerateTempFilenameSafe("osm_tmp_nodes");
 
             m_fpNodes = VSIFOpenL(m_osNodesFilename, "wb+");
             if (m_fpNodes == nullptr)
@@ -2938,7 +2921,8 @@ int OGROSMDataSource::Open(const char *pszFilename,
     const bool bRet = CreateTempDB();
     if (bRet)
     {
-        CPLString osInterestLayers = GetInterestLayersForDSName(GetName());
+        CPLString osInterestLayers =
+            GetInterestLayersForDSName(GetDescription());
         if (!osInterestLayers.empty())
         {
             ReleaseResultSet(ExecuteSQL(osInterestLayers, nullptr, nullptr));
@@ -2971,7 +2955,7 @@ bool OGROSMDataSource::CreateTempDB()
     }
     else
     {
-        m_osTmpDBName.Printf("/vsimem/osm_temp_%p.sqlite", this);
+        m_osTmpDBName = VSIMemGenerateHiddenFilename("osm_temp.sqlite");
 
         // On 32 bit, the virtual memory space is scarce, so we need to
         // reserve it right now. Will not hurt on 64 bit either.
@@ -3015,7 +2999,7 @@ bool OGROSMDataSource::CreateTempDB()
 
     if (!bSuccess)
     {
-        m_osTmpDBName = CPLGenerateTempFilename("osm_tmp");
+        m_osTmpDBName = CPLGenerateTempFilenameSafe("osm_tmp");
         rc = sqlite3_open(m_osTmpDBName.c_str(), &m_hDB);
 
         /* On Unix filesystems, you can remove a file even if it */
@@ -3375,23 +3359,52 @@ void OGROSMDataSource::AddComputedAttributes(
 
 bool OGROSMDataSource::ParseConf(CSLConstList papszOpenOptionsIn)
 {
+    VSILFILE *fpConf = nullptr;
+
     const char *pszFilename =
         CSLFetchNameValueDef(papszOpenOptionsIn, "CONFIG_FILE",
                              CPLGetConfigOption("OSM_CONFIG_FILE", nullptr));
     if (pszFilename == nullptr)
-        pszFilename = CPLFindFile("gdal", "osmconf.ini");
-    if (pszFilename == nullptr)
     {
-        CPLError(CE_Warning, CPLE_AppDefined,
-                 "Cannot find osmconf.ini configuration file");
-        return false;
+#if !defined(USE_ONLY_EMBEDDED_RESOURCE_FILES)
+        pszFilename = CPLFindFile("gdal", "osmconf.ini");
+#endif
+#ifdef EMBED_RESOURCE_FILES
+        if (!pszFilename || EQUAL(pszFilename, "osmconf.ini"))
+        {
+            static const bool bOnce [[maybe_unused]] = []()
+            {
+                CPLDebug("OSM", "Using embedded osmconf.ini");
+                return true;
+            }();
+            fpConf = VSIFileFromMemBuffer(
+                nullptr,
+                const_cast<GByte *>(
+                    reinterpret_cast<const GByte *>(OSMGetOSMConfIni())),
+                static_cast<int>(strlen(OSMGetOSMConfIni())),
+                /* bTakeOwnership = */ false);
+        }
+#else
+        if (!pszFilename)
+        {
+            CPLError(CE_Warning, CPLE_AppDefined,
+                     "Cannot find osmconf.ini configuration file");
+            return false;
+        }
+#endif
     }
 
-    m_osConfigFile = pszFilename;
+    if (pszFilename)
+        m_osConfigFile = pszFilename;
 
-    VSILFILE *fpConf = VSIFOpenL(pszFilename, "rb");
-    if (fpConf == nullptr)
-        return false;
+#if defined(EMBED_RESOURCE_FILES)
+    if (!fpConf)
+#endif
+    {
+        fpConf = VSIFOpenL(pszFilename, "rb");
+        if (fpConf == nullptr)
+            return false;
+    }
 
     const char *pszLine = nullptr;
     int iCurLayer = -1;
@@ -3904,7 +3917,7 @@ OGRFeature *OGROSMDataSource::GetNextFeature(OGRLayer **ppoBelongingLayer,
         if (m_nFileSize == FILESIZE_NOT_INIT)
         {
             VSIStatBufL sStat;
-            if (VSIStatL(m_pszName, &sStat) == 0)
+            if (VSIStatL(GetDescription(), &sStat) == 0)
             {
                 m_nFileSize = static_cast<GIntBig>(sStat.st_size);
             }
@@ -4058,7 +4071,7 @@ bool OGROSMDataSource::TransferToDiskIfNecesserary()
             m_fpNodes = nullptr;
 
             const std::string osNewTmpDBName(
-                CPLGenerateTempFilename("osm_tmp_nodes"));
+                CPLGenerateTempFilenameSafe("osm_tmp_nodes"));
 
             CPLDebug("OSM",
                      "%s too big for RAM. Transferring it onto disk in %s",
@@ -4139,7 +4152,7 @@ bool OGROSMDataSource::TransferToDiskIfNecesserary()
             CloseDB();
 
             const std::string osNewTmpDBName(
-                CPLGenerateTempFilename("osm_tmp"));
+                CPLGenerateTempFilenameSafe("osm_tmp"));
 
             CPLDebug("OSM",
                      "%s too big for RAM. Transferring it onto disk in %s",
@@ -4198,7 +4211,7 @@ bool OGROSMDataSource::TransferToDiskIfNecesserary()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGROSMDataSource::TestCapability(const char *pszCap)
+int OGROSMDataSource::TestCapability(const char *pszCap) const
 {
     return EQUAL(pszCap, ODsCRandomLayerRead);
 }
@@ -4207,7 +4220,7 @@ int OGROSMDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGROSMDataSource::GetLayer(int iLayer)
+const OGRLayer *OGROSMDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || static_cast<size_t>(iLayer) >= m_apoLayers.size())
@@ -4217,10 +4230,10 @@ OGRLayer *OGROSMDataSource::GetLayer(int iLayer)
 }
 
 /************************************************************************/
-/*                             GetExtent()                              */
+/*                          GetNativeExtent()                           */
 /************************************************************************/
 
-OGRErr OGROSMDataSource::GetExtent(OGREnvelope *psExtent)
+OGRErr OGROSMDataSource::GetNativeExtent(OGREnvelope *psExtent)
 {
     if (!m_bHasParsedFirstChunk)
     {
@@ -4256,21 +4269,21 @@ class OGROSMSingleFeatureLayer final : public OGRLayer
   public:
     OGROSMSingleFeatureLayer(const char *pszLayerName, int nVal);
     OGROSMSingleFeatureLayer(const char *pszLayerName, const char *pszVal);
-    virtual ~OGROSMSingleFeatureLayer();
+    ~OGROSMSingleFeatureLayer() override;
 
-    virtual void ResetReading() override
+    void ResetReading() override
     {
         iNextShapeId = 0;
     }
 
-    virtual OGRFeature *GetNextFeature() override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    virtual int TestCapability(const char *) override
+    int TestCapability(const char *) const override
     {
         return FALSE;
     }
@@ -4349,15 +4362,17 @@ class OGROSMResultLayerDecorator final : public OGRLayerDecorator
     {
     }
 
-    virtual GIntBig GetFeatureCount(int bForce = TRUE) override
-    {
-        /* When we run GetFeatureCount() with SQLite SQL dialect, */
-        /* the OSM dataset will be re-opened. Make sure that it is */
-        /* re-opened with the same interest layers */
-        AddInterestLayersForDSName(osDSName, osInterestLayers);
-        return OGRLayerDecorator::GetFeatureCount(bForce);
-    }
+    GIntBig GetFeatureCount(int bForce = TRUE) override;
 };
+
+GIntBig OGROSMResultLayerDecorator::GetFeatureCount(int bForce)
+{
+    /* When we run GetFeatureCount() with SQLite SQL dialect, */
+    /* the OSM dataset will be re-opened. Make sure that it is */
+    /* re-opened with the same interest layers */
+    AddInterestLayersForDSName(osDSName, osInterestLayers);
+    return OGRLayerDecorator::GetFeatureCount(bForce);
+}
 
 /************************************************************************/
 /*                             ExecuteSQL()                             */
@@ -4538,7 +4553,7 @@ OGRLayer *OGROSMDataSource::ExecuteSQL(const char *pszSQLCommand,
             MyResetReading();
 
             /* Run the request */
-            m_poResultSetLayer = OGRDataSource::ExecuteSQL(
+            m_poResultSetLayer = GDALDataset::ExecuteSQL(
                 pszSQLCommand, poSpatialFilter, pszDialect);
 
             /* If the user explicitly run a COUNT() request, then do it ! */
@@ -4547,7 +4562,7 @@ OGRLayer *OGROSMDataSource::ExecuteSQL(const char *pszSQLCommand,
                 if (pszDialect != nullptr && EQUAL(pszDialect, "SQLITE"))
                 {
                     m_poResultSetLayer = new OGROSMResultLayerDecorator(
-                        m_poResultSetLayer, GetName(), osInterestLayers);
+                        m_poResultSetLayer, GetDescription(), osInterestLayers);
                 }
                 m_bIsFeatureCountEnabled = true;
             }
@@ -4556,8 +4571,7 @@ OGRLayer *OGROSMDataSource::ExecuteSQL(const char *pszSQLCommand,
         }
     }
 
-    return OGRDataSource::ExecuteSQL(pszSQLCommand, poSpatialFilter,
-                                     pszDialect);
+    return GDALDataset::ExecuteSQL(pszSQLCommand, poSpatialFilter, pszDialect);
 }
 
 /************************************************************************/

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  ODS Translator
  * Purpose:  Definition of classes for OGR OpenOfficeSpreadsheet .ods driver.
@@ -8,30 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_ODS_H_INCLUDED
 #define OGR_ODS_H_INCLUDED
 
 #include "ogrsf_frmts.h"
-#include "ogr_mem.h"
+#include "memdataset.h"
 
 #include "ogr_expat.h"
 
@@ -61,7 +44,7 @@ class OGRODSLayer final : public OGRMemLayer
   public:
     OGRODSLayer(OGRODSDataSource *poDSIn, const char *pszName,
                 bool bUpdateIn = FALSE);
-    ~OGRODSLayer();
+    ~OGRODSLayer() override;
 
     void SetUpdated(bool bUpdatedIn = true);
 
@@ -75,37 +58,37 @@ class OGRODSLayer final : public OGRMemLayer
         bHasHeaderLine = bIn;
     }
 
-    const char *GetName() override
+    const char *GetName() const override
     {
         return OGRMemLayer::GetLayerDefn()->GetName();
     }
 
-    OGRwkbGeometryType GetGeomType() override
+    OGRwkbGeometryType GetGeomType() const override
     {
         return wkbNone;
     }
 
-    virtual OGRSpatialReference *GetSpatialRef() override
+    const OGRSpatialReference *GetSpatialRef() const override
     {
         return nullptr;
     }
 
     /* For external usage. Mess with FID */
-    virtual OGRFeature *GetNextFeature() override;
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
-    virtual OGRErr ISetFeature(OGRFeature *poFeature) override;
+    OGRFeature *GetNextFeature() override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRErr ISetFeature(OGRFeature *poFeature) override;
     OGRErr IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
                           const int *panUpdatedFieldsIdx,
                           int nUpdatedGeomFieldsCount,
                           const int *panUpdatedGeomFieldsIdx,
                           bool bUpdateStyleString) override;
-    virtual OGRErr DeleteFeature(GIntBig nFID) override;
+    OGRErr DeleteFeature(GIntBig nFID) override;
 
-    virtual GIntBig GetFeatureCount(int) override;
+    GIntBig GetFeatureCount(int) override;
 
-    virtual OGRErr SetAttributeFilter(const char *pszQuery) override;
+    OGRErr SetAttributeFilter(const char *pszQuery) override;
 
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 
     /* For internal usage, for cell resolver */
     OGRFeature *GetNextFeatureWithoutFIDHack()
@@ -128,13 +111,13 @@ class OGRODSLayer final : public OGRMemLayer
         return OGRMemLayer::CreateField(poField, bApproxOK);
     }
 
-    virtual OGRErr DeleteField(int iField) override
+    OGRErr DeleteField(int iField) override
     {
         SetUpdated();
         return OGRMemLayer::DeleteField(iField);
     }
 
-    virtual OGRErr ReorderFields(int *panMap) override
+    OGRErr ReorderFields(int *panMap) override
     {
         SetUpdated();
         return OGRMemLayer::ReorderFields(panMap);
@@ -147,7 +130,7 @@ class OGRODSLayer final : public OGRMemLayer
         return OGRMemLayer::AlterFieldDefn(iField, poNewFieldDefn, nFlagsIn);
     }
 
-    virtual OGRErr SyncToDisk() override;
+    OGRErr SyncToDisk() override;
 
     GDALDataset *GetDataset() override;
 };
@@ -245,25 +228,25 @@ class OGRODSDataSource final : public GDALDataset
 
   public:
     explicit OGRODSDataSource(CSLConstList papszOpenOptionsIn);
-    virtual ~OGRODSDataSource();
+    ~OGRODSDataSource() override;
     CPLErr Close() override;
 
     int Open(const char *pszFilename, VSILFILE *fpContentIn,
              VSILFILE *fpSettingsIn, int bUpdatableIn);
     int Create(const char *pszName, char **papszOptions);
 
-    virtual int GetLayerCount() override;
-    virtual OGRLayer *GetLayer(int) override;
+    int GetLayerCount() const override;
+    const OGRLayer *GetLayer(int) const override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    virtual OGRErr DeleteLayer(int iLayer) override;
+    OGRErr DeleteLayer(int iLayer) override;
 
-    virtual CPLErr FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
     void startElementCbk(const char *pszName, const char **ppszAttr);
     void endElementCbk(const char *pszName);

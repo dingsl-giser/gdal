@@ -11,23 +11,7 @@
  * Copyright (c) 2017, Dmitry Baryshnikov, <polimax@mail.ru>
  * Copyright (c) 2017, NextGIS, <info@nextgis.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************
  *
  * dataset.cpp:
@@ -43,6 +27,9 @@
 #include "minidriver_tms.h"
 #include "minidriver_tiled_wms.h"
 #include "minidriver_virtualearth.h"
+
+#include "gdal_colortable.h"
+#include "gdal_cpp_functions.h"
 
 #include <algorithm>
 
@@ -716,7 +703,7 @@ CPLErr GDALWMSDataset::Initialize(CPLXMLNode *config, char **l_papszOpenOptions)
     {
         if (m_oSRS.IsEmpty())
         {
-            const auto oSRS = m_mini_driver->GetSpatialRef();
+            const auto &oSRS = m_mini_driver->GetSpatialRef();
             if (!oSRS.IsEmpty())
             {
                 m_oSRS = oSRS;
@@ -786,16 +773,11 @@ CPLErr GDALWMSDataset::SetSpatialRef(const OGRSpatialReference *)
 /************************************************************************/
 /*                          GetGeoTransform()                           */
 /************************************************************************/
-CPLErr GDALWMSDataset::GetGeoTransform(double *gt)
+CPLErr GDALWMSDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     if (!(m_mini_driver_caps.m_has_geotransform))
     {
-        gt[0] = 0;
-        gt[1] = 1;
-        gt[2] = 0;
-        gt[3] = 0;
-        gt[4] = 0;
-        gt[5] = 1;
+        gt = GDALGeoTransform();
         return CE_Failure;
     }
     gt[0] = m_data_window.m_x0;
@@ -812,7 +794,7 @@ CPLErr GDALWMSDataset::GetGeoTransform(double *gt)
 /************************************************************************/
 /*                          SetGeoTransform()                           */
 /************************************************************************/
-CPLErr GDALWMSDataset::SetGeoTransform(CPL_UNUSED double *gt)
+CPLErr GDALWMSDataset::SetGeoTransform(const GDALGeoTransform &)
 {
     return CE_Failure;
 }
@@ -876,8 +858,7 @@ const char *const *GDALWMSDataset::GetHTTPRequestOpts()
         opts = CSLAddNameValue(opts, "USERAGENT", m_osUserAgent);
     else
         opts = CSLAddString(
-            opts,
-            "USERAGENT=GDAL WMS driver (http://www.gdal.org/frmt_wms.html)");
+            opts, "USERAGENT=GDAL WMS driver (https://gdal.org/frmt_wms.html)");
 
     if (!m_osReferer.empty())
         opts = CSLAddNameValue(opts, "REFERER", m_osReferer);

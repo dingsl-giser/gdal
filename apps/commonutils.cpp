@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2011-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "commonutils.h"
@@ -76,18 +60,82 @@ void EarlySetConfigOptions(int argc, char **argv)
     // OGRRegisterAll(), but we can't call GDALGeneralCmdLineProcessor() or
     // OGRGeneralCmdLineProcessor(), because it needs the drivers to be
     // registered for the --format or --formats options.
+
+    // Start with --debug, so that "my_command --config UNKNOWN_CONFIG_OPTION --debug on"
+    // detects and warns about a unknown config option.
     for (int i = 1; i < argc; i++)
     {
-        if (EQUAL(argv[i], "--config") && i + 2 < argc)
+        if (EQUAL(argv[i], "--config") && i + 1 < argc)
         {
-            CPLSetConfigOption(argv[i + 1], argv[i + 2]);
+            const char *pszArg = argv[i + 1];
+            if (strchr(pszArg, '=') != nullptr)
+            {
+                char *pszKey = nullptr;
+                const char *pszValue = CPLParseNameValue(pszArg, &pszKey);
+                if (pszKey && EQUAL(pszKey, "CPL_DEBUG") && pszValue)
+                {
+                    CPLSetConfigOption(pszKey, pszValue);
+                }
+                CPLFree(pszKey);
+                ++i;
+            }
+            else
+            {
+                if (i + 2 >= argc)
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "--config option given without a key and value "
+                             "argument.");
+                    return;
+                }
 
-            i += 2;
+                if (EQUAL(argv[i + 1], "CPL_DEBUG"))
+                {
+                    CPLSetConfigOption(argv[i + 1], argv[i + 2]);
+                }
+
+                i += 2;
+            }
         }
         else if (EQUAL(argv[i], "--debug") && i + 1 < argc)
         {
             CPLSetConfigOption("CPL_DEBUG", argv[i + 1]);
             i += 1;
+        }
+    }
+    for (int i = 1; i < argc; i++)
+    {
+        if (EQUAL(argv[i], "--config") && i + 1 < argc)
+        {
+            const char *pszArg = argv[i + 1];
+            if (strchr(pszArg, '=') != nullptr)
+            {
+                char *pszKey = nullptr;
+                const char *pszValue = CPLParseNameValue(pszArg, &pszKey);
+                if (pszKey && !EQUAL(pszKey, "CPL_DEBUG") && pszValue)
+                {
+                    CPLSetConfigOption(pszKey, pszValue);
+                }
+                CPLFree(pszKey);
+                ++i;
+            }
+            else
+            {
+                if (i + 2 >= argc)
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "--config option given without a key and value "
+                             "argument.");
+                    return;
+                }
+
+                if (!EQUAL(argv[i + 1], "CPL_DEBUG"))
+                {
+                    CPLSetConfigOption(argv[i + 1], argv[i + 2]);
+                }
+
+                i += 2;
+            }
         }
     }
 }
@@ -107,53 +155,6 @@ void GDALRemoveBOM(GByte *pabyData)
 }
 
 /************************************************************************/
-/*                      GDALRemoveSQLComments()                         */
-/************************************************************************/
-
-std::string GDALRemoveSQLComments(const std::string &osInput)
-{
-    const CPLStringList aosLines(
-        CSLTokenizeStringComplex(osInput.c_str(), "\r\n", FALSE, FALSE));
-    std::string osSQL;
-    for (const char *pszLine : aosLines)
-    {
-        char chQuote = 0;
-        int i = 0;
-        for (; pszLine[i] != '\0'; ++i)
-        {
-            if (chQuote)
-            {
-                if (pszLine[i] == chQuote)
-                {
-                    if (pszLine[i + 1] == chQuote)
-                    {
-                        i++;
-                    }
-                    else
-                    {
-                        chQuote = 0;
-                    }
-                }
-            }
-            else if (pszLine[i] == '\'' || pszLine[i] == '"')
-            {
-                chQuote = pszLine[i];
-            }
-            else if (pszLine[i] == '-' && pszLine[i + 1] == '-')
-            {
-                break;
-            }
-        }
-        if (i > 0)
-        {
-            osSQL.append(pszLine, i);
-        }
-        osSQL += ' ';
-    }
-    return osSQL;
-}
-
-/************************************************************************/
 /*                            ArgIsNumeric()                            */
 /************************************************************************/
 
@@ -161,4 +162,68 @@ int ArgIsNumeric(const char *pszArg)
 
 {
     return CPLGetValueType(pszArg) != CPL_VALUE_STRING;
+}
+
+/************************************************************************/
+/*                         GDALPatternMatch()                           */
+/************************************************************************/
+
+bool GDALPatternMatch(const char *input, const char *pattern)
+
+{
+    while (*input != '\0')
+    {
+        if (*pattern == '\0')
+            return false;
+
+        else if (*pattern == '?')
+        {
+            pattern++;
+            if (static_cast<unsigned int>(*input) > 127)
+            {
+                // Continuation bytes of such characters are of the form
+                // 10xxxxxx (0x80), whereas single-byte are 0xxxxxxx
+                // and the start of a multi-byte is 11xxxxxx
+                do
+                {
+                    input++;
+                } while (static_cast<unsigned int>(*input) > 127);
+            }
+            else
+            {
+                input++;
+            }
+        }
+        else if (*pattern == '*')
+        {
+            if (pattern[1] == '\0')
+                return true;
+
+            // Try eating varying amounts of the input till we get a positive.
+            for (int eat = 0; input[eat] != '\0'; eat++)
+            {
+                if (GDALPatternMatch(input + eat, pattern + 1))
+                    return true;
+            }
+
+            return false;
+        }
+        else
+        {
+            if (CPLTolower(*pattern) != CPLTolower(*input))
+            {
+                return false;
+            }
+            else
+            {
+                input++;
+                pattern++;
+            }
+        }
+    }
+
+    if (*pattern != '\0' && strcmp(pattern, "*") != 0)
+        return false;
+    else
+        return true;
 }

@@ -8,28 +8,16 @@
  * Copyright (c) 2000, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <algorithm>
 
@@ -89,12 +77,12 @@ class JDEMDataset final : public GDALPamDataset
 
   public:
     JDEMDataset();
-    ~JDEMDataset();
+    ~JDEMDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -114,9 +102,9 @@ class JDEMRasterBand final : public GDALPamRasterBand
 
   public:
     JDEMRasterBand(JDEMDataset *, int);
-    ~JDEMRasterBand();
+    ~JDEMRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 };
 
 /************************************************************************/
@@ -234,7 +222,7 @@ JDEMDataset::~JDEMDataset()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr JDEMDataset::GetGeoTransform(double *padfTransform)
+CPLErr JDEMDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     const char *psHeader = reinterpret_cast<const char *>(m_abyHeader);
@@ -244,13 +232,13 @@ CPLErr JDEMDataset::GetGeoTransform(double *padfTransform)
     const double dfURLat = JDEMGetAngle(psHeader + 43);
     const double dfURLong = JDEMGetAngle(psHeader + 50);
 
-    padfTransform[0] = dfLLLong;
-    padfTransform[3] = dfURLat;
-    padfTransform[1] = (dfURLong - dfLLLong) / GetRasterXSize();
-    padfTransform[2] = 0.0;
+    gt[0] = dfLLLong;
+    gt[3] = dfURLat;
+    gt[1] = (dfURLong - dfLLLong) / GetRasterXSize();
+    gt[2] = 0.0;
 
-    padfTransform[4] = 0.0;
-    padfTransform[5] = -1 * (dfURLat - dfLLLat) / GetRasterYSize();
+    gt[4] = 0.0;
+    gt[5] = -1 * (dfURLat - dfLLLat) / GetRasterYSize();
 
     return CE_None;
 }
@@ -319,9 +307,7 @@ GDALDataset *JDEMDataset::Open(GDALOpenInfo *poOpenInfo)
     // Confirm the requested access is supported.
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The JDEM driver does not support update access to existing "
-                 "datasets.");
+        ReportUpdateNotSupportedByDriver("JDEM");
         return nullptr;
     }
 

@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Andrey Kiselev <dron@ak4719.spb.edu>
  * Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -439,7 +423,7 @@ static CPLErr GDALGridInverseDistanceToAPowerNearestNeighborPerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -814,7 +798,7 @@ static CPLErr GDALGridMovingAveragePerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -1226,7 +1210,7 @@ static CPLErr GDALGridDataMetricMinimumOrMaximumPerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -1679,7 +1663,7 @@ static CPLErr GDALGridDataMetricRangePerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -1941,7 +1925,7 @@ static CPLErr GDALGridDataMetricCountPerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -2205,7 +2189,7 @@ static CPLErr GDALGridDataMetricAverageDistancePerQuadrant(
     // multimap), and use the closest n points based on distance until the max
     // is reached.
     // Do that by fetching the nearest point in quadrant 0, then the nearest
-    // point in quadrant 1, 2 and 3, and starting againg with the next nearest
+    // point in quadrant 1, 2 and 3, and starting again with the next nearest
     // point in quarant 0, etc.
     int nQuadrantIterFinishedFlag = 0;
     GUInt32 anPerQuadrant[4] = {0};
@@ -2469,7 +2453,6 @@ CPLErr GDALGridDataMetricAverageDistancePts(
  *
  * @return CE_None on success or CE_Failure if something goes wrong.
  *
- * @since GDAL 2.1
  */
 
 CPLErr GDALGridLinear(const void *poOptionsIn, GUInt32 nPoints,
@@ -2528,8 +2511,14 @@ CPLErr GDALGridLinear(const void *poOptionsIn, GUInt32 nPoints,
         {
             GDALGridNearestNeighborOptions sNeighbourOptions;
             sNeighbourOptions.nSizeOfStructure = sizeof(sNeighbourOptions);
-            sNeighbourOptions.dfRadius1 = dfRadius < 0.0 ? 0.0 : dfRadius;
-            sNeighbourOptions.dfRadius2 = dfRadius < 0.0 ? 0.0 : dfRadius;
+            sNeighbourOptions.dfRadius1 =
+                dfRadius < 0.0 || dfRadius >= std::numeric_limits<double>::max()
+                    ? 0.0
+                    : dfRadius;
+            sNeighbourOptions.dfRadius2 =
+                dfRadius < 0.0 || dfRadius >= std::numeric_limits<double>::max()
+                    ? 0.0
+                    : dfRadius;
             sNeighbourOptions.dfAngle = 0.0;
             sNeighbourOptions.dfNoDataValue = poOptions->dfNoDataValue;
             return GDALGridNearestNeighbor(&sNeighbourOptions, nPoints, padfX,
@@ -2570,6 +2559,7 @@ struct _GDALGridJob
     GDALDataType eType;
 
     int *pnCounter;
+    int nCounterSingleThreaded;
     volatile int *pbStop;
     CPLCond *hCond;
     CPLMutex *hCondMutex;
@@ -2601,8 +2591,7 @@ static int GDALGridProgressMultiThread(GDALGridJob *psJob)
 // Return TRUE if the computation must be interrupted.
 static int GDALGridProgressMonoThread(GDALGridJob *psJob)
 {
-    // coverity[missing_lock]
-    const int nCounter = ++(*psJob->pnCounter);
+    const int nCounter = ++(psJob->nCounterSingleThreaded);
     if (!psJob->pfnRealProgress(nCounter / static_cast<double>(psJob->nYSize),
                                 "", psJob->pRealProgressArg))
     {
@@ -2758,7 +2747,6 @@ static void GDALGridContextCreateQuadTree(GDALGridContext *psContext);
  * @return the context (to be freed with GDALGridContextFree()) or NULL in case
  *         or error.
  *
- * @since GDAL 2.1
  */
 
 GDALGridContext *GDALGridContextCreate(GDALGridAlgorithm eAlgorithm,
@@ -2858,9 +2846,11 @@ GDALGridContext *GDALGridContextCreate(GDALGridAlgorithm eAlgorithm,
 #ifdef HAVE_SSE_AT_COMPILE_TIME
 
                     if (pafXAligned == nullptr &&
-                        CPLTestBool(
-                            CPLGetConfigOption("GDAL_USE_SSE", "YES")) &&
-                        CPLHaveRuntimeSSE())
+                        CPLTestBool(CPLGetConfigOption("GDAL_USE_SSE", "YES"))
+#if !defined(USE_NEON_OPTIMIZATIONS)
+                        && CPLHaveRuntimeSSE()
+#endif
+                    )
                     {
                         pafXAligned = static_cast<float *>(
                             VSI_MALLOC_ALIGNED_AUTO_VERBOSE(sizeof(float) *
@@ -3362,7 +3352,6 @@ void GDALGridContextCreateQuadTree(GDALGridContext *psContext)
  *
  * @param psContext the context.
  *
- * @since GDAL 2.1
  */
 void GDALGridContextFree(GDALGridContext *psContext)
 {
@@ -3395,7 +3384,7 @@ void GDALGridContextFree(GDALGridContext *psContext)
 /**
  * Do the gridding of a window of a raster.
  *
- * This function takes the gridding context as input to preprare computation
+ * This function takes the gridding context as input to prepare computation
  * of regular grid (or call it a raster) from these scattered data.
  * You should supply the extent of the output grid and allocate array
  * sufficient to hold such a grid.
@@ -3415,7 +3404,6 @@ void GDALGridContextFree(GDALGridContext *psContext)
  *
  * @return CE_None on success or CE_Failure if something goes wrong.
  *
- * @since GDAL 2.1
  */
 
 CPLErr GDALGridContextProcess(GDALGridContext *psContext, double dfXMin,
@@ -3517,6 +3505,7 @@ CPLErr GDALGridContextProcess(GDALGridContext *psContext, double dfXMin,
     sJob.eType = eType;
     sJob.pfnRealProgress = pfnProgress;
     sJob.pRealProgressArg = pProgressArg;
+    sJob.nCounterSingleThreaded = 0;
     sJob.pnCounter = &nCounter;
     sJob.pbStop = &bStop;
     sJob.hCond = nullptr;
@@ -3610,12 +3599,12 @@ CPLErr GDALGridContextProcess(GDALGridContext *psContext, double dfXMin,
  * scattered data. You should supply geometry and extent of the output grid
  * and allocate array sufficient to hold such a grid.
  *
- * Starting with GDAL 1.10, it is possible to set the GDAL_NUM_THREADS
+ * It is possible to set the GDAL_NUM_THREADS
  * configuration option to parallelize the processing. The value to set is
  * the number of worker threads, or ALL_CPUS to use all the cores/CPUs of the
  * computer (default value).
  *
- * Starting with GDAL 1.10, on Intel/AMD i386/x86_64 architectures, some
+ * On Intel/AMD i386/x86_64 architectures, some
  * gridding methods will be optimized with SSE instructions (provided GDAL
  * has been compiled with such support, and it is available at runtime).
  * Currently, only 'invdist' algorithm with default parameters has an optimized
@@ -3623,7 +3612,7 @@ CPLErr GDALGridContextProcess(GDALGridContext *psContext, double dfXMin,
  * This can provide substantial speed-up, but sometimes at the expense of
  * reduced floating point precision. This can be disabled by setting the
  * GDAL_USE_SSE configuration option to NO.
- * Starting with GDAL 1.11, a further optimized version can use the AVX
+ * A further optimized version can use the AVX
  * instruction set. This can be disabled by setting the GDAL_USE_AVX
  * configuration option to NO.
  *
@@ -3739,8 +3728,10 @@ CPLErr GDALGridParseAlgorithmAndOptions(const char *pszAlgorithm,
                     papszNewParams, "radius",
                     CSLFetchNameValueDef(papszParams, "radius1", "1"));
             }
-            for (const char *pszItem : {"radius", "power", "smoothing",
-                                        "max_points", "min_points", "nodata"})
+            for (const char *pszItem :
+                 {"radius", "power", "smoothing", "max_points", "min_points",
+                  "nodata", "min_points_per_quadrant",
+                  "max_points_per_quadrant"})
             {
                 const char *pszValue = CSLFetchNameValue(papszParams, pszItem);
                 if (pszValue)
@@ -3860,8 +3851,8 @@ CPLErr GDALGridParseAlgorithmAndOptions(const char *pszAlgorithm,
             poPowerOpts->dfNoDataValue = pszValue ? CPLAtofM(pszValue) : 0.0;
 
             static const char *const apszKnownOptions[] = {
-                "power",      "smoothing",  "radius1", "radius2", "angle",
-                "max_points", "min_points", "nodata",  nullptr};
+                "power", "smoothing",  "radius",     "radius1", "radius2",
+                "angle", "max_points", "min_points", "nodata",  nullptr};
             papszKnownOptions = apszKnownOptions;
 
             break;

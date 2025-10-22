@@ -8,23 +8,7 @@
  * Copyright (c) 1998, 2002, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2007-2015, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GTIFFDATASET_H_INCLUDED
@@ -53,9 +37,6 @@ enum class GTiffProfile : GByte
 
 // This must be a #define, since it is used in a XSTRINGIFY() macro
 #define DEFAULT_WEBP_LEVEL 75
-
-constexpr const char *const szJPEGGTiffDatasetTmpPrefix =
-    "/vsimem/gtiffdataset_jpg_tmp_";
 
 class GTiffBitmapBand;
 class GTiffDataset;
@@ -172,12 +153,12 @@ class GTiffDataset final : public GDALPamDataset
 
     MaskOffset *m_panMaskOffsetLsb = nullptr;
     char *m_pszVertUnit = nullptr;
-    char *m_pszFilename = nullptr;
+    std::string m_osFilename{};
     char *m_pszTmpFilename = nullptr;
     char *m_pszGeorefFilename = nullptr;
     char *m_pszXMLFilename = nullptr;
 
-    double m_adfGeoTransform[6]{0, 1, 0, 0, 0, 1};
+    GDALGeoTransform m_gt{};
     double m_dfMaxZError = 0.0;
     double m_dfMaxZErrorOverview = 0.0;
     uint32_t m_anLercAddCompressionAndVersion[2]{0, 0};
@@ -324,6 +305,7 @@ class GTiffDataset final : public GDALPamDataset
     bool m_bWriteKnownIncompatibleEdition : 1;
     bool m_bHasUsedReadEncodedAPI : 1;  // for debugging
     bool m_bWriteCOGLayout : 1;
+    bool m_bTileInterleave : 1;
 
     void ScanDirectories();
     bool ReadStrile(int nBlockId, void *pOutputBuffer,
@@ -345,9 +327,8 @@ class GTiffDataset final : public GDALPamDataset
 
     int GetJPEGOverviewCount();
 
-    bool IsBlockAvailable(int nBlockId, vsi_l_offset *pnOffset = nullptr,
-                          vsi_l_offset *pnSize = nullptr,
-                          bool *pbErrOccurred = nullptr);
+    bool IsBlockAvailable(int nBlockId, vsi_l_offset *pnOffset,
+                          vsi_l_offset *pnSize, bool *pbErrOccurred);
 
     void ApplyPamInfo();
     void PushMetadataToPam();
@@ -459,28 +440,36 @@ class GTiffDataset final : public GDALPamDataset
 
     bool IsWholeBlock(int nXOff, int nYOff, int nXSize, int nYSize) const;
 
+    void *CacheMultiRange(int nXOff, int nYOff, int nXSize, int nYSize,
+                          int nBufXSize, int nBufYSize, const int *panBandMap,
+                          int nBandCount, GDALRasterIOExtraArg *psExtraArg);
+
     static void ThreadDecompressionFunc(void *pData);
 
     static GTIF *GTIFNew(TIFF *hTIFF);
 
+    static constexpr const char *DEFAULT_RASTER_ATTRIBUTE_TABLE =
+        "DEFAULT_RASTER_ATTRIBUTE_TABLE";
+    static constexpr const char *RAT_ROLE = "rat";
+
   protected:
-    virtual int CloseDependentDatasets() override;
+    int CloseDependentDatasets() override;
 
   public:
     GTiffDataset();
-    virtual ~GTiffDataset();
+    ~GTiffDataset() override;
 
     CPLErr Close() override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
 
-    virtual int GetGCPCount() override;
+    int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
-    virtual const GDAL_GCP *GetGCPs() override;
+    const GDAL_GCP *GetGCPs() override;
     CPLErr SetGCPs(int nGCPCountIn, const GDAL_GCP *pasGCPListIn,
                    const OGRSpatialReference *poSRS) override;
 
@@ -490,13 +479,12 @@ class GTiffDataset final : public GDALPamDataset
                              const int *panBandMap, GSpacing nPixelSpace,
                              GSpacing nLineSpace, GSpacing nBandSpace);
 
-    virtual CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff,
-                             int nXSize, int nYSize, void *pData, int nBufXSize,
-                             int nBufYSize, GDALDataType eBufType,
-                             int nBandCount, BANDMAP_TYPE panBandMap,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GSpacing nBandSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IRasterIO(GDALRWFlag eRWFlag, int nXOff, int nYOff, int nXSize,
+                     int nYSize, void *pData, int nBufXSize, int nBufYSize,
+                     GDALDataType eBufType, int nBandCount,
+                     BANDMAP_TYPE panBandMap, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
     virtual CPLStringList
     GetCompressionFormats(int nXOff, int nYOff, int nXSize, int nYSize,
@@ -507,11 +495,16 @@ class GTiffDataset final : public GDALPamDataset
                                       void **ppBuffer, size_t *pnBufferSize,
                                       char **ppszDetailedFormat) override;
 
-    virtual char **GetFileList() override;
+    char **GetFileList() override;
 
-    virtual CPLErr IBuildOverviews(const char *, int, const int *, int,
-                                   const int *, GDALProgressFunc, void *,
-                                   CSLConstList papszOptions) override;
+    CPLErr IBuildOverviews(const char *, int, const int *, int, const int *,
+                           GDALProgressFunc, void *,
+                           CSLConstList papszOptions) override;
+
+    virtual CPLErr AddOverviews(const std::vector<GDALDataset *> &apoSrcOvrDS,
+                                GDALProgressFunc pfnProgress,
+                                void *pProgressData,
+                                CSLConstList papszOptions) override;
 
     bool ComputeBlocksPerColRowAndBand(int l_nBands);
 
@@ -530,18 +523,18 @@ class GTiffDataset final : public GDALPamDataset
                                    char **papszOptions,
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
-    virtual CPLErr FlushCache(bool bAtClosing) override;
+    CPLErr FlushCache(bool bAtClosing) override;
 
-    virtual char **GetMetadataDomainList() override;
-    virtual CPLErr SetMetadata(char **, const char * = "") override;
-    virtual char **GetMetadata(const char *pszDomain = "") override;
-    virtual CPLErr SetMetadataItem(const char *, const char *,
-                                   const char * = "") override;
+    char **GetMetadataDomainList() override;
+    CPLErr SetMetadata(char **, const char * = "") override;
+    char **GetMetadata(const char *pszDomain = "") override;
+    CPLErr SetMetadataItem(const char *, const char *,
+                           const char * = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
-    virtual void *GetInternalHandle(const char *) override;
+    void *GetInternalHandle(const char *) override;
 
-    virtual CPLErr CreateMaskBand(int nFlags) override;
+    CPLErr CreateMaskBand(int nFlags) override;
 
     bool GetRawBinaryLayout(GDALDataset::RawBinaryLayout &) override;
 
@@ -561,7 +554,8 @@ class GTiffDataset final : public GDALPamDataset
                           int nBands, GDALDataType eType,
                           double dfExtraSpaceForOverviews,
                           int nColorTableMultiplier, char **papszParamList,
-                          VSILFILE **pfpL, CPLString &osTmpFilename);
+                          VSILFILE **pfpL, CPLString &osTmpFilename,
+                          bool bCreateCopy, bool &bTileInterleavingOut);
 
     CPLErr WriteEncodedTileOrStrip(uint32_t tile_or_strip, void *data,
                                    int bPreserveDataBuffer);

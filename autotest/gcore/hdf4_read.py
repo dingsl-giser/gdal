@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test basic read support for a all datatypes from a HDF file.
@@ -26,6 +25,7 @@
 # Boston, MA 02111-1307, USA.
 ###############################################################################
 
+import os
 
 import gdaltest
 import pytest
@@ -365,26 +365,26 @@ def test_hdf4_read_online_8():
 
     # 5 MB
     gdaltest.download_or_skip(
-        "https://e4ftl01.cr.usgs.gov/MOLT/MOD13Q1.006/2006.06.10/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
-        "MOD13Q1.A2006161.h34v09.006.2015161173716.hdf",
+        "https://e4ftl01.cr.usgs.gov/MOLT/MOD13Q1.061/2006.06.10/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf",
+        "MOD13Q1.A2006161.h34v09.061.2020265043931.hdf",
     )
 
     tst = gdaltest.GDALTest(
         "HDF4Image",
-        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI",
+        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI",
         1,
-        44174,
+        45111,
         filename_absolute=1,
     )
 
     tst.testOpen()
 
     ds = gdal.Open(
-        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.006.2015161173716.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI"
+        "HDF4_EOS:EOS_GRID:tmp/cache/MOD13Q1.A2006161.h34v09.061.2020265043931.hdf:MODIS_Grid_16DAY_250m_500m_VI:250m 16 days NDVI"
     )
 
     cs = ds.GetRasterBand(1).Checksum()
-    assert cs == 44174, "did not get expected checksum"
+    assert cs == 45111, "did not get expected checksum"
 
     if "GetBlockSize" in dir(gdal.Band):
         (blockx, blocky) = ds.GetRasterBand(1).GetBlockSize()
@@ -568,3 +568,30 @@ def test_gdal_subdataset_bogus(bogus):
     """Test it doesn't crash"""
 
     gdal.GetSubdatasetInfo(bogus)
+
+
+###############################################################################
+# Test reading dataset with lat/long fields with nodata values
+
+
+def test_hdf4_gcp_nodata():
+
+    if gdaltest.hdf4_drv is None:
+        pytest.skip()
+
+    # Cf https://github.com/OSGeo/gdal/issues/13207
+    gdaltest.download_or_skip(
+        "https://github.com/user-attachments/files/22880884/MOD04_3K.NRT.ForGDALTest.zip",
+        "MOD04_3K.NRT.ForGDALTest.zip",
+    )
+
+    if not os.path.exists("tmp/cache/MOD04_3K.A2025284.0010.061.NRT.hdf"):
+        gdaltest.unzip("tmp/cache", "tmp/cache/MOD04_3K.NRT.ForGDALTest.zip")
+
+    ds = gdal.Open(
+        'HDF4_EOS:EOS_SWATH:"tmp/cache/MOD04_3K.A2025284.0010.061.NRT.hdf":mod04:BowTie_Flag'
+    )
+    gcp_count = ds.GetGCPCount()
+    ds = None
+
+    assert gcp_count == 72, "did not get expected gcp count"

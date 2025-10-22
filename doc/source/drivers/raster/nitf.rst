@@ -40,8 +40,7 @@ image. Additionally, all BLOCKA instances are returned as metadata. If
 GeoSDE TRE (Tagged Record Extension) are available, they will be used to provide higher precision
 coordinates. If the RPC00B (or RPC00A) TRE is available, it is used to
 report RPC (Rapid Positioning Capability / Rational Polynomial Coefficients) metadata.
-Starting with GDAL 2.2, RPC information can be
-retrieved from \_rpc.txt files, and they will be used in priority over
+RPC information can be retrieved from \_rpc.txt files, and they will be used in priority over
 internal RPC00B values, since the latter have less precision than the
 ones stored in external \_rpc.txt.
 
@@ -131,10 +130,12 @@ The following creation options are available:
          CreateCopy() and/or Create() methods. See below paragraph for specificities.
 
 -  .. co:: QUALITY
-      :choices: 10-100
       :default: 75
 
-      JPEG quality 10-100
+      For JPEG, quality as integer values in the 10-100 range
+      For JPEG2000, quality as a floating-point value in >0 - 100 range.
+      When JPEG2000_DRIVER=JP2OpenJPEG and PROFILE is not one of the NPJE ones,
+      several quality layers can be specified as a comma-separated list of values.
 
 -  .. co:: PROGRESSIVE
       :choices: YES, NO

@@ -9,23 +9,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -42,7 +26,6 @@
 
 #include "cpl_conv.h"
 #include "cpl_error.h"
-#include "cpl_multiproc.h"
 #include "cpl_string.h"
 #include "cpl_vsi.h"
 #include "gt_citation.h"
@@ -375,8 +358,8 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
             static_cast<PJ_CONTEXT *>(GTIFGetPROJContext(hGTIF, true, nullptr));
         const auto type = PJ_TYPE_VERTICAL_CRS;
         auto list = proj_create_from_name(ctx, nullptr, pszVertCSName, &type, 1,
-                                          true,  // exact match
-                                          -1,    // result set limit size,
+                                          /* approximateMatch = */ false,
+                                          -1,  // result set limit size,
                                           nullptr);
         if (list)
         {
@@ -392,7 +375,6 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
                     auto datum = proj_crs_get_datum(ctx, crs);
                     if (datum)
                     {
-                        osVDatumName = proj_get_name(datum);
                         const char *pszAuthName =
                             proj_get_id_auth_name(datum, 0);
                         const char *pszCode = proj_get_id_code(datum, 0);
@@ -400,12 +382,14 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
                         {
                             if (osVDatumAuthName.empty())
                             {
+                                osVDatumName = proj_get_name(datum);
                                 osVDatumAuthName = pszAuthName;
                                 nVDatumCode = atoi(pszCode);
                             }
                             else if (osVDatumAuthName != pszAuthName ||
                                      nVDatumCode != atoi(pszCode))
                             {
+                                osVDatumName = "unknown";
                                 osVDatumAuthName.clear();
                                 nVDatumCode = 0;
                                 bGoOn = false;
@@ -469,6 +453,32 @@ static void FillCompoundCRSWithManualVertCS(GTIF *hGTIF,
 }
 
 /************************************************************************/
+/*                       GTIFGetOfficialCRS()                           */
+/************************************************************************/
+
+static PJ *GTIFGetOfficialCRS(GTIF *hGTIF, PJ_TYPE searchType,
+                              const char *pszAuthName, const char *pszName)
+{
+    PJ *ret = nullptr;
+    /* Search in database the corresponding EPSG 'official' name */
+    auto ctx =
+        static_cast<PJ_CONTEXT *>(GTIFGetPROJContext(hGTIF, true, nullptr));
+    auto list =
+        proj_create_from_name(ctx, pszAuthName, pszName, &searchType, 1,
+                              /* approximateMatch = */ false, 1, nullptr);
+    if (list)
+    {
+        const auto listSize = proj_list_get_count(list);
+        if (listSize == 1)
+        {
+            ret = proj_list_get(ctx, list, 0);
+        }
+        proj_list_destroy(list);
+    }
+    return ret;
+}
+
+/************************************************************************/
 /*                    GTIFGetEPSGOfficialName()                         */
 /************************************************************************/
 
@@ -476,29 +486,15 @@ static char *GTIFGetEPSGOfficialName(GTIF *hGTIF, PJ_TYPE searchType,
                                      const char *pszName)
 {
     char *pszRet = nullptr;
-    /* Search in database the corresponding EPSG 'official' name */
-    auto ctx =
-        static_cast<PJ_CONTEXT *>(GTIFGetPROJContext(hGTIF, true, nullptr));
-    auto list = proj_create_from_name(ctx, "EPSG", pszName, &searchType, 1,
-                                      false, /* approximate match */
-                                      1, nullptr);
-    if (list)
+    PJ *crs = GTIFGetOfficialCRS(hGTIF, searchType, "EPSG", pszName);
+    if (crs)
     {
-        const auto listSize = proj_list_get_count(list);
-        if (listSize == 1)
+        const char *pszOfficialName = proj_get_name(crs);
+        if (pszOfficialName)
         {
-            auto obj = proj_list_get(ctx, list, 0);
-            if (obj)
-            {
-                const char *pszOfficialName = proj_get_name(obj);
-                if (pszOfficialName)
-                {
-                    pszRet = CPLStrdup(pszOfficialName);
-                }
-            }
-            proj_destroy(obj);
+            pszRet = CPLStrdup(pszOfficialName);
         }
-        proj_list_destroy(list);
+        proj_destroy(crs);
     }
     return pszRet;
 }
@@ -1398,7 +1394,7 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
             adfParam[i] = 0.0;
 
 #if LIBGEOTIFF_VERSION <= 1730
-        // libgeotiff <= 1.7.3 is unfortunately inconsistent. When it synthetizes the
+        // libgeotiff <= 1.7.3 is unfortunately inconsistent. When it synthesizes the
         // projection parameters from the EPSG ProjectedCRS code, it returns
         // them normalized in degrees. But when it gets them from
         // ProjCoordTransGeoKey and other Proj....GeoKey's it return them in
@@ -1648,7 +1644,8 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
         }
     }
 
-    if (oSRS.IsProjected() && oSRS.GetAxesCount() == 2)
+    const bool bIs2DProjCRS = oSRS.IsProjected() && oSRS.GetAxesCount() == 2;
+    if (bIs2DProjCRS)
     {
         const char *pszProjCRSName = oSRS.GetAttrValue("PROJCS");
         if (pszProjCRSName)
@@ -1671,6 +1668,76 @@ OGRSpatialReferenceH GTIFGetOGISDefnAsOSR(GTIF *hGTIF, GTIFDefn *psDefn)
                     CPLFree(pszOfficialName);
                 }
             }
+        }
+    }
+
+    if ((bIs2DProjCRS || oSRS.IsGeographic()) &&
+        oSRS.GetAuthorityCode(nullptr) == nullptr &&
+        psDefn->UOMAngleInDegrees == 1.0)
+    {
+        const PJ_TYPE type = bIs2DProjCRS ? PJ_TYPE_PROJECTED_CRS
+                             : oSRS.GetAxesCount() == 2
+                                 ? PJ_TYPE_GEOGRAPHIC_2D_CRS
+                                 : PJ_TYPE_GEOGRAPHIC_3D_CRS;
+        // If the CRS has no known id, try to find one by the CRS name
+        // in the PROJ database, and validate equivalence of the
+        // definition from the GeoTIFF keys with the one from the
+        // PROJ database.
+        PJ *refCRS = GTIFGetOfficialCRS(hGTIF, type, "EPSG", oSRS.GetName());
+        if (!refCRS)
+            refCRS = GTIFGetOfficialCRS(hGTIF, type, nullptr, oSRS.GetName());
+        if (refCRS)
+        {
+            auto ctx = static_cast<PJ_CONTEXT *>(
+                GTIFGetPROJContext(hGTIF, true, nullptr));
+            const char *const apszOptions[] = {"FORMAT=WKT2_2019", nullptr};
+            auto crs = proj_create(ctx, oSRS.exportToWkt(apszOptions).c_str());
+            if (crs)
+            {
+                if (proj_is_equivalent_to(
+                        crs, refCRS,
+                        PJ_COMP_EQUIVALENT_EXCEPT_AXIS_ORDER_GEOGCRS))
+                {
+                    const char *pszAuthName = proj_get_id_auth_name(refCRS, 0);
+                    const char *pszCode = proj_get_id_code(refCRS, 0);
+                    if (pszAuthName && pszCode)
+                    {
+                        oSRS.SetFromUserInput(std::string(pszAuthName)
+                                                  .append(":")
+                                                  .append(pszCode)
+                                                  .c_str());
+                    }
+                }
+                else
+                {
+                    CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+                    auto refCrsFromWKT1 = proj_create(
+                        ctx, proj_as_wkt(ctx, refCRS, PJ_WKT1_GDAL, nullptr));
+                    if (refCrsFromWKT1)
+                    {
+                        if (proj_is_equivalent_to(
+                                crs, refCrsFromWKT1,
+                                PJ_COMP_EQUIVALENT_EXCEPT_AXIS_ORDER_GEOGCRS))
+                        {
+                            const char *pszAuthName =
+                                proj_get_id_auth_name(refCrsFromWKT1, 0);
+                            const char *pszCode =
+                                proj_get_id_code(refCrsFromWKT1, 0);
+                            if (pszAuthName && pszCode)
+                            {
+                                oSRS.SetFromUserInput(std::string(pszAuthName)
+                                                          .append(":")
+                                                          .append(pszCode)
+                                                          .c_str());
+                            }
+                        }
+                        proj_destroy(refCrsFromWKT1);
+                    }
+                }
+                proj_destroy(crs);
+            }
+
+            proj_destroy(refCRS);
         }
     }
 
@@ -1887,9 +1954,9 @@ static int OGCDatumName2EPSGDatumCode(GTIF *psGTIF, const char *pszOGCName)
     auto ctx =
         static_cast<PJ_CONTEXT *>(GTIFGetPROJContext(psGTIF, true, nullptr));
     const PJ_TYPE searchType = PJ_TYPE_GEODETIC_REFERENCE_FRAME;
-    auto list = proj_create_from_name(ctx, "EPSG", pszOGCName, &searchType, 1,
-                                      true, /* approximate match */
-                                      10, nullptr);
+    auto list =
+        proj_create_from_name(ctx, "EPSG", pszOGCName, &searchType, 1,
+                              /* approximateMatch = */ true, 10, nullptr);
     if (list)
     {
         const auto listSize = proj_list_get_count(list);
@@ -2085,11 +2152,11 @@ int GTIFSetFromOGISDefnEx(GTIF *psGTIF, OGRSpatialReferenceH hSRS,
                 auto ctx = static_cast<PJ_CONTEXT *>(
                     GTIFGetPROJContext(psGTIF, true, nullptr));
                 const auto type = PJ_TYPE_GEOGRAPHIC_2D_CRS;
-                auto list = proj_create_from_name(ctx, "EPSG",
-                                                  oGeogCRS.GetName(), &type, 1,
-                                                  false,  // exact match
-                                                  1,  // result set limit size,
-                                                  nullptr);
+                auto list = proj_create_from_name(
+                    ctx, "EPSG", oGeogCRS.GetName(), &type, 1,
+                    /* approximateMatch = */ false,
+                    1,  // result set limit size,
+                    nullptr);
                 if (list && proj_list_get_count(list) == 1)
                 {
                     auto crs2D = proj_list_get(ctx, list, 0);
@@ -3265,7 +3332,9 @@ int GTIFSetFromOGISDefnEx(GTIF *psGTIF, OGRSpatialReferenceH hSRS,
     /* -------------------------------------------------------------------- */
     if (nPCS == KvUserDefined)
     {
-        if (nGCS == KvUserDefined)
+        if (nGCS == KvUserDefined && poSRS->IsGeographic() &&
+            std::fabs(poSRS->GetAngularUnits() - CPLAtof(SRS_UA_DEGREE_CONV)) <
+                1e-9)
         {
             if (nDatum == Datum_North_American_Datum_1927)
                 nGCS = GCS_NAD27;
@@ -3513,10 +3582,8 @@ CPLErr GTIFWktFromMemBufEx(int nSize, unsigned char *pabyBuffer,
                            char ***ppapszRPCMD)
 
 {
-    char szFilename[100] = {};
-
-    snprintf(szFilename, sizeof(szFilename), "/vsimem/wkt_from_mem_buf_%ld.tif",
-             static_cast<long>(CPLGetPID()));
+    const std::string osFilename(
+        VSIMemGenerateHiddenFilename("wkt_from_mem_buf.tif"));
 
     /* -------------------------------------------------------------------- */
     /*      Initialization of libtiff and libgeotiff.                       */
@@ -3527,20 +3594,21 @@ CPLErr GTIFWktFromMemBufEx(int nSize, unsigned char *pabyBuffer,
     /* -------------------------------------------------------------------- */
     /*      Create a memory file from the buffer.                           */
     /* -------------------------------------------------------------------- */
-    VSILFILE *fp = VSIFileFromMemBuffer(szFilename, pabyBuffer, nSize, FALSE);
+    VSILFILE *fp =
+        VSIFileFromMemBuffer(osFilename.c_str(), pabyBuffer, nSize, FALSE);
     if (fp == nullptr)
         return CE_Failure;
 
     /* -------------------------------------------------------------------- */
     /*      Initialize access to the memory geotiff structure.              */
     /* -------------------------------------------------------------------- */
-    TIFF *hTIFF = VSI_TIFFOpen(szFilename, "rc", fp);
+    TIFF *hTIFF = VSI_TIFFOpen(osFilename.c_str(), "rc", fp);
 
     if (hTIFF == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "TIFF/GeoTIFF structure is corrupt.");
-        VSIUnlink(szFilename);
+        VSIUnlink(osFilename.c_str());
         CPL_IGNORE_RET_VAL(VSIFCloseL(fp));
         return CE_Failure;
     }
@@ -3678,7 +3746,7 @@ CPLErr GTIFWktFromMemBufEx(int nSize, unsigned char *pabyBuffer,
     XTIFFClose(hTIFF);
     CPL_IGNORE_RET_VAL(VSIFCloseL(fp));
 
-    VSIUnlink(szFilename);
+    VSIUnlink(osFilename.c_str());
 
     if (phSRS && *phSRS == nullptr)
         return CE_Failure;
@@ -3709,10 +3777,8 @@ CPLErr GTIFMemBufFromSRS(OGRSpatialReferenceH hSRS,
                          char **papszRPCMD)
 
 {
-    char szFilename[100] = {};
-
-    snprintf(szFilename, sizeof(szFilename), "/vsimem/wkt_from_mem_buf_%ld.tif",
-             static_cast<long>(CPLGetPID()));
+    const std::string osFilename(
+        VSIMemGenerateHiddenFilename("wkt_from_mem_buf.tif"));
 
     /* -------------------------------------------------------------------- */
     /*      Initialization of libtiff and libgeotiff.                       */
@@ -3723,17 +3789,18 @@ CPLErr GTIFMemBufFromSRS(OGRSpatialReferenceH hSRS,
     /* -------------------------------------------------------------------- */
     /*      Initialize access to the memory geotiff structure.              */
     /* -------------------------------------------------------------------- */
-    VSILFILE *fpL = VSIFOpenL(szFilename, "w");
+    VSILFILE *fpL = VSIFOpenL(osFilename.c_str(), "w");
     if (fpL == nullptr)
         return CE_Failure;
 
-    TIFF *hTIFF = VSI_TIFFOpen(szFilename, "w", fpL);
+    TIFF *hTIFF = VSI_TIFFOpen(osFilename.c_str(), "w", fpL);
 
     if (hTIFF == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "TIFF/GeoTIFF structure is corrupt.");
         CPL_IGNORE_RET_VAL(VSIFCloseL(fpL));
+        VSIUnlink(osFilename.c_str());
         return CE_Failure;
     }
 
@@ -3885,7 +3952,7 @@ CPLErr GTIFMemBufFromSRS(OGRSpatialReferenceH hSRS,
     /* -------------------------------------------------------------------- */
     GUIntBig nBigLength = 0;
 
-    *ppabyBuffer = VSIGetMemFileBuffer(szFilename, &nBigLength, TRUE);
+    *ppabyBuffer = VSIGetMemFileBuffer(osFilename.c_str(), &nBigLength, TRUE);
     *pnSize = static_cast<int>(nBigLength);
 
     return CE_None;

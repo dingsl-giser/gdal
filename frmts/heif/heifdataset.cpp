@@ -4,83 +4,18 @@
  * Author:   Even Rouault <even.rouault at spatialys.com>
  *
  ******************************************************************************
- * Copyright (c) 2020, Even Rouault <even.rouault at spatialys.com>
+ * Copyright (c) 2020-2025, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
-#include "gdal_pam.h"
-#include "ogr_spatialref.h"
+#include "heifdataset.h"
+#include "gdal_frmts.h"
 
-#include "include_libheif.h"
+#include "cpl_vsi_virtual.h"
 
-#include "heifdrivercore.h"
-
-#include <vector>
-
-extern "C" void CPL_DLL GDALRegister_HEIF();
-
-// g++ -fPIC -std=c++11 frmts/heif/heifdataset.cpp -Iport -Igcore -Iogr
-// -Iogr/ogrsf_frmts -I$HOME/heif/install-ubuntu-18.04/include
-// -L$HOME/heif/install-ubuntu-18.04/lib -lheif -shared -o gdal_HEIF.so -L.
-// -lgdal
-
-/************************************************************************/
-/*                        GDALHEIFDataset                               */
-/************************************************************************/
-
-class GDALHEIFDataset final : public GDALPamDataset
-{
-    friend class GDALHEIFRasterBand;
-
-    heif_context *m_hCtxt = nullptr;
-    heif_image_handle *m_hImageHandle = nullptr;
-    heif_image *m_hImage = nullptr;
-    bool m_bFailureDecoding = false;
-    std::vector<std::unique_ptr<GDALHEIFDataset>> m_apoOvrDS{};
-    bool m_bIsThumbnail = false;
-
-#ifdef HAS_CUSTOM_FILE_READER
-    heif_reader m_oReader{};
-    VSILFILE *m_fpL = nullptr;
-    vsi_l_offset m_nSize = 0;
-
-    static int64_t GetPositionCbk(void *userdata);
-    static int ReadCbk(void *data, size_t size, void *userdata);
-    static int SeekCbk(int64_t position, void *userdata);
-    static enum heif_reader_grow_status WaitForFileSizeCbk(int64_t target_size,
-                                                           void *userdata);
-#endif
-
-    bool Init(GDALOpenInfo *poOpenInfo);
-    void ReadMetadata();
-    void OpenThumbnails();
-
-  public:
-    GDALHEIFDataset();
-    ~GDALHEIFDataset();
-
-    static GDALDataset *OpenHEIF(GDALOpenInfo *poOpenInfo);
-#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 12, 0)
-    static GDALDataset *OpenAVIF(GDALOpenInfo *poOpenInfo);
-#endif
-};
+#include <algorithm>
+#include <cinttypes>
 
 /************************************************************************/
 /*                       GDALHEIFRasterBand                             */
@@ -136,16 +71,42 @@ GDALHEIFDataset::GDALHEIFDataset() : m_hCtxt(heif_context_alloc())
 
 GDALHEIFDataset::~GDALHEIFDataset()
 {
-    if (m_hCtxt)
-        heif_context_free(m_hCtxt);
+    GDALHEIFDataset::Close();
+}
+
+/************************************************************************/
+/*                                Close()                               */
+/************************************************************************/
+
+CPLErr GDALHEIFDataset::Close()
+{
+    CPLErr eErr = CE_None;
+
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (m_hCtxt)
+            heif_context_free(m_hCtxt);
+        m_hCtxt = nullptr;
+
 #ifdef HAS_CUSTOM_FILE_READER
-    if (m_fpL)
-        VSIFCloseL(m_fpL);
+        if (m_fpL)
+            VSIFCloseL(m_fpL);
+        m_fpL = nullptr;
 #endif
-    if (m_hImage)
-        heif_image_release(m_hImage);
-    if (m_hImageHandle)
-        heif_image_handle_release(m_hImageHandle);
+
+#ifndef LIBHEIF_SUPPORTS_TILES
+        if (m_hImage)
+            heif_image_release(m_hImage);
+        m_hImage = nullptr;
+#endif
+
+        if (m_hImageHandle)
+            heif_image_handle_release(m_hImageHandle);
+        m_hImageHandle = nullptr;
+
+        eErr = GDALPamDataset::Close();
+    }
+    return eErr;
 }
 
 #ifdef HAS_CUSTOM_FILE_READER
@@ -167,6 +128,26 @@ int64_t GDALHEIFDataset::GetPositionCbk(void *userdata)
 int GDALHEIFDataset::ReadCbk(void *data, size_t size, void *userdata)
 {
     GDALHEIFDataset *poThis = static_cast<GDALHEIFDataset *>(userdata);
+
+    const uint64_t nCurPos = poThis->m_fpL->Tell();
+
+#ifdef DEBUG_VERBOSE
+    CPLDebugOnly("HEIF",
+                 "ReadCbk["
+                 "%" PRIu64 ","
+                 "%" PRIu64 "[",
+                 nCurPos, nCurPos + size);
+#endif
+
+    if (nCurPos >= poThis->m_nAdviseReadStartPos &&
+        nCurPos + size <=
+            poThis->m_nAdviseReadStartPos + poThis->m_nAdviseReadSize)
+    {
+        const size_t nRead = poThis->m_fpL->PRead(data, size, nCurPos);
+        poThis->m_fpL->Seek(nCurPos + nRead, SEEK_SET);
+        return nRead == size ? 0 : -1;
+    }
+
     return VSIFReadL(data, 1, size, poThis->m_fpL) == size ? 0 : -1;
 }
 
@@ -194,7 +175,60 @@ GDALHEIFDataset::WaitForFileSizeCbk(int64_t target_size, void *userdata)
     return heif_reader_grow_status_size_reached;
 }
 
+/************************************************************************/
+/*                         RequestRangeCbk()                            */
+/************************************************************************/
+
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+/* static */
+struct heif_reader_range_request_result
+GDALHEIFDataset::RequestRangeCbk(uint64_t start_pos, uint64_t end_pos,
+                                 void *userdata)
+{
+    GDALHEIFDataset *poThis = static_cast<GDALHEIFDataset *>(userdata);
+
+    heif_reader_range_request_result result;
+
+#ifdef DEBUG_VERBOSE
+    CPLDebugOnly("HEIF",
+                 "RequestRangeCbk["
+                 "%" PRIu64 ","
+                 "%" PRIu64 "[",
+                 start_pos, end_pos);
 #endif
+
+    // Somewhat arbitrary. Corresponds to the default chunk size of /vsicurl
+    const size_t MINIMUM_RANGE_SIZE = 16384;
+
+    if (poThis->m_fpL->HasPRead() && end_pos > start_pos + MINIMUM_RANGE_SIZE &&
+        poThis->m_fpL->GetAdviseReadTotalBytesLimit() > 0)
+    {
+        const vsi_l_offset nOffset = start_pos;
+        const size_t nSize = static_cast<size_t>(
+            std::min<uint64_t>(poThis->m_fpL->GetAdviseReadTotalBytesLimit(),
+                               end_pos - start_pos));
+        poThis->m_fpL->AdviseRead(1, &nOffset, &nSize);
+        poThis->m_nAdviseReadStartPos = nOffset;
+        poThis->m_nAdviseReadSize = nSize;
+    }
+
+    if (end_pos >= poThis->m_nSize)
+    {
+        result.status = heif_reader_grow_status_size_beyond_eof;
+    }
+    else
+    {
+        result.status = heif_reader_grow_status_size_reached;
+    }
+
+    result.range_end = poThis->m_nSize;
+    result.reader_error_code = 0;
+    result.reader_error_msg = nullptr;
+    return result;
+}
+#endif
+
+#endif  // HAS_CUSTOM_FILE_READER
 
 /************************************************************************/
 /*                              Init()                                  */
@@ -232,11 +266,19 @@ bool GDALHEIFDataset::Init(GDALOpenInfo *poOpenInfo)
     }
 
 #ifdef HAS_CUSTOM_FILE_READER
+
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+    m_oReader.reader_api_version = 2;
+#else
     m_oReader.reader_api_version = 1;
+#endif
     m_oReader.get_position = GetPositionCbk;
     m_oReader.read = ReadCbk;
     m_oReader.seek = SeekCbk;
     m_oReader.wait_for_file_size = WaitForFileSizeCbk;
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+    m_oReader.request_range = RequestRangeCbk;
+#endif
     m_fpL = fpL;
 
     VSIFSeekL(m_fpL, 0, SEEK_END);
@@ -304,6 +346,16 @@ bool GDALHEIFDataset::Init(GDALOpenInfo *poOpenInfo)
         return false;
     }
 
+#ifdef LIBHEIF_SUPPORTS_TILES
+    err = heif_image_handle_get_image_tiling(m_hImageHandle, true, &m_tiling);
+    if (err.code != heif_error_Ok)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "%s",
+                 err.message ? err.message : "Cannot get image tiling");
+        return false;
+    }
+#endif
+
     nRasterXSize = heif_image_handle_get_width(m_hImageHandle);
     nRasterYSize = heif_image_handle_get_height(m_hImageHandle);
     const int l_nBands =
@@ -341,6 +393,10 @@ bool GDALHEIFDataset::Init(GDALOpenInfo *poOpenInfo)
 
 void GDALHEIFDataset::ReadMetadata()
 {
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+    processProperties();
+    ReadUserDescription();
+#endif
     const int nMDBlocks = heif_image_handle_get_number_of_metadata_blocks(
         m_hImageHandle, nullptr);
     if (nMDBlocks <= 0)
@@ -392,8 +448,8 @@ void GDALHEIFDataset::ReadMetadata()
                 }
             }
 
-            CPLString osTempFile;
-            osTempFile.Printf("/vsimem/heif_exif_%p.tif", this);
+            const CPLString osTempFile(
+                VSIMemGenerateHiddenFilename("heif_exif.tif"));
             VSILFILE *fpTemp =
                 VSIFileFromMemBuffer(osTempFile, &data[nTIFFFileOffset],
                                      nCount - nTIFFFileOffset, FALSE);
@@ -465,6 +521,125 @@ void GDALHEIFDataset::ReadMetadata()
     }
 }
 
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+static bool GetPropertyData(heif_context *m_hCtxt, heif_item_id item_id,
+                            heif_property_id prop_id,
+                            std::shared_ptr<std::vector<GByte>> &data)
+{
+    size_t size;
+    heif_error err =
+        heif_item_get_property_raw_size(m_hCtxt, item_id, prop_id, &size);
+    if (err.code != 0)
+    {
+        return false;
+    }
+    if (size == 0)
+    {
+        return false;
+    }
+    data = std::make_shared<std::vector<uint8_t>>(size);
+    err = heif_item_get_property_raw_data(m_hCtxt, item_id, prop_id,
+                                          data->data());
+    if (err.code != 0)
+    {
+        return false;
+    }
+    return true;
+}
+
+void GDALHEIFDataset::processProperties()
+{
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
+    constexpr heif_item_property_type TIEP_4CC =
+        (heif_item_property_type)heif_fourcc('t', 'i', 'e', 'p');
+    constexpr heif_item_property_type MTXF_4CC =
+        (heif_item_property_type)heif_fourcc('m', 't', 'x', 'f');
+    constexpr heif_item_property_type MCRS_4CC =
+        (heif_item_property_type)heif_fourcc('m', 'c', 'r', 's');
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+    constexpr int MAX_PROPERTIES_REQUIRED = 50;
+    heif_property_id prop_ids[MAX_PROPERTIES_REQUIRED];
+    heif_item_id item_id = heif_image_handle_get_item_id(m_hImageHandle);
+    int num_props = heif_item_get_properties_of_type(
+        m_hCtxt, item_id, heif_item_property_type_invalid, &prop_ids[0],
+        MAX_PROPERTIES_REQUIRED);
+    for (int i = 0; i < num_props; i++)
+    {
+        heif_item_property_type prop_type =
+            heif_item_get_property_type(m_hCtxt, item_id, prop_ids[i]);
+        if (prop_type == TIEP_4CC)
+        {
+            std::shared_ptr<std::vector<uint8_t>> data;
+            if (!GetPropertyData(m_hCtxt, item_id, prop_ids[i], data))
+            {
+                continue;
+            }
+            geoHEIF.addGCPs(data->data(), data->size());
+        }
+        else if (prop_type == MTXF_4CC)
+        {
+            std::shared_ptr<std::vector<uint8_t>> data;
+            if (!GetPropertyData(m_hCtxt, item_id, prop_ids[i], data))
+            {
+                continue;
+            }
+            geoHEIF.setModelTransformation(data->data(), data->size());
+        }
+        else if (prop_type == MCRS_4CC)
+        {
+            std::shared_ptr<std::vector<uint8_t>> data;
+            if (!GetPropertyData(m_hCtxt, item_id, prop_ids[i], data))
+            {
+                continue;
+            }
+            geoHEIF.extractSRS(data->data(), data->size());
+        }
+    }
+}
+
+/************************************************************************/
+/*                      ReadUserDescription()                           */
+/************************************************************************/
+void GDALHEIFDataset::ReadUserDescription()
+{
+    constexpr int MAX_PROPERTIES = 50;
+    heif_item_id item_id = heif_image_handle_get_item_id(m_hImageHandle);
+    heif_property_id properties[MAX_PROPERTIES];
+    int nProps = heif_item_get_properties_of_type(
+        m_hCtxt, item_id, heif_item_property_type_user_description, properties,
+        MAX_PROPERTIES);
+
+    heif_property_user_description *user_description = nullptr;
+    for (int i = 0; i < nProps; i++)
+    {
+        heif_error err = heif_item_get_property_user_description(
+            m_hCtxt, item_id, properties[i], &user_description);
+        if (err.code == 0)
+        {
+            std::string domain = "DESCRIPTION";
+            if (strlen(user_description->lang) != 0)
+            {
+                domain += "_";
+                domain += user_description->lang;
+            }
+            SetMetadataItem("NAME", user_description->name, domain.c_str());
+            SetMetadataItem("DESCRIPTION", user_description->description,
+                            domain.c_str());
+            if (strlen(user_description->tags) != 0)
+            {
+                SetMetadataItem("TAGS", user_description->tags, domain.c_str());
+            }
+            heif_property_user_description_release(user_description);
+        }
+    }
+}
+#endif
+
 /************************************************************************/
 /*                         OpenThumbnails()                             */
 /************************************************************************/
@@ -507,6 +682,17 @@ void GDALHEIFDataset::OpenThumbnails()
     poOvrDS->m_bIsThumbnail = true;
     poOvrDS->nRasterXSize = heif_image_handle_get_width(hThumbnailHandle);
     poOvrDS->nRasterYSize = heif_image_handle_get_height(hThumbnailHandle);
+#ifdef LIBHEIF_SUPPORTS_TILES
+    auto err = heif_image_handle_get_image_tiling(hThumbnailHandle, true,
+                                                  &poOvrDS->m_tiling);
+    if (err.code != heif_error_Ok)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "%s",
+                 err.message ? err.message : "Cannot get image tiling");
+        heif_image_handle_release(hThumbnailHandle);
+        return;
+    }
+#endif
     for (int i = 0; i < nBands; i++)
     {
         poOvrDS->SetBand(i + 1, new GDALHEIFRasterBand(poOvrDS.get(), i + 1));
@@ -577,7 +763,9 @@ static int HEIFDriverIdentify(GDALOpenInfo *poOpenInfo)
 GDALDataset *GDALHEIFDataset::OpenHEIF(GDALOpenInfo *poOpenInfo)
 {
     if (!HEIFDriverIdentify(poOpenInfo))
+    {
         return nullptr;
+    }
     if (poOpenInfo->eAccess == GA_Update)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -653,14 +841,97 @@ GDALHEIFRasterBand::GDALHEIFRasterBand(GDALHEIFDataset *poDSIn, int nBandIn)
                                         "IMAGE_STRUCTURE");
     }
 #endif
+
+#ifdef LIBHEIF_SUPPORTS_TILES
+    nBlockXSize = poDSIn->m_tiling.tile_width;
+    nBlockYSize = poDSIn->m_tiling.tile_height;
+#else
     nBlockXSize = poDS->GetRasterXSize();
     nBlockYSize = 1;
+#endif
 }
 
 /************************************************************************/
 /*                            IReadBlock()                              */
 /************************************************************************/
+#ifdef LIBHEIF_SUPPORTS_TILES
+CPLErr GDALHEIFRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
+                                      void *pImage)
+{
+    GDALHEIFDataset *poGDS = static_cast<GDALHEIFDataset *>(poDS);
+    if (poGDS->m_bFailureDecoding)
+        return CE_Failure;
+    const int nBands = poGDS->GetRasterCount();
+    heif_image *hImage = nullptr;
+    struct heif_decoding_options *decode_options =
+        heif_decoding_options_alloc();
 
+    auto err = heif_image_handle_decode_image_tile(
+        poGDS->m_hImageHandle, &hImage, heif_colorspace_RGB,
+        nBands == 3
+            ? (eDataType == GDT_UInt16 ?
+#if CPL_IS_LSB
+                                       heif_chroma_interleaved_RRGGBB_LE
+#else
+                                       heif_chroma_interleaved_RRGGBB_BE
+#endif
+                                       : heif_chroma_interleaved_RGB)
+            : (eDataType == GDT_UInt16 ?
+#if CPL_IS_LSB
+                                       heif_chroma_interleaved_RRGGBBAA_LE
+#else
+                                       heif_chroma_interleaved_RRGGBBAA_BE
+#endif
+                                       : heif_chroma_interleaved_RGBA),
+        decode_options, nBlockXOff, nBlockYOff);
+
+    if (err.code != heif_error_Ok)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "%s",
+                 err.message ? err.message : "Cannot decode image");
+        poGDS->m_bFailureDecoding = true;
+        heif_decoding_options_free(decode_options);
+        return CE_Failure;
+    }
+    heif_decoding_options_free(decode_options);
+    int nStride = 0;
+    const uint8_t *pSrcData = heif_image_get_plane_readonly(
+        hImage, heif_channel_interleaved, &nStride);
+    if (eDataType == GDT_Byte)
+    {
+        for (int y = 0; y < nBlockYSize; y++)
+        {
+            for (int x = 0; x < nBlockXSize; x++)
+            {
+                const size_t srcIndex = static_cast<size_t>(y) * nStride +
+                                        static_cast<size_t>(x) * nBands +
+                                        nBand - 1;
+                const size_t outIndex =
+                    static_cast<size_t>(y) * nBlockXSize + x;
+                (static_cast<GByte *>(pImage))[outIndex] = pSrcData[srcIndex];
+            }
+        }
+    }
+    else
+    {
+        for (int y = 0; y < nBlockYSize; y++)
+        {
+            for (int x = 0; x < nBlockXSize; x++)
+            {
+                const size_t srcIndex = static_cast<size_t>(y) * (nStride / 2) +
+                                        static_cast<size_t>(x) * nBands +
+                                        nBand - 1;
+                const size_t outIndex =
+                    static_cast<size_t>(y) * nBlockXSize + x;
+                (static_cast<GUInt16 *>(pImage))[outIndex] =
+                    (reinterpret_cast<const GUInt16 *>(pSrcData))[srcIndex];
+            }
+        }
+    }
+    heif_image_release(hImage);
+    return CE_None;
+}
+#else
 CPLErr GDALHEIFRasterBand::IReadBlock(int, int nBlockYOff, void *pImage)
 {
     GDALHEIFDataset *poGDS = static_cast<GDALHEIFDataset *>(poDS);
@@ -705,7 +976,7 @@ CPLErr GDALHEIFRasterBand::IReadBlock(int, int nBlockYOff, void *pImage)
         }
         const int nBitsPerPixel = heif_image_get_bits_per_pixel(
             poGDS->m_hImage, heif_channel_interleaved);
-        if (nBitsPerPixel != nBands * GDALGetDataTypeSize(eDataType))
+        if (nBitsPerPixel != nBands * GDALGetDataTypeSizeBits(eDataType))
         {
             CPLError(CE_Failure, CPLE_AppDefined,
                      "Unexpected bits_per_pixel = %d value", nBitsPerPixel);
@@ -717,23 +988,58 @@ CPLErr GDALHEIFRasterBand::IReadBlock(int, int nBlockYOff, void *pImage)
     int nStride = 0;
     const uint8_t *pSrcData = heif_image_get_plane_readonly(
         poGDS->m_hImage, heif_channel_interleaved, &nStride);
-    pSrcData += nBlockYOff * nStride;
+    pSrcData += static_cast<size_t>(nBlockYOff) * nStride;
     if (eDataType == GDT_Byte)
     {
         for (int i = 0; i < nBlockXSize; i++)
             (static_cast<GByte *>(pImage))[i] =
-                pSrcData[nBand - 1 + i * nBands];
+                pSrcData[nBand - 1 + static_cast<size_t>(i) * nBands];
     }
     else
     {
         for (int i = 0; i < nBlockXSize; i++)
             (static_cast<GUInt16 *>(pImage))[i] =
                 (reinterpret_cast<const GUInt16 *>(
-                    pSrcData))[nBand - 1 + i * nBands];
+                    pSrcData))[nBand - 1 + static_cast<size_t>(i) * nBands];
     }
 
     return CE_None;
 }
+#endif
+
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+/************************************************************************/
+/*                          GetGeoTransform()                           */
+/************************************************************************/
+
+CPLErr GDALHEIFDataset::GetGeoTransform(GDALGeoTransform &gt) const
+{
+    return geoHEIF.GetGeoTransform(gt);
+}
+
+/************************************************************************/
+/*                          GetSpatialRef()                             */
+/************************************************************************/
+const OGRSpatialReference *GDALHEIFDataset::GetSpatialRef() const
+{
+    return geoHEIF.GetSpatialRef();
+}
+
+int GDALHEIFDataset::GetGCPCount()
+{
+    return geoHEIF.GetGCPCount();
+}
+
+const GDAL_GCP *GDALHEIFDataset::GetGCPs()
+{
+    return geoHEIF.GetGCPs();
+}
+
+const OGRSpatialReference *GDALHEIFDataset::GetGCPSpatialRef() const
+{
+    return this->GetSpatialRef();
+}
+#endif
 
 /************************************************************************/
 /*                       GDALRegister_HEIF()                            */
@@ -754,15 +1060,97 @@ void GDALRegister_HEIF()
         HEIFDriverSetCommonMetadata(poDriver);
 
 #if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 12, 0)
+        if (heif_have_decoder_for_format(heif_compression_AVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_AVC", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_AVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_AVC_WRITE", "YES", "HEIF");
+        }
         // If the AVIF dedicated driver is not available, register an AVIF driver,
         // called AVIF_HEIF, based on libheif, if it has AV1 decoding capabilities.
         if (heif_have_decoder_for_format(heif_compression_AV1))
         {
             poDriver->SetMetadataItem("SUPPORTS_AVIF", "YES", "HEIF");
+            poDriver->SetMetadataItem("SUPPORTS_AV1", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_AV1))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_AV1_WRITE", "YES", "HEIF");
+        }
+        if (heif_have_decoder_for_format(heif_compression_HEVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_HEVC", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_HEVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_HEVC_WRITE", "YES", "HEIF");
+        }
+        if (heif_have_decoder_for_format(heif_compression_JPEG))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_JPEG", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_JPEG))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_JPEG_WRITE", "YES", "HEIF");
+        }
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 15, 0)
+        if (heif_have_decoder_for_format(heif_compression_JPEG2000))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_JPEG2000", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_JPEG2000))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_JPEG2000_WRITE", "YES", "HEIF");
         }
 #endif
-
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 18, 0)
+        if (heif_have_decoder_for_format(heif_compression_HTJ2K))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_HTJ2K", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_HTJ2K))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_HTJ2K_WRITE", "YES", "HEIF");
+        }
+#endif
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 16, 0)
+        if (heif_have_decoder_for_format(heif_compression_uncompressed))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_UNCOMPRESSED", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_uncompressed))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_UNCOMPRESSED_WRITE", "YES",
+                                      "HEIF");
+        }
+#endif
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 15, 0)
+        if (heif_have_decoder_for_format(heif_compression_VVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_VVC", "YES", "HEIF");
+        }
+        if (heif_have_encoder_for_format(heif_compression_VVC))
+        {
+            poDriver->SetMetadataItem("SUPPORTS_VVC_WRITE", "YES", "HEIF");
+        }
+#endif
+#else
+        // Anything that old probably supports only HEVC
+        poDriver->SetMetadataItem("SUPPORTS_HEVC", "YES", "HEIF");
+#endif
+#ifdef LIBHEIF_SUPPORTS_TILES
+        poDriver->SetMetadataItem("SUPPORTS_TILES", "YES", "HEIF");
+#endif
+#if LIBHEIF_NUMERIC_VERSION >= BUILD_LIBHEIF_VERSION(1, 19, 0)
+        poDriver->SetMetadataItem("SUPPORTS_GEOHEIF", "YES", "HEIF");
+#endif
         poDriver->pfnOpen = GDALHEIFDataset::OpenHEIF;
+
+#ifdef HAS_CUSTOM_FILE_WRITER
+        poDriver->pfnCreateCopy = GDALHEIFDataset::CreateCopy;
+#endif
         poDM->RegisterDriver(poDriver);
     }
 

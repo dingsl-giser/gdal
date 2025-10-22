@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     Band.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Kevin Ruland
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 /************************************************************************
@@ -101,7 +84,7 @@ CPLErr WriteRaster_internal( GDALRasterBandShadow *obj,
                              GIntBig pixel_space, GIntBig line_space,
                              GDALRasterIOExtraArg* psExtraArg )
 {
-    GIntBig min_buffer_size = ComputeBandRasterIOSize (buf_xsize, buf_ysize, GDALGetDataTypeSize( buf_type ) / 8,
+    GIntBig min_buffer_size = ComputeBandRasterIOSize (buf_xsize, buf_ysize, GDALGetDataTypeSizeBytes( buf_type ),
                                                    pixel_space, line_space, FALSE );
     if ( min_buffer_size == 0 )
       return CE_Failure;
@@ -133,13 +116,15 @@ public:
   GDALDataType DataType;
 %mutable;
 
-  /* Interface method added for GDAL 1.12.0 */
+#if defined(SWIGJAVA)
+  GDALDatasetShadow* GetDatasetInternal()
+#else
   GDALDatasetShadow* GetDataset()
+#endif
   {
     return (GDALDatasetShadow*) GDALGetBandDataset(self);
   }
 
-  /* Interface method added for GDAL 1.7.0 */
   int GetBand()
   {
     return GDALGetBandNumber(self);
@@ -159,7 +144,6 @@ public:
 #endif
 
   // Preferred name to match C++ API
-  /* Interface method added for GDAL 1.7.0 */
   GDALColorInterp GetColorInterpretation() {
     return GDALGetRasterColorInterpretation(self);
   }
@@ -170,7 +154,6 @@ public:
   }
 
   // Preferred name to match C++ API
-  /* Interface method added for GDAL 1.7.0 */
   CPLErr SetColorInterpretation( GDALColorInterp val ) {
     return GDALSetRasterColorInterpretation( self, val );
   }
@@ -212,12 +195,10 @@ public:
     return GDALDeleteRasterNoDataValue(self);
   }
 
-  /* Interface method added for GDAL 1.7.0 */
   const char* GetUnitType() {
       return GDALGetRasterUnitType(self);
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetUnitType( const char* val ) {
     return GDALSetRasterUnitType( self, val );
   }
@@ -250,12 +231,10 @@ public:
     *val = GDALGetRasterScale( self, hasval );
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetOffset( double val ) {
     return GDALSetRasterOffset( self, val );
   }
 
-  /* Interface method added for GDAL 1.8.0 */
   CPLErr SetScale( double val ) {
     return GDALSetRasterScale( self, val );
   }
@@ -273,7 +252,6 @@ public:
   }
 %clear (CPLErr);
 
-  /* Interface method added for GDAL 1.7.0 */
 %apply (double *OUTPUT){double *min, double *max, double *mean, double *stddev};
 %apply (IF_ERROR_RETURN_NONE) { (CPLErr) };
 %feature ("kwargs") ComputeStatistics;
@@ -293,6 +271,10 @@ public:
 
   GDALRasterBandShadow *GetOverview(int i) {
     return (GDALRasterBandShadow*) GDALGetOverview( self, i );
+  }
+
+  GDALRasterBandShadow *GetSampleOverview(GUIntBig nDesiredSamples) {
+    return (GDALRasterBandShadow*) GDALGetRasterSampleOverviewEx( self, nDesiredSamples );
   }
 
 #if defined (SWIGJAVA)
@@ -508,12 +490,10 @@ CPLErr SetDefaultHistogram( double min, double max,
 #endif
 #endif
 
-  /* Interface method added for GDAL 1.7.0 */
   bool HasArbitraryOverviews() {
       return (GDALHasArbitraryOverviews( self ) != 0) ? true : false;
   }
 
-  /* Interface method added for GDAL 1.9.0 */
 %apply (char **options) {char **};
   char **GetCategoryNames() {
     return GDALGetRasterCategoryNames( self );
@@ -681,6 +661,46 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
 %clear (CPLErr);
 #endif
 
+
+%apply (double *OUTPUT){double *pdfRealValue, double *pdfImagValue};
+#if !defined(SWIGPYTHON)
+%apply (IF_ERROR_RETURN_NONE) { (CPLErr) };
+#endif
+%apply (char **options) { char ** transformerOptions };
+  CPLErr InterpolateAtGeolocation( double geolocX, double geolocY,
+                                   OSRSpatialReferenceShadow* srs,
+                                   GDALRIOResampleAlg interpolation,
+                                   double *pdfRealValue,
+                                   double *pdfImagValue, char** transformerOptions = NULL ) {
+    if (pdfRealValue) *pdfRealValue = 0;
+    if (pdfImagValue) *pdfImagValue = 0;
+    return GDALRasterInterpolateAtGeolocation( self, geolocX, geolocY,
+                (OGRSpatialReferenceH)srs, interpolation,
+                pdfRealValue, pdfImagValue, transformerOptions );
+  }
+#if !defined(SWIGPYTHON)
+%clear (CPLErr);
+%clear char ** transformerOptions;
+#endif
+
+
+%apply (double *OUTPUT){double *pdfMin, double *pdfMax};
+%apply (int *OUTPUT){int *pnMinX, int *pnMinY};
+%apply (int *OUTPUT){int *pnMaxX, int *pnMaxY};
+#if !defined(SWIGPYTHON)
+%apply (IF_ERROR_RETURN_NONE) { (CPLErr) };
+#endif
+  CPLErr ComputeMinMaxLocation( double *pdfMin, double *pdfMax,
+                                int *pnMinX, int *pnMinY,
+                                int *pnMaxX, int *pnMaxY ) {
+    return GDALComputeRasterMinMaxLocation( self, pdfMin, pdfMax,
+                                            pnMinX, pnMinY,
+                                            pnMaxX, pnMaxY );
+  }
+#if !defined(SWIGPYTHON)
+%clear (CPLErr);
+#endif
+
 %newobject AsMDArray;
   GDALMDArrayHS *AsMDArray()
   {
@@ -692,6 +712,115 @@ CPLErr AdviseRead(  int xoff, int yoff, int xsize, int ysize,
   {
       GDALEnablePixelTypeSignedByteWarning(self, b);
   }
+
+  %newobject UnaryOp;
+  GDALComputedRasterBandShadow* UnaryOp(GDALRasterAlgebraUnaryOperation op)
+  {
+      return GDALRasterBandUnaryOp(self, op);
+  }
+
+  %apply Pointer NONNULL {GDALRasterBandShadow* other};
+  %newobject BinaryOpBand;
+  GDALComputedRasterBandShadow* BinaryOpBand(GDALRasterAlgebraBinaryOperation op, GDALRasterBandShadow* other)
+  {
+      return GDALRasterBandBinaryOpBand(self, op, other);
+  }
+  %clear GDALRasterBandShadow* other;
+
+  %newobject BinaryOpDouble;
+  GDALComputedRasterBandShadow* BinaryOpDouble(GDALRasterAlgebraBinaryOperation op, double constant)
+  {
+      return GDALRasterBandBinaryOpDouble(self, op, constant);
+  }
+
+  %apply Pointer NONNULL {GDALRasterBandShadow* band};
+  %newobject BinaryOpDoubleToBand;
+  static GDALComputedRasterBandShadow* BinaryOpDoubleToBand(double constant, GDALRasterAlgebraBinaryOperation op, GDALRasterBandShadow* band)
+  {
+      return GDALRasterBandBinaryOpDoubleToBand(constant, op, band);
+  }
+  %clear GDALRasterBandShadow* band;
+
+  %apply Pointer NONNULL {GDALRasterBandShadow* condBand};
+  %apply Pointer NONNULL {GDALRasterBandShadow* thenBand};
+  %apply Pointer NONNULL {GDALRasterBandShadow* elseBand};
+  %newobject IfThenElse;
+  static GDALComputedRasterBandShadow* IfThenElse(GDALRasterBandShadow* condBand,
+                                                  GDALRasterBandShadow* thenBand,
+                                                  GDALRasterBandShadow* elseBand)
+  {
+      return GDALRasterBandIfThenElse(condBand, thenBand, elseBand);
+  }
+  %clear GDALRasterBandShadow* condBand;
+  %clear GDALRasterBandShadow* thenBand;
+  %clear GDALRasterBandShadow* elseBand;
+
+
+  %newobject AsType;
+  GDALComputedRasterBandShadow* AsType(GDALDataType dt)
+  {
+      return GDALRasterBandAsDataType(self, dt);
+  }
+
+  %newobject MaximumOfNBands;
+#ifdef SWIGCSHARP
+  %apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow **bands};
+#else
+  %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int band_count, GDALRasterBandShadow **bands)};
+#endif
+  static GDALComputedRasterBandShadow* MaximumOfNBands(int band_count, GDALRasterBandShadow** bands)
+  {
+     return GDALMaximumOfNBands(band_count, bands);
+  }
+#ifdef SWIGCSHARP
+  %clear GDALRasterBandShadow **bands;
+#else
+  %clear (int band_count, GDALRasterBandShadow **bands);
+#endif
+
+  %newobject MaxConstant;
+  GDALComputedRasterBandShadow* MaxConstant(double constant)
+  {
+      return GDALRasterBandMaxConstant(self, constant);
+  }
+
+  %newobject MinimumOfNBands;
+#ifdef SWIGCSHARP
+  %apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow **bands};
+#else
+  %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int band_count, GDALRasterBandShadow **bands)};
+#endif
+  static GDALComputedRasterBandShadow* MinimumOfNBands(int band_count, GDALRasterBandShadow** bands)
+  {
+     return GDALMinimumOfNBands(band_count, bands);
+  }
+#ifdef SWIGCSHARP
+  %clear GDALRasterBandShadow **bands;
+#else
+  %clear (int band_count, GDALRasterBandShadow **bands);
+#endif
+
+  %newobject MinConstant;
+  GDALComputedRasterBandShadow* MinConstant(double constant)
+  {
+      return GDALRasterBandMinConstant(self, constant);
+  }
+
+  %newobject MeanOfNBands;
+#ifdef SWIGCSHARP
+  %apply GDALRasterBandShadow OBJPTRS_STATIC[] {GDALRasterBandShadow **bands};
+#else
+  %apply (int object_list_count, GDALRasterBandShadow **poObjects) {(int band_count, GDALRasterBandShadow **bands)};
+#endif
+  static GDALComputedRasterBandShadow* MeanOfNBands(int band_count, GDALRasterBandShadow** bands)
+  {
+     return GDALMeanOfNBands(band_count, bands);
+  }
+#ifdef SWIGCSHARP
+  %clear GDALRasterBandShadow **bands;
+#else
+  %clear (int band_count, GDALRasterBandShadow **bands);
+#endif
 
 } /* %extend */
 
@@ -708,3 +837,41 @@ int GDALRasterBandShadow_YSize_get( GDALRasterBandShadow *h ) {
   return GDALGetRasterBandYSize( h );
 }
 %}
+
+#if defined(SWIGPYTHON)
+%pythoncode %{
+del Band.UnaryOp
+del Band.BinaryOpBand
+del Band.BinaryOpDouble
+del Band.BinaryOpDoubleToBand
+del Band.AsType
+del Band.MinimumOfNBands
+del Band.MinConstant
+del Band.MaximumOfNBands
+del Band.MaxConstant
+del Band.MeanOfNBands
+del Band.IfThenElse
+%}
+#endif
+
+/************************************************************************
+ *
+ * Define the extensions for ComputedBand (GDALComputedRasterBandShadow)
+ *
+*************************************************************************/
+
+%rename (ComputedBand) GDALComputedRasterBandShadow;
+
+class GDALComputedRasterBandShadow : public GDALRasterBandShadow {
+private:
+  GDALComputedRasterBandShadow();
+public:
+%extend {
+
+  ~GDALComputedRasterBandShadow() {
+      GDALComputedRasterBandRelease(self);
+  }
+
+} /* %extend */
+
+};

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2015, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #if defined(__MINGW32__) || defined(__MINGW64__)
@@ -95,7 +79,6 @@
  *
  * @return TRUE if GDAL is built with Delaunay triangulation support.
  *
- * @since GDAL 2.1
  */
 int GDALHasTriangulation()
 {
@@ -118,7 +101,6 @@ int GDALHasTriangulation()
  * @return triangulation that must be freed with GDALTriangulationFree(), or
  *         NULL in case of error.
  *
- * @since GDAL 2.1
  */
 GDALTriangulation *GDALTriangulationCreateDelaunay(int nPoints,
                                                    const double *padfX,
@@ -280,7 +262,6 @@ end:
 /** Free a triangulation.
  *
  * @param psDT triangulation.
- * @since GDAL 2.1
  */
 void GDALTriangulationFree(GDALTriangulation *psDT)
 {
@@ -306,7 +287,6 @@ void GDALTriangulationFree(GDALTriangulation *psDT)
  *
  * @return TRUE in case of success.
  *
- * @since GDAL 2.1
  */
 int GDALTriangulationComputeBarycentricCoefficients(GDALTriangulation *psDT,
                                                     const double *padfX,
@@ -387,7 +367,6 @@ int GDALTriangulationComputeBarycentricCoefficients(GDALTriangulation *psDT,
  *
  * @return TRUE in case of success.
  *
- * @since GDAL 2.1
  */
 
 int GDALTriangulationComputeBarycentricCoordinates(
@@ -432,7 +411,6 @@ int GDALTriangulationComputeBarycentricCoordinates(
  *
  * @return index >= 0 of the triangle in case of success, -1 otherwise.
  *
- * @since GDAL 2.1
  */
 
 int GDALTriangulationFindFacetBruteForce(const GDALTriangulation *psDT,
@@ -527,7 +505,6 @@ int GDALTriangulationFindFacetBruteForce(const GDALTriangulation *psDT,
  *
  * @return TRUE in case of success, FALSE otherwise.
  *
- * @since GDAL 2.1
  */
 
 int GDALTriangulationFindFacetDirected(const GDALTriangulation *psDT,

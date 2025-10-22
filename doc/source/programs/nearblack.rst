@@ -13,13 +13,7 @@ nearblack
 Synopsis
 --------
 
-.. code-block::
-
-    nearblack [--help] [--help-general]
-              [-of <format>] [-white | [-color <c1>,<c2>,<c3>...<cn>]...]
-              [-near <dist>] [-nb <non_black_pixels>]
-              [-setalpha] [-setmask] [-alg twopasses|floodfill]
-              [-o <outfile>] [-q] [-co <NAME>=<VALUE>]... <infile>
+.. program-output:: nearblack --help-doc
 
 Description
 -----------
@@ -41,8 +35,7 @@ if either alpha band or mask band is not set.
 .. option:: -of <format>
 
     Select the output format.
-    Starting with GDAL 2.3, if not specified, the format is guessed from the extension (previously
-    was ERDAS Imagine .img).
+    If not specified, the format is guessed from the extension.
     Use the short format name (GTiff for GeoTIFF for example).
 
 .. option:: -co <NAME>=<VALUE>
@@ -125,6 +118,4 @@ C API
 -----
 
 This utility is also callable from C with :cpp:func:`GDALNearblack`.
-
-.. versionadded:: 2.1
 

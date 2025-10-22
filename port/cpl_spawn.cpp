@@ -7,23 +7,7 @@
  **********************************************************************
  * Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -115,7 +99,6 @@ static void FillPipeFromFile(VSILFILE *fin, CPL_FILE_HANDLE pipe_fd)
  *
  * @return the exit code of the spawned process, or -1 in case of error.
  *
- * @since GDAL 1.10.0
  */
 
 int CPLSpawn(const char *const papszArgv[], VSILFILE *fin, VSILFILE *fout,
@@ -312,16 +295,18 @@ CPLSpawnAsync(CPL_UNUSED int (*pfnMain)(CPL_FILE_HANDLE, CPL_FILE_HANDLE),
     {
         if (i > 0)
             osCommandLine += " ";
-        // We need to quote arguments with spaces in them (if not already done).
-        if (strchr(papszArgv[i], ' ') != nullptr && papszArgv[i][0] != '"')
+        CPLString osArg(papszArgv[i]);
+        // We need to quote arguments with spaces or double quotes in them (if not already done).
+        if (osArg.find_first_of(" \"") != std::string::npos &&
+            !(osArg.size() >= 3 && osArg.front() == '"' && osArg.back() == '"'))
         {
-            osCommandLine += "\"";
-            osCommandLine += papszArgv[i];
-            osCommandLine += "\"";
+            osCommandLine += '"';
+            osCommandLine += osArg.replaceAll('"', "\\\"");
+            osCommandLine += '"';
         }
         else
         {
-            osCommandLine += papszArgv[i];
+            osCommandLine += osArg;
         }
     }
 
@@ -464,17 +449,25 @@ void CPLSpawnAsyncCloseErrorFileHandle(CPLSpawnedProcess *p)
  *
  * @return TRUE in case of success.
  *
- * @since GDAL 1.10.0
  */
 int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
 {
+#ifdef __COVERITY__
+    (void)fin;
+    (void)data;
+    (void)length;
+    CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+    return FALSE;
+#else
     GByte *pabyData = static_cast<GByte *>(data);
     int nRemain = length;
     while (nRemain > 0)
     {
         while (true)
         {
-            const auto n = read(fin, pabyData, nRemain);
+            assert(nRemain > 0);
+            // coverity[overflow_sink]
+            const ssize_t n = read(fin, pabyData, nRemain);
             if (n < 0)
             {
                 if (errno == EINTR)
@@ -485,11 +478,13 @@ int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
             else if (n == 0)
                 return FALSE;
             pabyData += n;
+            assert(n <= nRemain);
             nRemain -= static_cast<int>(n);
             break;
         }
     }
     return TRUE;
+#endif
 }
 
 /************************************************************************/
@@ -505,17 +500,25 @@ int CPLPipeRead(CPL_FILE_HANDLE fin, void *data, int length)
  *
  * @return TRUE in case of success.
  *
- * @since GDAL 1.10.0
  */
 int CPLPipeWrite(CPL_FILE_HANDLE fout, const void *data, int length)
 {
+#ifdef __COVERITY__
+    (void)fout;
+    (void)data;
+    (void)length;
+    CPLError(CE_Failure, CPLE_AppDefined, "Not implemented");
+    return FALSE;
+#else
     const GByte *pabyData = static_cast<const GByte *>(data);
     int nRemain = length;
     while (nRemain > 0)
     {
         while (true)
         {
-            const auto n = write(fout, pabyData, nRemain);
+            assert(nRemain > 0);
+            // coverity[overflow_sink]
+            const ssize_t n = write(fout, pabyData, nRemain);
             if (n < 0)
             {
                 if (errno == EINTR)
@@ -524,11 +527,13 @@ int CPLPipeWrite(CPL_FILE_HANDLE fout, const void *data, int length)
                     return FALSE;
             }
             pabyData += n;
+            assert(n <= nRemain);
             nRemain -= static_cast<int>(n);
             break;
         }
     }
     return TRUE;
+#endif
 }
 
 /************************************************************************/
@@ -592,7 +597,6 @@ struct _CPLSpawnedProcess
  *
  * @return a handle, that must be freed with CPLSpawnAsyncFinish()
  *
- * @since GDAL 1.10.0
  */
 CPLSpawnedProcess *
 CPLSpawnAsync(int (*pfnMain)(CPL_FILE_HANDLE, CPL_FILE_HANDLE),
@@ -604,11 +608,25 @@ CPLSpawnAsync(int (*pfnMain)(CPL_FILE_HANDLE, CPL_FILE_HANDLE),
     int pipe_out[2] = {-1, -1};
     int pipe_err[2] = {-1, -1};
 
+    const auto ClosePipes = [&pipe_in, &pipe_out, &pipe_err]()
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            if (pipe_in[i] >= 0)
+                close(pipe_in[i]);
+            if (pipe_out[i] >= 0)
+                close(pipe_out[i]);
+            if (pipe_err[i] >= 0)
+                close(pipe_err[i]);
+        }
+    };
+
     if ((bCreateInputPipe && pipe(pipe_in)) ||
         (bCreateOutputPipe && pipe(pipe_out)) ||
         (bCreateErrorPipe && pipe(pipe_err)))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Could not create pipe");
+        ClosePipes();
         return nullptr;
     }
 
@@ -702,16 +720,7 @@ CPLSpawnAsync(int (*pfnMain)(CPL_FILE_HANDLE, CPL_FILE_HANDLE),
                 posix_spawn_file_actions_destroy(&actions);
             CPLError(CE_Failure, CPLE_AppDefined, "posix_spawnp() failed");
             CSLDestroy(papszArgvDup);
-            for (int i = 0; i < 2; i++)
-            {
-                if (pipe_in[i] >= 0)
-                    close(pipe_in[i]);
-                if (pipe_out[i] >= 0)
-                    close(pipe_out[i]);
-                if (pipe_err[i] >= 0)
-                    close(pipe_err[i]);
-            }
-
+            ClosePipes();
             return nullptr;
         }
 
@@ -827,16 +836,7 @@ CPLSpawnAsync(int (*pfnMain)(CPL_FILE_HANDLE, CPL_FILE_HANDLE),
     CPLError(CE_Failure, CPLE_AppDefined, "Fork failed");
 
     CSLDestroy(papszArgvDup);
-    for (int i = 0; i < 2; i++)
-    {
-        if (pipe_in[i] >= 0)
-            close(pipe_in[i]);
-        if (pipe_out[i] >= 0)
-            close(pipe_out[i]);
-        if (pipe_err[i] >= 0)
-            close(pipe_err[i]);
-    }
-
+    ClosePipes();
     return nullptr;
 }
 
@@ -865,7 +865,6 @@ CPL_PID CPLSpawnAsyncGetChildProcessId(CPLSpawnedProcess *p)
  *
  * @return the return code of the forked process if bWait == TRUE, 0 otherwise
  *
- * @since GDAL 1.10.0
  */
 
 int CPLSpawnAsyncFinish(CPLSpawnedProcess *p, int bWait, CPL_UNUSED int bKill)
@@ -958,7 +957,6 @@ void CPLSpawnAsyncCloseErrorFileHandle(CPLSpawnedProcess *p)
  *
  * @return the file handle.
  *
- * @since GDAL 1.10.0
  */
 CPL_FILE_HANDLE CPLSpawnAsyncGetInputFileHandle(CPLSpawnedProcess *p)
 {
@@ -977,7 +975,6 @@ CPL_FILE_HANDLE CPLSpawnAsyncGetInputFileHandle(CPLSpawnedProcess *p)
  *
  * @return the file handle.
  *
- * @since GDAL 1.10.0
  */
 CPL_FILE_HANDLE CPLSpawnAsyncGetOutputFileHandle(CPLSpawnedProcess *p)
 {
@@ -996,7 +993,6 @@ CPL_FILE_HANDLE CPLSpawnAsyncGetOutputFileHandle(CPLSpawnedProcess *p)
  *
  * @return the file handle
  *
- * @since GDAL 1.10.0
  */
 CPL_FILE_HANDLE CPLSpawnAsyncGetErrorFileHandle(CPLSpawnedProcess *p)
 {

@@ -9,36 +9,18 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "envidataset.h"
+#include "gdal_priv.h"
 #include "rawdataset.h"
 
 #include <climits>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 
 #include <algorithm>
 #include <limits>
@@ -101,15 +83,8 @@ static int ITTVISToUSGSZone(int nITTVISZone)
 
 ENVIDataset::ENVIDataset()
     : fpImage(nullptr), fp(nullptr), pszHDRFilename(nullptr),
-      bFoundMapinfo(false), bHeaderDirty(false), bFillFile(false),
-      interleave(BSQ)
+      bFoundMapinfo(false), bHeaderDirty(false), bFillFile(false)
 {
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -233,15 +208,15 @@ CPLErr ENVIDataset::FlushCache(bool bAtClosing)
     const int iENVIType = GetEnviType(band->GetRasterDataType());
     bOK &= VSIFPrintfL(fp, "data type = %d\n", iENVIType) >= 0;
     const char *pszInterleaving = nullptr;
-    switch (interleave)
+    switch (eInterleave)
     {
-        case BIP:
+        case Interleave::BIP:
             pszInterleaving = "bip";  // Interleaved by pixel.
             break;
-        case BIL:
+        case Interleave::BIL:
             pszInterleaving = "bil";  // Interleaved by line.
             break;
-        case BSQ:
+        case Interleave::BSQ:
             pszInterleaving = "bsq";  // Band sequential by default.
             break;
         default:
@@ -596,25 +571,19 @@ void ENVIDataset::WriteProjectionInfo()
     CPLString osLocation;
     CPLString osRotation;
 
-    const double dfPixelXSize = sqrt(adfGeoTransform[1] * adfGeoTransform[1] +
-                                     adfGeoTransform[2] * adfGeoTransform[2]);
-    const double dfPixelYSize = sqrt(adfGeoTransform[4] * adfGeoTransform[4] +
-                                     adfGeoTransform[5] * adfGeoTransform[5]);
-    const bool bHasNonDefaultGT =
-        adfGeoTransform[0] != 0.0 || adfGeoTransform[1] != 1.0 ||
-        adfGeoTransform[2] != 0.0 || adfGeoTransform[3] != 0.0 ||
-        adfGeoTransform[4] != 0.0 || adfGeoTransform[5] != 1.0;
-    if (adfGeoTransform[1] > 0.0 && adfGeoTransform[2] == 0.0 &&
-        adfGeoTransform[4] == 0.0 && adfGeoTransform[5] > 0.0)
+    const double dfPixelXSize = sqrt(m_gt[1] * m_gt[1] + m_gt[2] * m_gt[2]);
+    const double dfPixelYSize = sqrt(m_gt[4] * m_gt[4] + m_gt[5] * m_gt[5]);
+    const bool bHasNonDefaultGT = m_gt[0] != 0.0 || m_gt[1] != 1.0 ||
+                                  m_gt[2] != 0.0 || m_gt[3] != 0.0 ||
+                                  m_gt[4] != 0.0 || m_gt[5] != 1.0;
+    if (m_gt[1] > 0.0 && m_gt[2] == 0.0 && m_gt[4] == 0.0 && m_gt[5] > 0.0)
     {
         osRotation = ", rotation=180";
     }
     else if (bHasNonDefaultGT)
     {
-        const double dfRotation1 =
-            -atan2(-adfGeoTransform[2], adfGeoTransform[1]) * kdfRadToDeg;
-        const double dfRotation2 =
-            -atan2(-adfGeoTransform[4], -adfGeoTransform[5]) * kdfRadToDeg;
+        const double dfRotation1 = -atan2(-m_gt[2], m_gt[1]) * kdfRadToDeg;
+        const double dfRotation2 = -atan2(-m_gt[4], -m_gt[5]) * kdfRadToDeg;
         const double dfRotation = (dfRotation1 + dfRotation2) / 2.0;
 
         if (fabs(dfRotation1 - dfRotation2) > 1e-5)
@@ -630,8 +599,8 @@ void ENVIDataset::WriteProjectionInfo()
         }
     }
 
-    osLocation.Printf("1, 1, %.15g, %.15g, %.15g, %.15g", adfGeoTransform[0],
-                      adfGeoTransform[3], dfPixelXSize, dfPixelYSize);
+    osLocation.Printf("1, 1, %.15g, %.15g, %.15g, %.15g", m_gt[0], m_gt[3],
+                      dfPixelXSize, dfPixelYSize);
 
     // Minimal case - write out simple geotransform if we have a
     // non-default geotransform.
@@ -1134,10 +1103,10 @@ CPLErr ENVIDataset::SetSpatialRef(const OGRSpatialReference *poSRS)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ENVIDataset::GetGeoTransform(double *padfTransform)
+CPLErr ENVIDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
 
     if (bFoundMapinfo)
         return CE_None;
@@ -1149,9 +1118,9 @@ CPLErr ENVIDataset::GetGeoTransform(double *padfTransform)
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr ENVIDataset::SetGeoTransform(double *padfTransform)
+CPLErr ENVIDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    memcpy(adfGeoTransform, padfTransform, sizeof(double) * 6);
+    m_gt = gt;
 
     bHeaderDirty = true;
     bFoundMapinfo = true;
@@ -1390,18 +1359,18 @@ bool ENVIDataset::ProcessMapinfo(const char *pszMapinfo)
     const double xPixelSize = CPLAtof(papszFields[5]);
     const double yPixelSize = CPLAtof(papszFields[6]);
 
-    adfGeoTransform[0] = pixelEasting - (xReference - 1) * xPixelSize;
-    adfGeoTransform[1] = cos(dfRotation) * xPixelSize;
-    adfGeoTransform[2] = -sin(dfRotation) * xPixelSize;
-    adfGeoTransform[3] = pixelNorthing + (yReference - 1) * yPixelSize;
-    adfGeoTransform[4] = -sin(dfRotation) * yPixelSize;
-    adfGeoTransform[5] = -cos(dfRotation) * yPixelSize;
+    m_gt[0] = pixelEasting - (xReference - 1) * xPixelSize;
+    m_gt[1] = cos(dfRotation) * xPixelSize;
+    m_gt[2] = -sin(dfRotation) * xPixelSize;
+    m_gt[3] = pixelNorthing + (yReference - 1) * yPixelSize;
+    m_gt[4] = -sin(dfRotation) * yPixelSize;
+    m_gt[5] = -cos(dfRotation) * yPixelSize;
     if (bUpsideDown)  // to avoid numeric approximations
     {
-        adfGeoTransform[1] = xPixelSize;
-        adfGeoTransform[2] = 0;
-        adfGeoTransform[4] = 0;
-        adfGeoTransform[5] = yPixelSize;
+        m_gt[1] = xPixelSize;
+        m_gt[2] = 0;
+        m_gt[4] = 0;
+        m_gt[5] = yPixelSize;
     }
 
     // TODO(schwehr): Symbolic constants for the fields.
@@ -1579,12 +1548,12 @@ bool ENVIDataset::ProcessMapinfo(const char *pszMapinfo)
                     conversionFactor = 60.0;
                 else if (EQUAL(pszUnits, "Seconds"))
                     conversionFactor = 3600.0;
-                adfGeoTransform[0] /= conversionFactor;
-                adfGeoTransform[1] /= conversionFactor;
-                adfGeoTransform[2] /= conversionFactor;
-                adfGeoTransform[3] /= conversionFactor;
-                adfGeoTransform[4] /= conversionFactor;
-                adfGeoTransform[5] /= conversionFactor;
+                m_gt[0] /= conversionFactor;
+                m_gt[1] /= conversionFactor;
+                m_gt[2] /= conversionFactor;
+                m_gt[3] /= conversionFactor;
+                m_gt[4] /= conversionFactor;
+                m_gt[5] /= conversionFactor;
             }
         }
     }
@@ -1798,7 +1767,7 @@ static unsigned byteSwapUInt(unsigned swapMe)
 
 void ENVIDataset::ProcessStatsFile()
 {
-    osStaFilename = CPLResetExtension(pszHDRFilename, "sta");
+    osStaFilename = CPLResetExtensionSafe(pszHDRFilename, "sta");
     VSILFILE *fpStaFile = VSIFOpenL(osStaFilename, "rb");
 
     if (!fpStaFile)
@@ -2004,8 +1973,12 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
 
 {
     // Assume the caller is pointing to the binary (i.e. .bil) file.
-    if (poOpenInfo->nHeaderBytes < 2)
+    if (poOpenInfo->nHeaderBytes < 2 ||
+        (!poOpenInfo->IsSingleAllowedDriver("ENVI") &&
+         poOpenInfo->IsExtensionEqualToCI("zarr")))
+    {
         return nullptr;
+    }
 
     // Do we have a .hdr file?  Try upper and lower case, and
     // replacing the extension as well as appending the extension
@@ -2019,54 +1992,57 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
 
     CPLString osHdrFilename;
     VSILFILE *fpHeader = nullptr;
-    char **papszSiblingFiles = poOpenInfo->GetSiblingFiles();
+    CSLConstList papszSiblingFiles = poOpenInfo->GetSiblingFiles();
     if (papszSiblingFiles == nullptr)
     {
         // First try hdr as an extra extension
         osHdrFilename =
-            CPLFormFilename(nullptr, poOpenInfo->pszFilename, "hdr");
+            CPLFormFilenameSafe(nullptr, poOpenInfo->pszFilename, "hdr");
         fpHeader = VSIFOpenL(osHdrFilename, pszMode);
 
         if (fpHeader == nullptr && VSIIsCaseSensitiveFS(osHdrFilename))
         {
             osHdrFilename =
-                CPLFormFilename(nullptr, poOpenInfo->pszFilename, "HDR");
+                CPLFormFilenameSafe(nullptr, poOpenInfo->pszFilename, "HDR");
             fpHeader = VSIFOpenL(osHdrFilename, pszMode);
         }
 
         // Otherwise, try .hdr as a replacement extension
         if (fpHeader == nullptr)
         {
-            osHdrFilename = CPLResetExtension(poOpenInfo->pszFilename, "hdr");
+            osHdrFilename =
+                CPLResetExtensionSafe(poOpenInfo->pszFilename, "hdr");
             fpHeader = VSIFOpenL(osHdrFilename, pszMode);
         }
 
         if (fpHeader == nullptr && VSIIsCaseSensitiveFS(osHdrFilename))
         {
-            osHdrFilename = CPLResetExtension(poOpenInfo->pszFilename, "HDR");
+            osHdrFilename =
+                CPLResetExtensionSafe(poOpenInfo->pszFilename, "HDR");
             fpHeader = VSIFOpenL(osHdrFilename, pszMode);
         }
     }
     else
     {
         // Now we need to tear apart the filename to form a .HDR filename.
-        CPLString osPath = CPLGetPath(poOpenInfo->pszFilename);
+        CPLString osPath = CPLGetPathSafe(poOpenInfo->pszFilename);
         CPLString osName = CPLGetFilename(poOpenInfo->pszFilename);
 
         // First try hdr as an extra extension
-        int iFile = CSLFindString(papszSiblingFiles,
-                                  CPLFormFilename(nullptr, osName, "hdr"));
+        int iFile =
+            CSLFindString(papszSiblingFiles,
+                          CPLFormFilenameSafe(nullptr, osName, "hdr").c_str());
         if (iFile < 0)
         {
             // Otherwise, try .hdr as a replacement extension
             iFile = CSLFindString(papszSiblingFiles,
-                                  CPLResetExtension(osName, "hdr"));
+                                  CPLResetExtensionSafe(osName, "hdr").c_str());
         }
 
         if (iFile >= 0)
         {
             osHdrFilename =
-                CPLFormFilename(osPath, papszSiblingFiles[iFile], nullptr);
+                CPLFormFilenameSafe(osPath, papszSiblingFiles[iFile], nullptr);
             fpHeader = VSIFOpenL(osHdrFilename, pszMode);
         }
     }
@@ -2100,7 +2076,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     }
 
     // Has the user selected the .hdr file to open?
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "hdr"))
+    if (poOpenInfo->IsExtensionEqualToCI("hdr"))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "The selected file is an ENVI header file, but to "
@@ -2113,7 +2089,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     }
 
     // Has the user selected the .sta (stats) file to open?
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "sta"))
+    if (poOpenInfo->IsExtensionEqualToCI("sta"))
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "The selected file is an ENVI statistics file. "
@@ -2126,16 +2102,47 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     }
 
     // Extract required values from the .hdr.
-    int nLines = atoi(poDS->m_aosHeader.FetchNameValueDef("lines", "0"));
+    const char *pszLines = poDS->m_aosHeader.FetchNameValueDef("lines", "0");
+    const auto nLines64 = std::strtoll(pszLines, nullptr, 10);
+    const int nLines = static_cast<int>(std::min<int64_t>(nLines64, INT_MAX));
+    if (nLines < nLines64)
+    {
+        CPLError(CE_Warning, CPLE_AppDefined,
+                 "Limiting number of lines from %s to %d due to GDAL raster "
+                 "data model limitation",
+                 pszLines, nLines);
+    }
 
-    int nSamples = atoi(poDS->m_aosHeader.FetchNameValueDef("samples", "0"));
+    const char *pszSamples =
+        poDS->m_aosHeader.FetchNameValueDef("samples", "0");
+    const auto nSamples64 = std::strtoll(pszSamples, nullptr, 10);
+    const int nSamples =
+        static_cast<int>(std::min<int64_t>(nSamples64, INT_MAX));
+    if (nSamples < nSamples64)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Cannot handle samples=%s due to GDAL raster data model limitation",
+            pszSamples);
+        return nullptr;
+    }
 
-    int nBands = atoi(poDS->m_aosHeader.FetchNameValueDef("bands", "0"));
+    const char *pszBands = poDS->m_aosHeader.FetchNameValueDef("bands", "0");
+    const auto nBands64 = std::strtoll(pszBands, nullptr, 10);
+    const int nBands = static_cast<int>(std::min<int64_t>(nBands64, INT_MAX));
+    if (nBands < nBands64)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Cannot handle bands=%s due to GDAL raster data model limitation",
+            pszBands);
+        return nullptr;
+    }
 
     // In case, there is no interleave keyword, we try to derive it from the
     // file extension.
     CPLString osInterleave = poDS->m_aosHeader.FetchNameValueDef(
-        "interleave", CPLGetExtension(poOpenInfo->pszFilename));
+        "interleave", poOpenInfo->osExtension.c_str());
 
     if (!STARTS_WITH_CI(osInterleave, "BSQ") &&
         !STARTS_WITH_CI(osInterleave, "BIP") &&
@@ -2307,7 +2314,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
 
     if (STARTS_WITH_CI(osInterleave, "bil"))
     {
-        poDS->interleave = BIL;
+        poDS->eInterleave = Interleave::BIL;
         poDS->SetMetadataItem("INTERLEAVE", "LINE", "IMAGE_STRUCTURE");
         if (nSamples > std::numeric_limits<int>::max() / (nDataSize * nBands))
         {
@@ -2320,7 +2327,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     }
     else if (STARTS_WITH_CI(osInterleave, "bip"))
     {
-        poDS->interleave = BIP;
+        poDS->eInterleave = Interleave::BIP;
         poDS->SetMetadataItem("INTERLEAVE", "PIXEL", "IMAGE_STRUCTURE");
         if (nSamples > std::numeric_limits<int>::max() / (nDataSize * nBands))
         {
@@ -2333,7 +2340,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     }
     else
     {
-        poDS->interleave = BSQ;
+        poDS->eInterleave = Interleave::BSQ;
         poDS->SetMetadataItem("INTERLEAVE", "BAND", "IMAGE_STRUCTURE");
         if (nSamples > std::numeric_limits<int>::max() / nDataSize)
         {
@@ -2342,7 +2349,7 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
         }
         nLineOffset = nDataSize * nSamples;
         nPixelOffset = nDataSize;
-        nBandOffset = static_cast<vsi_l_offset>(nLineOffset) * nLines;
+        nBandOffset = static_cast<vsi_l_offset>(nLineOffset) * nLines64;
     }
 
     const char *pszMajorFrameOffset = poDS->m_aosHeader["major_frame_offsets"];
@@ -2401,9 +2408,12 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
     {
         char **papszBandNames = poDS->SplitList(pszBandNames);
         char **papszWL = poDS->SplitList(pszWaveLength);
+        const char *pszFWHM = poDS->m_aosHeader["fwhm"];
+        char **papszFWHM = pszFWHM ? poDS->SplitList(pszFWHM) : nullptr;
 
         const char *pszWLUnits = nullptr;
         const int nWLCount = CSLCount(papszWL);
+        const int nFWHMCount = CSLCount(papszFWHM);
         if (papszWL)
         {
             // If WL information is present, process wavelength units.
@@ -2460,6 +2470,29 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
             CPLString osBandId = CPLSPrintf("Band_%i", i + 1);
             poDS->SetMetadataItem(osBandId, osBandName.c_str());
 
+            const auto ConvertWaveLength =
+                [pszWLUnits](double dfVal) -> const char *
+            {
+                if (EQUAL(pszWLUnits, "Micrometers") || EQUAL(pszWLUnits, "um"))
+                {
+                    return CPLSPrintf("%.3f", dfVal);
+                }
+                else if (EQUAL(pszWLUnits, "Nanometers") ||
+                         EQUAL(pszWLUnits, "nm"))
+                {
+                    return CPLSPrintf("%.3f", dfVal / 1000);
+                }
+                else if (EQUAL(pszWLUnits, "Millimeters") ||
+                         EQUAL(pszWLUnits, "mm"))
+                {
+                    return CPLSPrintf("%.3f", dfVal * 1000);
+                }
+                else
+                {
+                    return nullptr;
+                }
+            };
+
             // Set wavelength metadata to band.
             if (papszWL && nWLCount > i)
             {
@@ -2470,11 +2503,29 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
                 {
                     poDS->GetRasterBand(i + 1)->SetMetadataItem(
                         "wavelength_units", pszWLUnits);
+
+                    if (const char *pszVal =
+                            ConvertWaveLength(CPLAtof(papszWL[i])))
+                    {
+                        poDS->GetRasterBand(i + 1)->SetMetadataItem(
+                            "CENTRAL_WAVELENGTH_UM", pszVal, "IMAGERY");
+                    }
+                }
+            }
+
+            if (papszFWHM && nFWHMCount > i && pszWLUnits)
+            {
+                if (const char *pszVal =
+                        ConvertWaveLength(CPLAtof(papszFWHM[i])))
+                {
+                    poDS->GetRasterBand(i + 1)->SetMetadataItem(
+                        "FWHM_UM", pszVal, "IMAGERY");
                 }
             }
         }
         CSLDestroy(papszWL);
         CSLDestroy(papszBandNames);
+        CSLDestroy(papszFWHM);
     }
 
     // Apply "default bands" if we have it to set RGB color interpretation.
@@ -2556,12 +2607,14 @@ ENVIDataset *ENVIDataset::Open(GDALOpenInfo *poOpenInfo, bool bFileSizeCheck)
 
         for (int i = 0; i * 3 + 2 < nColorValueCount; i++)
         {
-            GDALColorEntry sEntry;
-
-            sEntry.c1 = static_cast<short>(atoi(papszClassColors[i * 3 + 0]));
-            sEntry.c2 = static_cast<short>(atoi(papszClassColors[i * 3 + 1]));
-            sEntry.c3 = static_cast<short>(atoi(papszClassColors[i * 3 + 2]));
-            sEntry.c4 = 255;
+            const GDALColorEntry sEntry = {
+                static_cast<short>(std::clamp(atoi(papszClassColors[i * 3 + 0]),
+                                              0, 255)),  // Red
+                static_cast<short>(std::clamp(atoi(papszClassColors[i * 3 + 1]),
+                                              0, 255)),  // Green
+                static_cast<short>(std::clamp(atoi(papszClassColors[i * 3 + 2]),
+                                              0, 255)),  // Blue
+                255};
             oCT.SetColorEntry(i, &sEntry);
         }
 
@@ -2719,19 +2772,19 @@ GDALDataset *ENVIDataset::Create(const char *pszFilename, int nXSize,
     }
 
     // Create the .hdr filename.
-    const char *pszHDRFilename = nullptr;
+    std::string osHDRFilename;
     const char *pszSuffix = CSLFetchNameValue(papszOptions, "SUFFIX");
     if (pszSuffix && STARTS_WITH_CI(pszSuffix, "ADD"))
-        pszHDRFilename = CPLFormFilename(nullptr, pszFilename, "hdr");
+        osHDRFilename = CPLFormFilenameSafe(nullptr, pszFilename, "hdr");
     else
-        pszHDRFilename = CPLResetExtension(pszFilename, "hdr");
+        osHDRFilename = CPLResetExtensionSafe(pszFilename, "hdr");
 
     // Open the file.
-    fp = VSIFOpenL(pszHDRFilename, "wt");
+    fp = VSIFOpenL(osHDRFilename.c_str(), "wt");
     if (fp == nullptr)
     {
         CPLError(CE_Failure, CPLE_OpenFailed,
-                 "Attempt to create file `%s' failed.", pszHDRFilename);
+                 "Attempt to create file `%s' failed.", osHDRFilename.c_str());
         return nullptr;
     }
 
@@ -2909,6 +2962,11 @@ void GDALRegister_ENVI()
         "       <Value>BSQ</Value>"
         "   </Option>"
         "</CreationOptionList>");
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS,
+                              "GeoTransform SRS GCPs NoData "
+                              "RasterValues DatasetMetadata");
 
     poDriver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
     poDriver->pfnOpen = ENVIDataset::Open;

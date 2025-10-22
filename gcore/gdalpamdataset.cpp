@@ -9,23 +9,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2007-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -164,18 +148,35 @@ GDALPamDataset::GDALPamDataset()
 GDALPamDataset::~GDALPamDataset()
 
 {
-    if (IsMarkedSuppressOnClose())
-    {
-        if (psPam && psPam->pszPamFilename != nullptr)
-            VSIUnlink(psPam->pszPamFilename);
-    }
-    else if (nPamFlags & GPF_DIRTY)
-    {
-        CPLDebug("GDALPamDataset", "In destructor with dirty metadata.");
-        GDALPamDataset::TrySaveXML();
-    }
+    CPL_IGNORE_RET_VAL(GDALPamDataset::Close());
 
     PamClear();
+}
+
+/************************************************************************/
+/*                              Close()                                 */
+/************************************************************************/
+
+CPLErr GDALPamDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        if (IsMarkedSuppressOnClose())
+        {
+            if (psPam && psPam->pszPamFilename != nullptr)
+                VSIUnlink(psPam->pszPamFilename);
+        }
+        else if (nPamFlags & GPF_DIRTY)
+        {
+            CPLDebug("GDALPamDataset", "In Close() with dirty metadata.");
+            eErr = GDALPamDataset::TrySaveXML();
+        }
+
+        if (GDALDataset::Close() != CE_None)
+            eErr = CE_Failure;
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -277,9 +278,8 @@ CPLXMLNode *GDALPamDataset::SerializeToXML(const char *pszUnused)
     {
         CPLString oFmt;
         oFmt.Printf("%24.16e,%24.16e,%24.16e,%24.16e,%24.16e,%24.16e",
-                    psPam->adfGeoTransform[0], psPam->adfGeoTransform[1],
-                    psPam->adfGeoTransform[2], psPam->adfGeoTransform[3],
-                    psPam->adfGeoTransform[4], psPam->adfGeoTransform[5]);
+                    psPam->gt[0], psPam->gt[1], psPam->gt[2], psPam->gt[3],
+                    psPam->gt[4], psPam->gt[5]);
         CPLSetXMLValue(psDSTree, "GeoTransform", oFmt);
     }
 
@@ -370,7 +370,7 @@ void GDALPamDataset::PamInitialize()
 
     if (!CPLTestBool(CPLGetConfigOption("GDAL_PAM_ENABLED", pszPamDefault)))
     {
-        CPLDebug("GDAL", "PAM is disabled");
+        CPLDebugOnce("GDAL", "PAM is disabled");
         nPamFlags |= GPF_DISABLED;
     }
 
@@ -469,7 +469,7 @@ CPLErr GDALPamDataset::XMLInit(const CPLXMLNode *psTree, const char *pszUnused)
         else
         {
             for (int iTA = 0; iTA < 6; iTA++)
-                psPam->adfGeoTransform[iTA] = CPLAtof(aosTokens[iTA]);
+                psPam->gt[iTA] = CPLAtof(aosTokens[iTA]);
             psPam->bHaveGeoTransform = TRUE;
         }
     }
@@ -637,31 +637,27 @@ CPLErr GDALPamDataset::XMLInit(const CPLXMLNode *psTree, const char *pszUnused)
                 }
                 if (adfCoeffX.size() == 3 && adfCoeffY.size() == 3)
                 {
-                    psPam->adfGeoTransform[0] = adfCoeffX[0];
-                    psPam->adfGeoTransform[1] = adfCoeffX[1];
+                    psPam->gt[0] = adfCoeffX[0];
+                    psPam->gt[1] = adfCoeffX[1];
                     // Looking at the example of https://github.com/qgis/QGIS/issues/53125#issuecomment-1567650082
                     // when comparing the .pgwx world file and .png.aux.xml file,
                     // it appears that the sign of the coefficients for the line
                     // terms must be negated (which is a bit in line with the
                     // negation of dfGCPLine in the above GCP case)
-                    psPam->adfGeoTransform[2] = -adfCoeffX[2];
-                    psPam->adfGeoTransform[3] = adfCoeffY[0];
-                    psPam->adfGeoTransform[4] = adfCoeffY[1];
-                    psPam->adfGeoTransform[5] = -adfCoeffY[2];
+                    psPam->gt[2] = -adfCoeffX[2];
+                    psPam->gt[3] = adfCoeffY[0];
+                    psPam->gt[4] = adfCoeffY[1];
+                    psPam->gt[5] = -adfCoeffY[2];
 
                     // Looking at the example of https://github.com/qgis/QGIS/issues/53125#issuecomment-1567650082
                     // when comparing the .pgwx world file and .png.aux.xml file,
                     // one can see that they have the same origin, so knowing
                     // that world file uses a center-of-pixel convention,
                     // correct from center of pixel to top left of pixel
-                    psPam->adfGeoTransform[0] -=
-                        0.5 * psPam->adfGeoTransform[1];
-                    psPam->adfGeoTransform[0] -=
-                        0.5 * psPam->adfGeoTransform[2];
-                    psPam->adfGeoTransform[3] -=
-                        0.5 * psPam->adfGeoTransform[4];
-                    psPam->adfGeoTransform[3] -=
-                        0.5 * psPam->adfGeoTransform[5];
+                    psPam->gt[0] -= 0.5 * psPam->gt[1];
+                    psPam->gt[0] -= 0.5 * psPam->gt[2];
+                    psPam->gt[3] -= 0.5 * psPam->gt[4];
+                    psPam->gt[3] -= 0.5 * psPam->gt[5];
 
                     psPam->bHaveGeoTransform = TRUE;
                 }
@@ -971,7 +967,7 @@ CPLErr GDALPamDataset::TryLoadXML(CSLConstList papszSiblingFiles)
     /*      Initialize ourselves from this XML tree.                        */
     /* -------------------------------------------------------------------- */
 
-    CPLString osVRTPath(CPLGetPath(psPam->pszPamFilename));
+    CPLString osVRTPath(CPLGetPathSafe(psPam->pszPamFilename));
     const CPLErr eErr = XMLInit(psTree, osVRTPath);
 
     CPLDestroyXMLNode(psTree);
@@ -1163,14 +1159,14 @@ CPLErr GDALPamDataset::CloneInfo(GDALDataset *poSrcDS, int nCloneFlags)
     /* -------------------------------------------------------------------- */
     if (nCloneFlags & GCIF_GEOTRANSFORM)
     {
-        double adfGeoTransform[6] = {0.0};
+        GDALGeoTransform gt;
 
-        if (poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None)
+        if (poSrcDS->GetGeoTransform(gt) == CE_None)
         {
-            double adfOldGT[6] = {0.0};
+            GDALGeoTransform oldGT;
 
-            if (!bOnlyIfMissing || GetGeoTransform(adfOldGT) != CE_None)
-                SetGeoTransform(adfGeoTransform);
+            if (!bOnlyIfMissing || GetGeoTransform(oldGT) != CE_None)
+                SetGeoTransform(gt);
         }
     }
 
@@ -1375,6 +1371,19 @@ const OGRSpatialReference *GDALPamDataset::GetSpatialRef() const
 }
 
 /************************************************************************/
+/*                        GetSpatialRefRasterOnly()                     */
+/************************************************************************/
+
+const OGRSpatialReference *GDALPamDataset::GetSpatialRefRasterOnly() const
+
+{
+    if (psPam && psPam->poSRS)
+        return psPam->poSRS;
+
+    return GDALDataset::GetSpatialRefRasterOnly();
+}
+
+/************************************************************************/
 /*                           SetSpatialRef()                            */
 /************************************************************************/
 
@@ -1398,23 +1407,23 @@ CPLErr GDALPamDataset::SetSpatialRef(const OGRSpatialReference *poSRS)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GDALPamDataset::GetGeoTransform(double *padfTransform)
+CPLErr GDALPamDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (psPam && psPam->bHaveGeoTransform)
     {
-        memcpy(padfTransform, psPam->adfGeoTransform, sizeof(double) * 6);
+        gt = psPam->gt;
         return CE_None;
     }
 
-    return GDALDataset::GetGeoTransform(padfTransform);
+    return GDALDataset::GetGeoTransform(gt);
 }
 
 /************************************************************************/
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr GDALPamDataset::SetGeoTransform(double *padfTransform)
+CPLErr GDALPamDataset::SetGeoTransform(const GDALGeoTransform &gt)
 
 {
     PamInitialize();
@@ -1422,12 +1431,12 @@ CPLErr GDALPamDataset::SetGeoTransform(double *padfTransform)
     if (psPam)
     {
         MarkPamDirty();
-        psPam->bHaveGeoTransform = TRUE;
-        memcpy(psPam->adfGeoTransform, padfTransform, sizeof(double) * 6);
+        psPam->bHaveGeoTransform = true;
+        psPam->gt = gt;
         return (CE_None);
     }
 
-    return GDALDataset::SetGeoTransform(padfTransform);
+    return GDALDataset::SetGeoTransform(gt);
 }
 
 /************************************************************************/
@@ -1590,21 +1599,26 @@ const char *GDALPamDataset::GetMetadataItem(const char *pszName,
     else if (pszDomain != nullptr && EQUAL(pszDomain, "OVERVIEWS") &&
              EQUAL(pszName, "OVERVIEW_FILE"))
     {
-        const char *pszOverviewFile =
-            GDALDataset::GetMetadataItem(pszName, pszDomain);
+        if (m_osOverviewFile.empty())
+        {
+            const char *pszOverviewFile =
+                GDALDataset::GetMetadataItem(pszName, pszDomain);
 
-        if (pszOverviewFile == nullptr ||
-            !STARTS_WITH_CI(pszOverviewFile, ":::BASE:::"))
-            return pszOverviewFile;
+            if (pszOverviewFile == nullptr ||
+                !STARTS_WITH_CI(pszOverviewFile, ":::BASE:::"))
+                return pszOverviewFile;
 
-        CPLString osPath;
+            std::string osPath;
 
-        if (strlen(GetPhysicalFilename()) > 0)
-            osPath = CPLGetPath(GetPhysicalFilename());
-        else
-            osPath = CPLGetPath(GetDescription());
+            if (strlen(GetPhysicalFilename()) > 0)
+                osPath = CPLGetPathSafe(GetPhysicalFilename());
+            else
+                osPath = CPLGetPathSafe(GetDescription());
 
-        return CPLFormFilename(osPath, pszOverviewFile + 10, nullptr);
+            m_osOverviewFile = CPLFormFilenameSafe(
+                osPath.c_str(), pszOverviewFile + 10, nullptr);
+        }
+        return m_osOverviewFile.c_str();
     }
 
     /* -------------------------------------------------------------------- */
@@ -1655,7 +1669,7 @@ CPLErr GDALPamDataset::TryLoadAux(CSLConstList papszSiblingFiles)
 
     if (papszSiblingFiles && GDALCanReliablyUseSiblingFileList(pszPhysicalFile))
     {
-        CPLString osAuxFilename = CPLResetExtension(pszPhysicalFile, "aux");
+        CPLString osAuxFilename = CPLResetExtensionSafe(pszPhysicalFile, "aux");
         int iSibling =
             CSLFindString(papszSiblingFiles, CPLGetFilename(osAuxFilename));
         if (iSibling < 0)
@@ -1689,7 +1703,7 @@ CPLErr GDALPamDataset::TryLoadAux(CSLConstList papszSiblingFiles)
     /* -------------------------------------------------------------------- */
     /*      Geotransform.                                                   */
     /* -------------------------------------------------------------------- */
-    if (poAuxDS->GetGeoTransform(psPam->adfGeoTransform) == CE_None)
+    if (poAuxDS->GetGeoTransform(psPam->gt) == CE_None)
         psPam->bHaveGeoTransform = TRUE;
 
     /* -------------------------------------------------------------------- */
@@ -1804,7 +1818,7 @@ void GDALPamDataset::ClearStatistics()
         GDALRasterBand *poBand = GetRasterBand(i);
         CPLStringList aosNewMD;
         for (const char *pszStr :
-             cpl::Iterate(CSLConstList(poBand->GetMetadata())))
+             cpl::Iterate(static_cast<CSLConstList>(poBand->GetMetadata())))
         {
             if (STARTS_WITH_CI(pszStr, "STATISTICS_"))
             {

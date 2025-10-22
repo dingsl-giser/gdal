@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for PCIDSK driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2009-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -60,6 +43,7 @@ def test_pcidsk_1():
 # Test lossless copying (16, multiband) via Create().
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_2():
 
     tst = gdaltest.GDALTest("PCIDSK", "png/rgba16.png", 2, 2042)
@@ -222,6 +206,7 @@ def test_pcidsk_5(tmp_path):
 # Test FILE interleaving.
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_8():
 
     tst = gdaltest.GDALTest(
@@ -284,6 +269,7 @@ def test_pcidsk_10():
 # Test INTERLEAVING=TILED interleaving.
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11():
 
     tst = gdaltest.GDALTest(
@@ -297,6 +283,7 @@ def test_pcidsk_11():
     tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11_v1():
 
     tst = gdaltest.GDALTest(
@@ -310,6 +297,7 @@ def test_pcidsk_11_v1():
     tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_11_v2():
 
     tst = gdaltest.GDALTest(
@@ -327,6 +315,7 @@ def test_pcidsk_11_v2():
 # Test INTERLEAVING=TILED interleaving and COMPRESSION=RLE
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12():
 
     tst = gdaltest.GDALTest(
@@ -340,6 +329,7 @@ def test_pcidsk_12():
     tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12_v1():
 
     tst = gdaltest.GDALTest(
@@ -358,6 +348,7 @@ def test_pcidsk_12_v1():
     tst.testCreate()
 
 
+@pytest.mark.require_driver("PNG")
 def test_pcidsk_12_v2():
 
     tst = gdaltest.GDALTest(
@@ -432,63 +423,60 @@ def test_pcidsk_14():
 # Test mixed raster and vector
 
 
-def test_pcidsk_15():
+def test_pcidsk_15(tmp_path):
 
     # One raster band and vector layer
-    ds = gdal.GetDriverByName("PCIDSK").Create("/vsimem/pcidsk_15.pix", 1, 1)
+    ds = gdal.GetDriverByName("PCIDSK").Create(tmp_path / "pcidsk_15.pix", 1, 1)
     ds.CreateLayer("foo")
     ds = None
 
-    ds = gdal.Open("/vsimem/pcidsk_15.pix")
+    ds = gdal.Open(tmp_path / "pcidsk_15.pix")
     assert ds.RasterCount == 1
     assert ds.GetLayerCount() == 1
 
-    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy("/vsimem/pcidsk_15_2.pix", ds)
+    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy(tmp_path / "pcidsk_15_2.pix", ds)
     ds2 = None
     ds = None
 
-    ds = gdal.Open("/vsimem/pcidsk_15_2.pix")
+    ds = gdal.Open(tmp_path / "pcidsk_15_2.pix")
     assert ds.RasterCount == 1
     assert ds.GetLayerCount() == 1
     ds = None
 
     # One vector layer only
-    ds = gdal.GetDriverByName("PCIDSK").Create("/vsimem/pcidsk_15.pix", 0, 0, 0)
+    ds = gdal.GetDriverByName("PCIDSK").Create(tmp_path / "pcidsk_15.pix", 0, 0, 0)
     ds.CreateLayer("foo")
     ds = None
 
-    ds = gdal.OpenEx("/vsimem/pcidsk_15.pix")
+    ds = gdal.OpenEx(tmp_path / "pcidsk_15.pix")
     assert ds.RasterCount == 0
     assert ds.GetLayerCount() == 1
 
-    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy("/vsimem/pcidsk_15_2.pix", ds)
+    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy(tmp_path / "pcidsk_15_2.pix", ds)
     ds2 = None
     ds = None
 
-    ds = gdal.OpenEx("/vsimem/pcidsk_15_2.pix")
+    ds = gdal.OpenEx(tmp_path / "pcidsk_15_2.pix")
     assert ds.RasterCount == 0
     assert ds.GetLayerCount() == 1
     ds = None
 
     # Zero raster band and vector layer
-    ds = gdal.GetDriverByName("PCIDSK").Create("/vsimem/pcidsk_15.pix", 0, 0, 0)
+    ds = gdal.GetDriverByName("PCIDSK").Create(tmp_path / "pcidsk_15.pix", 0, 0, 0)
     ds = None
 
-    ds = gdal.OpenEx("/vsimem/pcidsk_15.pix")
+    ds = gdal.OpenEx(tmp_path / "pcidsk_15.pix")
     assert ds.RasterCount == 0
     assert ds.GetLayerCount() == 0
 
-    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy("/vsimem/pcidsk_15_2.pix", ds)
+    ds2 = gdal.GetDriverByName("PCIDSK").CreateCopy(tmp_path / "pcidsk_15_2.pix", ds)
     del ds2
     ds = None
 
-    ds = gdal.OpenEx("/vsimem/pcidsk_15_2.pix")
+    ds = gdal.OpenEx(tmp_path / "pcidsk_15_2.pix")
     assert ds.RasterCount == 0
     assert ds.GetLayerCount() == 0
     ds = None
-
-    gdal.GetDriverByName("PCIDSK").Delete("/vsimem/pcidsk_15.pix")
-    gdal.GetDriverByName("PCIDSK").Delete("/vsimem/pcidsk_15_2.pix")
 
 
 ###############################################################################
@@ -518,6 +506,8 @@ def test_pcidsk_external_ovr_rrd():
     with gdaltest.config_option("USE_RRD", "YES"):
         ds.BuildOverviews("NEAR", [2])
     ds = None
+    if gdal.GetLastErrorMsg() == "This build does not support creating .aux overviews":
+        pytest.skip(gdal.GetLastErrorMsg())
     assert gdal.VSIStatL("/vsimem/test.aux") is not None
     ds = gdal.Open("/vsimem/test.pix")
     assert ds.GetRasterBand(1).GetOverviewCount() == 1

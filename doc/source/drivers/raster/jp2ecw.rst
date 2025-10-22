@@ -54,7 +54,7 @@ Georeferencing information can come from different sources : internal
 information is fetched in following order (first listed is the highest
 priority): PAM, GeoJP2, GMLJP2, WORLDFILE.
 
-Starting with GDAL 2.2, the allowed sources and their priority order can
+The allowed sources and their priority order can
 be changed with the :config:`GDAL_GEOREF_SOURCES` configuration option (or
 :oo:`GEOREF_SOURCES` open option) whose value is a comma-separated list of the
 following keywords : PAM, GEOJP2, GMLJP2, INTERNAL (shortcut for
@@ -379,4 +379,3 @@ See Also
 -  Support for non-GDAL specific issues should be directed to the
    `Hexagon Geospatial public
    forum <https://sgisupport.intergraph.com/infocenter/index?page=forums&forum=507301383c17ef4e013d8dfa30c2007ef1>`__
--  `GDAL ECW Build Hints <http://trac.osgeo.org/gdal/wiki/ECW>`__

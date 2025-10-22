@@ -7,23 +7,7 @@
  **********************************************************************
  * Copyright (c) 2010-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 //! @cond Doxygen_Suppress
@@ -35,12 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if HAVE_FCNTL_H
 #include <fcntl.h>
-#endif
-#if HAVE_SYS_STAT_H
-#include <sys/stat.h>
-#endif
 
 #include <algorithm>
 #include <limits>
@@ -51,7 +30,6 @@
 
 #ifdef _WIN32
 #include <io.h>
-#include <fcntl.h>
 #endif
 
 static std::string gosStdinFilename{};
@@ -96,9 +74,9 @@ class VSIStdinFilesystemHandler final : public VSIFilesystemHandler
     VSIStdinFilesystemHandler();
     ~VSIStdinFilesystemHandler() override;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError,
-                           CSLConstList /* papszOptions */) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList /* papszOptions */) override;
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
 
@@ -614,7 +592,7 @@ static bool ParseFilename(const char *pszFilename)
 /*                                Open()                                */
 /************************************************************************/
 
-VSIVirtualHandle *
+VSIVirtualHandleUniquePtr
 VSIStdinFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
                                 bool /* bSetError */,
                                 CSLConstList /* papszOptions */)
@@ -632,7 +610,8 @@ VSIStdinFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
         return nullptr;
     }
 
-    return new VSIStdinHandle();
+    return VSIVirtualHandleUniquePtr(
+        std::make_unique<VSIStdinHandle>().release());
 }
 
 /************************************************************************/
@@ -661,7 +640,6 @@ int VSIStdinFilesystemHandler::Stat(const char *pszFilename,
                 return -1;
             handle->Seek(0, SEEK_END);
             pStatBuf->st_size = handle->Tell();
-            delete handle;
         }
     }
 
@@ -693,7 +671,6 @@ int VSIStdinFilesystemHandler::Stat(const char *pszFilename,
  See :ref:`/vsistdin/ documentation <vsistdin>`
  \endverbatim
 
- @since GDAL 1.8.0
  */
 void VSIInstallStdinHandler()
 

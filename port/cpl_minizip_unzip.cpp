@@ -536,8 +536,7 @@ extern unzFile ZEXPORT cpl_unzOpen2(const char *path,
 
     // Must be a trick to ensure that unz_copyright remains in the binary!
     // cppcheck-suppress knownConditionTrueFalse
-    if (unz_copyright[0] != ' ')
-        return nullptr;
+    central_pos = (unz_copyright[0] != ' ');
 
     if (pzlib_filefunc_def == nullptr)
         cpl_fill_fopen_filefunc(&us.z_filefunc);
@@ -550,7 +549,7 @@ extern unzFile ZEXPORT cpl_unzOpen2(const char *path,
     if (us.filestream == nullptr)
         return nullptr;
 
-    central_pos = unzlocal_SearchCentralDir64(&us.z_filefunc, us.filestream);
+    central_pos += unzlocal_SearchCentralDir64(&us.z_filefunc, us.filestream);
     if (central_pos)
     {
         uLong uS;
@@ -692,6 +691,11 @@ extern unzFile ZEXPORT cpl_unzOpen2(const char *path,
     us.current_file_ok = 0;
 
     s = static_cast<unz_s *>(ALLOC(sizeof(unz_s)));
+    if (!s)
+    {
+        ZCLOSE(us.z_filefunc, us.filestream);
+        return nullptr;
+    }
     *s = us;
     cpl_unzGoToFirstFile(reinterpret_cast<unzFile>(s));
     return reinterpret_cast<unzFile>(s);
@@ -1217,6 +1221,7 @@ extern int ZEXPORT cpl_unzLocateFile(unzFile file, const char *szFileName,
     /* We failed, so restore the state of the 'current file' to where we
      * were.
      */
+    // cppcheck-suppress redundantAssignment
     s->num_file = num_fileSaved;
     s->pos_in_central_dir = pos_in_central_dirSaved;
     s->cur_file_info = cur_file_infoSaved;
@@ -1311,7 +1316,7 @@ unzlocal_CheckCurrentFileCoherencyHeader(unz_s *s, uInt *piSizeVar,
               ZLIB_FILEFUNC_SEEK_SET) != 0)
         return UNZ_ERRNO;
 
-    if (err == UNZ_OK)
+    // if (err == UNZ_OK)
     {
         if (unzlocal_getLong(&s->z_filefunc, s->filestream, &uMagic) != UNZ_OK)
             err = UNZ_ERRNO;
@@ -1502,6 +1507,7 @@ extern int ZEXPORT cpl_unzOpenCurrentFile3(unzFile file, int *method,
             pfile_in_zip_read_info->stream_initialised = 1;
         else
         {
+            TRYFREE(pfile_in_zip_read_info->read_buffer);
             TRYFREE(pfile_in_zip_read_info);
             return err;
         }
@@ -1614,7 +1620,7 @@ extern int cpl_unzCurrentFileInfoFromLocalHeader(
               ZLIB_FILEFUNC_SEEK_SET) != 0)
         return UNZ_ERRNO;
 
-    if (err == UNZ_OK)
+    // if (err == UNZ_OK)
     {
         if (unzlocal_getLong(&s->z_filefunc, s->filestream, &uMagic) != UNZ_OK)
             err = UNZ_ERRNO;

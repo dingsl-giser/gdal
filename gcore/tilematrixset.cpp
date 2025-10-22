@@ -7,28 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_json.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cfloat>
 #include <limits>
@@ -44,13 +30,17 @@ namespace gdal
 /*                   listPredefinedTileMatrixSets()                     */
 /************************************************************************/
 
-std::set<std::string> TileMatrixSet::listPredefinedTileMatrixSets()
+std::vector<std::string> TileMatrixSet::listPredefinedTileMatrixSets()
 {
-    std::set<std::string> l{"GoogleMapsCompatible", "InspireCRS84Quad"};
+    std::vector<std::string> l{"GoogleMapsCompatible", "WorldCRS84Quad",
+                               "WorldMercatorWGS84Quad", "GoogleCRS84Quad",
+                               "PseudoTMS_GlobalMercator"};
     const char *pszSomeFile = CPLFindFile("gdal", "tms_NZTM2000.json");
     if (pszSomeFile)
     {
-        CPLStringList aosList(VSIReadDir(CPLGetDirname(pszSomeFile)));
+        std::set<std::string> set;
+        CPLStringList aosList(
+            VSIReadDir(CPLGetDirnameSafe(pszSomeFile).c_str()));
         for (int i = 0; i < aosList.size(); i++)
         {
             const size_t nLen = strlen(aosList[i]);
@@ -60,9 +50,11 @@ std::set<std::string> TileMatrixSet::listPredefinedTileMatrixSets()
             {
                 std::string id(aosList[i] + strlen("tms_"),
                                nLen - (strlen("tms_") + strlen(".json")));
-                l.insert(id);
+                set.insert(std::move(id));
             }
         }
+        for (const std::string &id : set)
+            l.push_back(id);
     }
     return l;
 }
@@ -77,13 +69,16 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
     std::unique_ptr<TileMatrixSet> poTMS(new TileMatrixSet());
 
     constexpr double HALF_CIRCUMFERENCE = 6378137 * M_PI;
+
     if (EQUAL(fileOrDef, "GoogleMapsCompatible") ||
+        EQUAL(fileOrDef, "WebMercatorQuad") ||
         EQUAL(
             fileOrDef,
             "http://www.opengis.net/def/tilematrixset/OGC/1.0/WebMercatorQuad"))
     {
         /* See http://portal.opengeospatial.org/files/?artifact_id=35326
          * (WMTS 1.0), Annex E.4 */
+        // or https://docs.ogc.org/is/17-083r4/17-083r4.html#toc49
         poTMS->mTitle = "GoogleMapsCompatible";
         poTMS->mIdentifier = "GoogleMapsCompatible";
         poTMS->mCrs = "http://www.opengis.net/def/crs/EPSG/0/3857";
@@ -112,7 +107,72 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
         return poTMS;
     }
 
+    if (EQUAL(fileOrDef, "WorldMercatorWGS84Quad") ||
+        EQUAL(fileOrDef, "http://www.opengis.net/def/tilematrixset/OGC/1.0/"
+                         "WorldMercatorWGS84Quad"))
+    {
+        // See https://docs.ogc.org/is/17-083r4/17-083r4.html#toc51
+        poTMS->mTitle = "WorldMercatorWGS84Quad";
+        poTMS->mIdentifier = "WorldMercatorWGS84Quad";
+        poTMS->mCrs = "http://www.opengis.net/def/crs/EPSG/0/3395";
+        poTMS->mBbox.mCrs = poTMS->mCrs;
+        poTMS->mBbox.mLowerCornerX = -HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mLowerCornerY = -HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mUpperCornerX = HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mUpperCornerY = HALF_CIRCUMFERENCE;
+        poTMS->mWellKnownScaleSet =
+            "http://www.opengis.net/def/wkss/OGC/1.0/WorldMercatorWGS84Quad";
+        for (int i = 0; i <= 30; i++)
+        {
+            TileMatrix tm;
+            tm.mId = CPLSPrintf("%d", i);
+            tm.mResX = 2 * HALF_CIRCUMFERENCE / 256 / (1 << i);
+            tm.mResY = tm.mResX;
+            tm.mScaleDenominator = tm.mResX / 0.28e-3;
+            tm.mTopLeftX = -HALF_CIRCUMFERENCE;
+            tm.mTopLeftY = HALF_CIRCUMFERENCE;
+            tm.mTileWidth = 256;
+            tm.mTileHeight = 256;
+            tm.mMatrixWidth = 1 << i;
+            tm.mMatrixHeight = 1 << i;
+            poTMS->mTileMatrixList.emplace_back(std::move(tm));
+        }
+        return poTMS;
+    }
+
+    if (EQUAL(fileOrDef, "PseudoTMS_GlobalMercator"))
+    {
+        /* See global-mercator at
+           http://wiki.osgeo.org/wiki/Tile_Map_Service_Specification */
+        poTMS->mTitle = "PseudoTMS_GlobalMercator";
+        poTMS->mIdentifier = "PseudoTMS_GlobalMercator";
+        poTMS->mCrs = "http://www.opengis.net/def/crs/EPSG/0/3857";
+        poTMS->mBbox.mCrs = poTMS->mCrs;
+        poTMS->mBbox.mLowerCornerX = -HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mLowerCornerY = -HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mUpperCornerX = HALF_CIRCUMFERENCE;
+        poTMS->mBbox.mUpperCornerY = HALF_CIRCUMFERENCE;
+        for (int i = 0; i <= 29; i++)
+        {
+            TileMatrix tm;
+            tm.mId = CPLSPrintf("%d", i);
+            tm.mResX = HALF_CIRCUMFERENCE / 256 / (1 << i);
+            tm.mResY = tm.mResX;
+            tm.mScaleDenominator = tm.mResX / 0.28e-3;
+            tm.mTopLeftX = -HALF_CIRCUMFERENCE;
+            tm.mTopLeftY = HALF_CIRCUMFERENCE;
+            tm.mTileWidth = 256;
+            tm.mTileHeight = 256;
+            tm.mMatrixWidth = 2 * (1 << i);
+            tm.mMatrixHeight = 2 * (1 << i);
+            poTMS->mTileMatrixList.emplace_back(std::move(tm));
+        }
+        return poTMS;
+    }
+
     if (EQUAL(fileOrDef, "InspireCRS84Quad") ||
+        EQUAL(fileOrDef, "PseudoTMS_GlobalGeodetic") ||
+        EQUAL(fileOrDef, "WorldCRS84Quad") ||
         EQUAL(
             fileOrDef,
             "http://www.opengis.net/def/tilematrixset/OGC/1.0/WorldCRS84Quad"))
@@ -124,8 +184,8 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
         /* See global-geodetic at
          * http://wiki.osgeo.org/wiki/Tile_Map_Service_Specification */
         // See also http://docs.opengeospatial.org/is/17-083r2/17-083r2.html#76
-        poTMS->mTitle = "InspireCRS84Quad";
-        poTMS->mIdentifier = "InspireCRS84Quad";
+        poTMS->mTitle = "WorldCRS84Quad";
+        poTMS->mIdentifier = "WorldCRS84Quad";
         poTMS->mCrs = "http://www.opengis.net/def/crs/OGC/1.3/CRS84";
         poTMS->mBbox.mCrs = poTMS->mCrs;
         poTMS->mBbox.mLowerCornerX = -180;
@@ -149,6 +209,41 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
             tm.mTileWidth = 256;
             tm.mTileHeight = 256;
             tm.mMatrixWidth = 2 * (1 << i);
+            tm.mMatrixHeight = 1 << i;
+            poTMS->mTileMatrixList.emplace_back(std::move(tm));
+        }
+        return poTMS;
+    }
+
+    if (EQUAL(fileOrDef, "GoogleCRS84Quad") ||
+        EQUAL(fileOrDef,
+              "http://www.opengis.net/def/wkss/OGC/1.0/GoogleCRS84Quad"))
+    {
+        /* See http://portal.opengeospatial.org/files/?artifact_id=35326 (WMTS 1.0),
+               Annex E.3 */
+        poTMS->mTitle = "GoogleCRS84Quad";
+        poTMS->mIdentifier = "GoogleCRS84Quad";
+        poTMS->mCrs = "http://www.opengis.net/def/crs/OGC/1.3/CRS84";
+        poTMS->mBbox.mCrs = poTMS->mCrs;
+        poTMS->mBbox.mLowerCornerX = -180;
+        poTMS->mBbox.mLowerCornerY = -90;
+        poTMS->mBbox.mUpperCornerX = 180;
+        poTMS->mBbox.mUpperCornerY = 90;
+        poTMS->mWellKnownScaleSet =
+            "http://www.opengis.net/def/wkss/OGC/1.0/GoogleCRS84Quad";
+        for (int i = 0; i <= 30; i++)
+        {
+            TileMatrix tm;
+            tm.mId = CPLSPrintf("%d", i);
+            tm.mResX = 360. / 256 / (1 << i);
+            tm.mResY = tm.mResX;
+            tm.mScaleDenominator =
+                tm.mResX * (HALF_CIRCUMFERENCE / 180) / 0.28e-3;
+            tm.mTopLeftX = -180;
+            tm.mTopLeftY = 180;
+            tm.mTileWidth = 256;
+            tm.mTileHeight = 256;
+            tm.mMatrixWidth = 1 << i;
             tm.mMatrixHeight = 1 << i;
             poTMS->mTileMatrixList.emplace_back(std::move(tm));
         }
@@ -213,13 +308,46 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
         return nullptr;
     }
 
+    const auto GetCRS = [](const CPLJSONObject &j)
+    {
+        if (j.IsValid())
+        {
+            if (j.GetType() == CPLJSONObject::Type::String)
+                return j.ToString();
+
+            else if (j.GetType() == CPLJSONObject::Type::Object)
+            {
+                std::string osURI = j.GetString("uri");
+                if (!osURI.empty())
+                    return osURI;
+
+                // Quite a bit of confusion around wkt.
+                // See https://github.com/opengeospatial/ogcapi-tiles/issues/170
+                const auto jWKT = j.GetObj("wkt");
+                if (jWKT.GetType() == CPLJSONObject::Type::String)
+                {
+                    std::string osWKT = jWKT.ToString();
+                    if (!osWKT.empty())
+                        return osWKT;
+                }
+                else if (jWKT.GetType() == CPLJSONObject::Type::Object)
+                {
+                    std::string osWKT = jWKT.ToString();
+                    if (!osWKT.empty())
+                        return osWKT;
+                }
+            }
+        }
+        return std::string();
+    };
+
     poTMS->mIdentifier = oRoot.GetString(bIsTMSv2 ? "id" : "identifier");
     poTMS->mTitle = oRoot.GetString("title");
     poTMS->mAbstract = oRoot.GetString(bIsTMSv2 ? "description" : "abstract");
     const auto oBbox = oRoot.GetObj("boundingBox");
     if (oBbox.IsValid())
     {
-        poTMS->mBbox.mCrs = oBbox.GetString("crs");
+        poTMS->mBbox.mCrs = GetCRS(oBbox.GetObj("crs"));
         const auto oLowerCorner = oBbox.GetArray("lowerCorner");
         if (oLowerCorner.IsValid() && oLowerCorner.Size() == 2)
         {
@@ -233,7 +361,7 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
             poTMS->mBbox.mUpperCornerY = oUpperCorner[1].ToDouble(NaN);
         }
     }
-    poTMS->mCrs = oRoot.GetString(bIsTMSv2 ? "crs" : "supportedCRS");
+    poTMS->mCrs = GetCRS(oRoot.GetObj(bIsTMSv2 ? "crs" : "supportedCRS"));
     poTMS->mWellKnownScaleSet = oRoot.GetString("wellKnownScaleSet");
 
     OGRSpatialReference oCrs;
@@ -297,9 +425,41 @@ std::unique_ptr<TileMatrixSet> TileMatrixSet::parse(const char *fileOrDef)
                 tm.mTopLeftY = oTopLeftCorner[1].ToDouble(NaN);
             }
             tm.mTileWidth = oTM.GetInteger("tileWidth");
+            if (tm.mTileWidth <= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined, "Invalid tileWidth: %d",
+                         tm.mTileWidth);
+                return nullptr;
+            }
             tm.mTileHeight = oTM.GetInteger("tileHeight");
+            if (tm.mTileHeight <= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined, "Invalid tileHeight: %d",
+                         tm.mTileHeight);
+                return nullptr;
+            }
+            if (tm.mTileWidth > INT_MAX / tm.mTileHeight)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "tileWidth(%d) x tileHeight(%d) larger than "
+                         "INT_MAX",
+                         tm.mTileWidth, tm.mTileHeight);
+                return nullptr;
+            }
             tm.mMatrixWidth = oTM.GetInteger("matrixWidth");
+            if (tm.mMatrixWidth <= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined, "Invalid matrixWidth: %d",
+                         tm.mMatrixWidth);
+                return nullptr;
+            }
             tm.mMatrixHeight = oTM.GetInteger("matrixHeight");
+            if (tm.mMatrixHeight <= 0)
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Invalid matrixHeight: %d", tm.mMatrixHeight);
+                return nullptr;
+            }
 
             const auto oVariableMatrixWidths = oTM.GetArray(
                 bIsTMSv2 ? "variableMatrixWidths" : "variableMatrixWidth");
@@ -394,6 +554,108 @@ bool TileMatrixSet::hasVariableMatrixWidth() const
         }
     }
     return false;
+}
+
+/************************************************************************/
+/*                            createRaster()                            */
+/************************************************************************/
+
+/* static */
+std::unique_ptr<TileMatrixSet>
+TileMatrixSet::createRaster(int width, int height, int tileSize,
+                            int zoomLevelCount, double dfTopLeftX,
+                            double dfTopLeftY, double dfResXFull,
+                            double dfResYFull, const std::string &crs)
+{
+    CPLAssert(width > 0);
+    CPLAssert(height > 0);
+    CPLAssert(tileSize > 0);
+    CPLAssert(zoomLevelCount > 0);
+    std::unique_ptr<TileMatrixSet> poTMS(new TileMatrixSet());
+    poTMS->mTitle = "raster";
+    poTMS->mIdentifier = "raster";
+    poTMS->mCrs = crs;
+    poTMS->mBbox.mCrs = poTMS->mCrs;
+    poTMS->mBbox.mLowerCornerX = dfTopLeftX;
+    poTMS->mBbox.mLowerCornerY = dfTopLeftY - height * dfResYFull;
+    poTMS->mBbox.mUpperCornerX = dfTopLeftX + width * dfResYFull;
+    poTMS->mBbox.mUpperCornerY = dfTopLeftY;
+    for (int i = 0; i < zoomLevelCount; i++)
+    {
+        TileMatrix tm;
+        tm.mId = CPLSPrintf("%d", i);
+        const int iRev = zoomLevelCount - 1 - i;
+        tm.mResX = dfResXFull * (1 << iRev);
+        tm.mResY = dfResYFull * (1 << iRev);
+        tm.mScaleDenominator = tm.mResX / 0.28e-3;
+        tm.mTopLeftX = poTMS->mBbox.mLowerCornerX;
+        tm.mTopLeftY = poTMS->mBbox.mUpperCornerY;
+        tm.mTileWidth = tileSize;
+        tm.mTileHeight = tileSize;
+        tm.mMatrixWidth = std::max(1, DIV_ROUND_UP(width >> iRev, tileSize));
+        tm.mMatrixHeight = std::max(1, DIV_ROUND_UP(height >> iRev, tileSize));
+        poTMS->mTileMatrixList.emplace_back(std::move(tm));
+    }
+    return poTMS;
+}
+
+/************************************************************************/
+/*                        exportToTMSJsonV1()                           */
+/************************************************************************/
+
+std::string TileMatrixSet::exportToTMSJsonV1() const
+{
+    CPLJSONObject oRoot;
+    oRoot["type"] = "TileMatrixSetType";
+    oRoot["title"] = mTitle;
+    oRoot["identifier"] = mIdentifier;
+    if (!mAbstract.empty())
+        oRoot["abstract"] = mAbstract;
+    if (!std::isnan(mBbox.mLowerCornerX))
+    {
+        CPLJSONObject oBbox;
+        oBbox["type"] = "BoundingBoxType";
+        oBbox["crs"] = mBbox.mCrs;
+        oBbox["lowerCorner"] = {mBbox.mLowerCornerX, mBbox.mLowerCornerY};
+        oBbox["upperCorner"] = {mBbox.mUpperCornerX, mBbox.mUpperCornerY};
+        oRoot["boundingBox"] = std::move(oBbox);
+    }
+    oRoot["supportedCRS"] = mCrs;
+    if (!mWellKnownScaleSet.empty())
+        oRoot["wellKnownScaleSet"] = mWellKnownScaleSet;
+
+    CPLJSONArray oTileMatrices;
+    for (const auto &tm : mTileMatrixList)
+    {
+        CPLJSONObject oTM;
+        oTM["type"] = "TileMatrixType";
+        oTM["identifier"] = tm.mId;
+        oTM["scaleDenominator"] = tm.mScaleDenominator;
+        oTM["topLeftCorner"] = {tm.mTopLeftX, tm.mTopLeftY};
+        oTM["tileWidth"] = tm.mTileWidth;
+        oTM["tileHeight"] = tm.mTileHeight;
+        oTM["matrixWidth"] = tm.mMatrixWidth;
+        oTM["matrixHeight"] = tm.mMatrixHeight;
+
+        if (!tm.mVariableMatrixWidthList.empty())
+        {
+            CPLJSONArray oVariableMatrixWidths;
+            for (const auto &vmw : tm.mVariableMatrixWidthList)
+            {
+                CPLJSONObject oVMW;
+                oVMW["coalesce"] = vmw.mCoalesce;
+                oVMW["minTileRow"] = vmw.mMinTileRow;
+                oVMW["maxTileRow"] = vmw.mMaxTileRow;
+                oVariableMatrixWidths.Add(oVMW);
+            }
+            oTM["variableMatrixWidth"] = oVariableMatrixWidths;
+        }
+
+        oTileMatrices.Add(oTM);
+    }
+    oRoot["tileMatrix"] = oTileMatrices;
+    return CPLString(oRoot.Format(CPLJSONObject::PrettyFormat::Pretty))
+        .replaceAll("\\/", '/');
 }
 
 }  // namespace gdal

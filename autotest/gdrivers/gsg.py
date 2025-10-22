@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Golden Software ASCII and binary grid format.
@@ -9,27 +8,13 @@
 ###############################################################################
 # Copyright (c) 2008, Andrey Kiselev <dron@ak4719.spb.edu>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
-
 import gdaltest
+import pytest
+
+from osgeo import gdal
 
 ###############################################################################
 # Perform simple read tests.
@@ -93,3 +78,40 @@ def test_gsg_8():
 
 
 ###############################################################################
+
+
+@pytest.mark.parametrize(
+    "drv_name,xsize,ysize",
+    [
+        ("GSBG", 2, 1),
+        ("GSBG", 1, 2),
+        ("GSBG", 2, 32768),
+        ("GSBG", 32768, 2),
+        ("GS7BG", 2, 1),
+        ("GS7BG", 1, 2),
+        ("GS7BG", 2, (1 << 31) - 1),
+        ("GS7BG", (1 << 31) - 1, 2),
+    ],
+)
+def test_gsg_create_wrong_dims(tmp_vsimem, drv_name, xsize, ysize):
+
+    with pytest.raises(Exception):
+        gdal.GetDriverByName(drv_name).Create(tmp_vsimem / "out", xsize, ysize)
+
+
+@pytest.mark.parametrize(
+    "drv_name,xsize,ysize",
+    [
+        ("GSBG", 2, 1),
+        ("GSBG", 1, 2),
+        ("GSBG", 2, 32768),
+        ("GSBG", 32768, 2),
+        ("GS7BG", 2, 1),
+        ("GS7BG", 1, 2),
+    ],
+)
+def test_gsg_createcopy_wrong_dims(tmp_vsimem, drv_name, xsize, ysize):
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", xsize, ysize)
+    with pytest.raises(Exception):
+        gdal.GetDriverByName(drv_name).CreateCopy(tmp_vsimem / "out", src_ds)

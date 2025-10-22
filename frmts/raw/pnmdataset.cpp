@@ -8,27 +8,12 @@
  * Copyright (c) 2001, Frank Warmerdam
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "rawdataset.h"
 
 #include <algorithm>
@@ -42,20 +27,20 @@
 
 class PNMDataset final : public RawDataset
 {
-    VSILFILE *fpImage;  // Image data file.
+    VSILFILE *fpImage = nullptr;  // Image data file.
 
-    bool bGeoTransformValid;
-    double adfGeoTransform[6];
+    bool bGeoTransformValid{};
+    GDALGeoTransform m_gt{};
 
     CPL_DISALLOW_COPY_ASSIGN(PNMDataset)
 
     CPLErr Close() override;
 
   public:
-    PNMDataset();
+    PNMDataset() = default;
     ~PNMDataset() override;
 
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     static int Identify(GDALOpenInfo *);
     static GDALDataset *Open(GDALOpenInfo *);
@@ -63,20 +48,6 @@ class PNMDataset final : public RawDataset
                                int nBandsIn, GDALDataType eType,
                                char **papszOptions);
 };
-
-/************************************************************************/
-/*                            PNMDataset()                             */
-/************************************************************************/
-
-PNMDataset::PNMDataset() : fpImage(nullptr), bGeoTransformValid(false)
-{
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
-}
 
 /************************************************************************/
 /*                            ~PNMDataset()                            */
@@ -119,12 +90,12 @@ CPLErr PNMDataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr PNMDataset::GetGeoTransform(double *padfTransform)
+CPLErr PNMDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (bGeoTransformValid)
     {
-        memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+        gt = m_gt;
         return CE_None;
     }
 
@@ -296,8 +267,8 @@ GDALDataset *PNMDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Check for world file.                                           */
     /* -------------------------------------------------------------------- */
-    poDS->bGeoTransformValid = CPL_TO_BOOL(GDALReadWorldFile(
-        poOpenInfo->pszFilename, ".wld", poDS->adfGeoTransform));
+    poDS->bGeoTransformValid = CPL_TO_BOOL(
+        GDALReadWorldFile(poOpenInfo->pszFilename, ".wld", poDS->m_gt.data()));
 
     /* -------------------------------------------------------------------- */
     /*      Initialize any PAM information.                                 */
@@ -344,7 +315,7 @@ GDALDataset *PNMDataset::Create(const char *pszFilename, int nXSize, int nYSize,
 
         return nullptr;
     }
-    const CPLString osExt(CPLGetExtension(pszFilename));
+    const CPLString osExt(CPLGetExtensionSafe(pszFilename));
     if (nBandsIn == 1)
     {
         if (!EQUAL(osExt, "PGM"))

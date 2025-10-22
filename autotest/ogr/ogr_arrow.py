@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test functionality for OGR Arrow driver.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2022, Planet Labs
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
@@ -34,6 +17,7 @@ import math
 
 import gdaltest
 import pytest
+import test_cli_utilities
 
 from osgeo import gdal, ogr, osr
 
@@ -569,7 +553,7 @@ def test_ogr_arrow_read_arrow_json_extension():
     stream = lyr.GetArrowStream()
     schema = stream.GetSchema()
 
-    dst_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    dst_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     dst_lyr = dst_ds.CreateLayer("test")
     success, error_msg = dst_lyr.IsArrowSchemaSupported(schema)
     assert success
@@ -793,4 +777,208 @@ def test_ogr_arrow_vsi_arrow_file_system():
     if version < 16:
         pytest.skip("requires Arrow >= 16.0.0")
 
-    ogr.Open("vsi://data/arrow/test.feather")
+    ogr.Open("gdalvsi://data/arrow/test.feather")
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_arrow_string_view():
+
+    version = int(
+        ogr.GetDriverByName("ARROW").GetMetadataItem("ARROW_VERSION").split(".")[0]
+    )
+    if version < 15:
+        pytest.skip("requires Arrow >= 15")
+
+    with ogr.Open("data/arrow/stringview.feather") as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f["stringview"] == "foo"
+        assert f["list_stringview"] is None
+        assert f["list_of_list_stringview"] is None
+        assert f["map_stringview"] is None
+
+        f = lyr.GetNextFeature()
+        assert f["stringview"] == "bar"
+        assert f["list_stringview"] == [""]
+        assert f["list_of_list_stringview"] == "[null]"
+        assert f["map_stringview"] == "{}"
+
+        f = lyr.GetNextFeature()
+        assert f["stringview"] == "looooooooooong string"
+        assert f["list_stringview"] == ["foo", "bar", "looooooooooong string"]
+        assert f["list_of_list_stringview"] == '[["foo","bar","looooooooooong string"]]'
+        assert f["map_stringview"] == '{"x":"x_val","y":null}'
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_arrow_binary_view():
+
+    version = int(
+        ogr.GetDriverByName("ARROW").GetMetadataItem("ARROW_VERSION").split(".")[0]
+    )
+    if version < 15:
+        pytest.skip("requires Arrow >= 15")
+
+    with ogr.Open("data/arrow/binaryview.feather") as ds:
+        lyr = ds.GetLayer(0)
+        f = lyr.GetNextFeature()
+        assert f.GetFieldAsBinary("binaryview") == b"foo"
+        f = lyr.GetNextFeature()
+        assert f.GetFieldAsBinary("binaryview") == b"bar"
+        f = lyr.GetNextFeature()
+        assert f.GetFieldAsBinary("binaryview") == b"looooooooooong binary"
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.parametrize(
+    "geom_type,encoding,expected_arrow_type",
+    [
+        (
+            ogr.wkbPoint,
+            "GEOARROW_STRUCT",
+            "struct<x: double not null, y: double not null>",
+        ),
+        (
+            ogr.wkbPoint,
+            "GEOARROW_INTERLEAVED",
+            "fixed_size_list<xy: double not null>[2]",
+        ),
+        (
+            ogr.wkbLineString,
+            "GEOARROW_STRUCT",
+            "list<vertices: struct<x: double not null, y: double not null>>",
+        ),
+        (
+            ogr.wkbLineString,
+            "GEOARROW_INTERLEAVED",
+            "list<vertices: fixed_size_list<xy: double not null>[2]>",
+        ),
+        (
+            ogr.wkbPolygon,
+            "GEOARROW_STRUCT",
+            "list<rings: list<vertices: struct<x: double not null, y: double not null>>>",
+        ),
+        (
+            ogr.wkbPolygon,
+            "GEOARROW_INTERLEAVED",
+            "list<rings: list<vertices: fixed_size_list<xy: double not null>[2]>>",
+        ),
+        (
+            ogr.wkbMultiPoint,
+            "GEOARROW_STRUCT",
+            "list<points: struct<x: double not null, y: double not null>>",
+        ),
+        (
+            ogr.wkbMultiPoint,
+            "GEOARROW_INTERLEAVED",
+            "list<points: fixed_size_list<xy: double not null>[2]>",
+        ),
+        (
+            ogr.wkbMultiLineString,
+            "GEOARROW_STRUCT",
+            "list<linestrings: list<vertices: struct<x: double not null, y: double not null>>>",
+        ),
+        (
+            ogr.wkbMultiLineString,
+            "GEOARROW_INTERLEAVED",
+            "list<linestrings: list<vertices: fixed_size_list<xy: double not null>[2]>>",
+        ),
+        (
+            ogr.wkbMultiPolygon,
+            "GEOARROW_STRUCT",
+            "list<polygons: list<rings: list<vertices: struct<x: double not null, y: double not null>>>>",
+        ),
+        (
+            ogr.wkbMultiPolygon,
+            "GEOARROW_INTERLEAVED",
+            "list<polygons: list<rings: list<vertices: fixed_size_list<xy: double not null>[2]>>>",
+        ),
+    ],
+)
+def test_ogr_arrow_check_geoarrow_types(
+    tmp_path, geom_type, encoding, expected_arrow_type
+):
+    pytest.importorskip("pyarrow")
+    import pyarrow.feather
+
+    filename = str(tmp_path / "out.feather")
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    with ogr.GetDriverByName("ARROW").CreateDataSource(filename) as ds:
+        ds.CreateLayer(
+            "test",
+            geom_type=geom_type,
+            srs=srs,
+            options=["GEOMETRY_ENCODING=" + encoding],
+        )
+
+    schema = pyarrow.feather.read_table(filename).schema
+    assert str(schema.field("geometry").type) == expected_arrow_type
+
+
+###############################################################################
+
+
+def _parquet_has_geo_types():
+    drv = gdal.GetDriverByName("Parquet")
+    return drv is not None and "USE_PARQUET_GEO_TYPES" in drv.GetMetadataItem(
+        "DS_LAYER_CREATIONOPTIONLIST"
+    )
+
+
+###############################################################################
+# Test files from https://github.com/geoarrow/geoarrow-data/tree/main/example-crs/files
+
+
+@pytest.mark.skipif(
+    not _parquet_has_geo_types(),
+    reason="requires libarrow >= 21",
+)
+@pytest.mark.parametrize(
+    "filename,crs_name",
+    [
+        ("example-crs_vermont-4326_wkb.arrows", "WGS 84"),  # uses PROJJSON
+        ("example-crs_vermont-crs84-auth-code_wkb.arrows", "WGS 84"),
+        ("example-crs_vermont-crs84-wkt2_wkb.arrows", "WGS 84"),
+        ("example-crs_vermont-utm_wkb.arrows", "WGS 84 / UTM zone 18N"),
+    ],
+)
+def test_ogr_arrow_with_geoarrow_wkb_but_no_geo_metadata(filename, crs_name):
+
+    ds = ogr.Open("data/arrow/geoarrow_crs/" + filename)
+    lyr = ds.GetLayer(0)
+    assert lyr.GetGeomType() == ogr.wkbPolygon
+    assert lyr.GetSpatialRef().GetName() == crs_name
+
+
+###############################################################################
+
+
+@pytest.mark.skipif(
+    not _parquet_has_geo_types(),
+    reason="requires libarrow >= 21",
+)
+def test_ogr_arrow_convert_from_geoarrow_wkb_with_extension_loaded(tmp_path):
+
+    ogr2ogr_path = test_cli_utilities.get_ogr2ogr_path()
+    if ogr2ogr_path is None:
+        pytest.skip("ogr2ogr unavailable")
+
+    (_, err) = gdaltest.runexternal_out_and_err(
+        ogr2ogr_path
+        + f" {tmp_path}/out.feather data/arrow/from_paleolimbot_geoarrow/geometrycollection-default.feather -lco GEOMETRY_ENCODING=WKB -a_srs EPSG:4326 --config OGR_ARROW_REGISTER_GEOARROW_WKB_EXTENSION=YES"
+    )
+    assert err == ""
+
+    with gdal.OpenEx(tmp_path / "out.feather") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 9

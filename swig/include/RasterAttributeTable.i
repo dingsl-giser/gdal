@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     RAT.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2007, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 //************************************************************************
@@ -40,9 +23,12 @@ typedef int GDALRATTableType;
 #else
 %rename (RATFieldType) GDALRATFieldType;
 typedef enum {
-    /*! Integer field */	   	   GFT_Integer ,
-    /*! Floating point (double) field */   GFT_Real,
-    /*! String field */                    GFT_String
+    /*! Integer field */                         GFT_Integer,
+    /*! Floating point (double) field */         GFT_Real,
+    /*! String field */                          GFT_String,
+    /*! Boolean field (GDAL >= 3.12) */          GFT_Boolean,
+    /*! DateTime field (GDAL >= 3.12) */         GFT_DateTime,
+    /*! Geometry field, as WKB (GDAL >= 3.12) */ GFT_WKBGeometry
 } GDALRATFieldType;
 
 %rename (RATFieldUsage) GDALRATFieldUsage;
@@ -74,6 +60,22 @@ typedef enum {
     /*! Athematic table type */           GRTT_ATHEMATIC
 } GDALRATTableType;
 #endif /* CSHARP */
+
+%rename (RATDateTime) GDALRATDateTime;
+
+typedef struct
+{
+    /*! Year */ int nYear;
+    /*! Month [1, 12] */ int nMonth;
+    /*! Day [1, 31] */ int nDay;
+    /*! Hour [0, 23] */ int nHour;
+    /*! Minute [0, 59] */ int nMinute;
+    /*! Second [0, 61) */ float fSecond;
+    /*! Time zone hour [0, 23] */ int nTimeZoneHour;
+    /*! Time zone minute: 0, 15, 30, 45 */ int nTimeZoneMinute;
+    /*! Whether time zone is positive (or null) */ bool bPositiveTimeZone;
+    /*! Whether this object is valid */ bool bIsValid;
+} GDALRATDateTime;
 
 %rename (RasterAttributeTable) GDALRasterAttributeTableShadow;
 
@@ -134,7 +136,29 @@ public:
         return GDALRATGetValueAsDouble( self, iRow, iCol );
     }
 
+    bool GetValueAsBoolean( int iRow, int iCol ) {
+        return GDALRATGetValueAsBoolean( self, iRow, iCol );
+    }
+
+    GDALRATDateTime GetValueAsDateTime( int iRow, int iCol ) {
+        GDALRATDateTime dt;
+        GDALRATGetValueAsDateTime( self, iRow, iCol, &dt );
+        return dt;
+    }
+
 #if defined(SWIGPYTHON)
+    CPLErr GetValueAsWKBGeometry( int iRow, int iCol, size_t *nLen, char **pBuf) {
+        const void* pRet = GDALRATGetValueAsWKBGeometry( self, iRow, iCol, nLen );
+        *pBuf = (char*)VSIMalloc(*nLen);
+        if (*nLen)
+            memcpy(*pBuf, pRet, *nLen);
+        return CE_None;
+    }
+
+    CPLErr SetValueAsWKBGeometry( int iRow, int iCol, int nLen, char *pBuf) {
+        return GDALRATSetValueAsWKBGeometry(self, iRow, iCol, pBuf, nLen);
+    }
+
     CPLErr ReadValuesIOAsString( int iField, int iStartRow, int iLength, char **ppszData ) {
         return GDALRATValuesIOAsString(self, GF_Read, iField, iStartRow, iLength, ppszData);
     }
@@ -145,6 +169,10 @@ public:
 
     CPLErr ReadValuesIOAsDouble( int iField, int iStartRow, int iLength, double *pdfData ) {
         return GDALRATValuesIOAsDouble(self, GF_Read, iField, iStartRow, iLength, pdfData);
+    }
+
+    CPLErr ReadValuesIOAsBoolean( int iField, int iStartRow, int iLength, bool *pbData ) {
+        return GDALRATValuesIOAsBoolean(self, GF_Read, iField, iStartRow, iLength, pbData);
     }
 #endif
 
@@ -162,6 +190,14 @@ public:
         GDALRATSetValueAsDouble( self, iRow, iCol, dfValue );
     }
 
+    void SetValueAsBoolean( int iRow, int iCol, bool value ) {
+        GDALRATSetValueAsBoolean( self, iRow, iCol, value );
+    }
+
+    void SetValueAsDateTime( int iRow, int iCol, GDALRATDateTime value ) {
+        GDALRATSetValueAsDateTime( self, iRow, iCol, &value );
+    }
+
     void SetRowCount( int nCount ) {
         GDALRATSetRowCount( self, nCount );
     }
@@ -171,7 +207,6 @@ public:
         return GDALRATCreateColumn( self, pszName, eType, eUsage );
     }
 
-    /* Interface method added for GDAL 1.7.0 */
     %apply (double *OUTPUT){double *pdfRow0Min, double *pdfBinSize};
     bool GetLinearBinning( double *pdfRow0Min, double *pdfBinSize )
     {
@@ -179,7 +214,6 @@ public:
     }
     %clear double *pdfRow0Min, double *pdfBinSize;
 
-    /* Interface method added for GDAL 1.7.0 */
     int	SetLinearBinning (double dfRow0Min, double dfBinSize)
     {
         return GDALRATSetLinearBinning(self, dfRow0Min, dfBinSize);

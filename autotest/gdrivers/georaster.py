@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  GeoRaster Testing.
@@ -9,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2008, Ivan Lucena <ivan.lucena@pmldnet.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -503,6 +486,38 @@ def test_georaster_genstats():
             "INSERT=(1014, sdo_geor.init('GDAL_TEST_RDT',1014))",
             "NBITS=4",
             "GENSTATS=TRUE",
+        ],
+    )
+
+    ds_name = ds.GetDescription()
+
+    ds = None
+
+    tst = gdaltest.GDALTest("GeoRaster", ds_name, 1, 2578, filename_absolute=1)
+
+    tst.testOpen()
+
+
+###############################################################################
+#
+
+
+def test_georaster_pool():
+    if gdaltest.oci_ds is None:
+        pytest.skip()
+
+    ds_src = gdal.Open("data/byte.tif")
+
+    ds = gdaltest.georasterDriver.CreateCopy(
+        get_connection_str() + ",GDAL_TEST,RASTER",
+        ds_src,
+        1,
+        [
+            "DESCRIPTION=(id number, raster sdo_georaster)",
+            "INSERT=(1015, sdo_geor.init('GDAL_TEST_RDT',1015))",
+            "NBITS=4",
+            "POOL=TRUE",
+            "POOL_SESSMAX=5",
         ],
     )
 

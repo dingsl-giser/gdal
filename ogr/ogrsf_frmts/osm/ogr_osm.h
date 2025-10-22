@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Private definitions for OGR/OpenStreeMap driver.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_OSM_H_INCLUDED
@@ -148,33 +131,30 @@ class OGROSMLayer final : public OGRLayer
 
   public:
     OGROSMLayer(OGROSMDataSource *m_poDS, int m_nIdxLayer, const char *pszName);
-    virtual ~OGROSMLayer();
+    ~OGROSMLayer() override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    using OGRLayer::GetLayerDefn;
+
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
 
-    virtual void ResetReading() override;
-    virtual int TestCapability(const char *) override;
+    void ResetReading() override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRFeature *GetNextFeature() override;
+    OGRFeature *GetNextFeature() override;
 
     OGRFeature *MyGetNextFeature(OGROSMLayer **ppoNewCurLayer,
                                  GDALProgressFunc pfnProgress,
                                  void *pProgressData);
 
-    virtual GIntBig GetFeatureCount(int bForce) override;
+    GIntBig GetFeatureCount(int bForce) override;
 
-    virtual OGRErr SetAttributeFilter(const char *pszAttrQuery) override;
+    OGRErr SetAttributeFilter(const char *pszAttrQuery) override;
 
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
     const OGREnvelope *GetSpatialFilterEnvelope();
 
@@ -387,12 +367,11 @@ typedef struct
 } CollisionBucket;
 #endif
 
-class OGROSMDataSource final : public OGRDataSource
+class OGROSMDataSource final : public GDALDataset
 {
     friend class OGROSMLayer;
 
     std::vector<std::unique_ptr<OGROSMLayer>> m_apoLayers{};
-    char *m_pszName = nullptr;
 
     std::string m_osConfigFile{};
 
@@ -584,28 +563,23 @@ class OGROSMDataSource final : public OGRDataSource
 
   public:
     OGROSMDataSource();
-    virtual ~OGROSMDataSource();
+    ~OGROSMDataSource() override;
 
-    virtual const char *GetName() override
-    {
-        return m_pszName;
-    }
-
-    virtual int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    virtual OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRLayer *ExecuteSQL(const char *pszSQLCommand,
-                                 OGRGeometry *poSpatialFilter,
-                                 const char *pszDialect) override;
-    virtual void ReleaseResultSet(OGRLayer *poLayer) override;
+    OGRLayer *ExecuteSQL(const char *pszSQLCommand,
+                         OGRGeometry *poSpatialFilter,
+                         const char *pszDialect) override;
+    void ReleaseResultSet(OGRLayer *poLayer) override;
 
-    virtual void ResetReading() override;
+    void ResetReading() override;
     virtual OGRFeature *GetNextFeature(OGRLayer **ppoBelongingLayer,
                                        double *pdfProgressPct,
                                        GDALProgressFunc pfnProgress,
@@ -616,7 +590,7 @@ class OGROSMDataSource final : public OGRDataSource
     int MyResetReading();
     bool ParseNextChunk(int nIdxLayer, GDALProgressFunc pfnProgress,
                         void *pProgressData);
-    OGRErr GetExtent(OGREnvelope *psExtent);
+    OGRErr GetNativeExtent(OGREnvelope *psExtent);
     int IsInterleavedReading();
 
     void NotifyNodes(unsigned int nNodes, const OSMNode *pasNodes);

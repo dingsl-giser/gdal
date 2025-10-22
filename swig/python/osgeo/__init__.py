@@ -42,7 +42,7 @@ python_version = tuple(version_info)[:3]
 
 # Setting this flag to True will cause importing osgeo to fail on an unsupported Python version.
 # Otherwise a deprecation warning will be issued instead.
-# Importing osgeo fom an unsupported Python version might still partially work
+# Importing osgeo from an unsupported Python version might still partially work
 # because the core of GDAL Python bindings might still support an older Python version.
 # Hence the default option to just issue a warning.
 # To get complete functionality upgrading to the minimum supported version is needed.
@@ -93,8 +93,7 @@ if python_version < minimum_supported_python_version_for_this_gdal_version:
     if fail_on_unsupported_version:
         raise Exception(msg)
     else:
-        from warnings import warn, simplefilter
-        simplefilter('always', DeprecationWarning)
+        from warnings import warn
         warn(msg, DeprecationWarning)
 elif this_python_version_will_be_deprecated_in_gdal_version:
     msg = 'You are using Python {} with GDAL {}. ' \
@@ -106,6 +105,5 @@ elif this_python_version_will_be_deprecated_in_gdal_version:
                ver_str(next_version_of_gdal_will_use_python_version),
                ver_str(this_python_version_will_be_deprecated_in_gdal_version))
 
-    from warnings import warn, simplefilter
-    simplefilter('always', DeprecationWarning)
+    from warnings import warn
     warn(msg, DeprecationWarning)

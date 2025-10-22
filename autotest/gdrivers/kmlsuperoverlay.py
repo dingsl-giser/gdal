@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test write functionality for KMLSUPEROVERLAY driver.
@@ -10,27 +9,12 @@
 ###############################################################################
 # Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
 import shutil
+import sys
 
 import gdaltest
 import pytest
@@ -84,14 +68,17 @@ def test_kmlsuperoverlay_2():
 # Test CreateCopy() to a KML file
 
 
-def test_kmlsuperoverlay_3():
+def test_kmlsuperoverlay_3(tmp_path):
 
     src_ds = gdal.Open("data/utm.tif")
-    ds = gdal.GetDriverByName("KMLSUPEROVERLAY").CreateCopy("tmp/tmp.kml", src_ds)
+    out_filename = tmp_path / "tmp.kml"
+    if sys.platform == "win32" and "\\" in str(out_filename):
+        out_filename = "\\\\?\\" + str(out_filename)
+    ds = gdal.GetDriverByName("KMLSUPEROVERLAY").CreateCopy(out_filename, src_ds)
     del ds
     src_ds = None
 
-    f = gdal.VSIFOpenL("tmp/tmp.kml", "rb")
+    f = gdal.VSIFOpenL(out_filename, "rb")
     if f:
         data = gdal.VSIFReadL(1, 10000, f).decode("ascii")
         gdal.VSIFCloseL(f)
@@ -100,33 +87,37 @@ def test_kmlsuperoverlay_3():
     assert "<east>-117.309" in data, data
     assert "<west>-117.639" in data, data
 
-    filelist = [
-        "tmp/0/0/0.jpg",
-        "tmp/0/0/0.kml",
-        "tmp/1/0/0.jpg",
-        "tmp/1/0/0.kml",
-        "tmp/1/0/1.jpg",
-        "tmp/1/0/1.kml",
-        "tmp/1/1/0.jpg",
-        "tmp/1/1/0.kml",
-        "tmp/1/1/1.jpg",
-        "tmp/1/1/1.kml",
-        "tmp/tmp.kml",
-    ]
-    for filename in filelist:
-        try:
-            os.remove(filename)
-        except OSError:
-            pytest.fail("Missing file: %s" % filename)
-
-    shutil.rmtree("tmp/0")
-    shutil.rmtree("tmp/1")
+    lst = [x.replace("\\", "/") for x in gdal.ReadDirRecursive(tmp_path)]
+    assert set(lst) == set(
+        [
+            "0/",
+            "0/0/",
+            "0/0/0.jpg",
+            "0/0/0.kml",
+            "1/",
+            "1/0/",
+            "1/0/0.jpg",
+            "1/0/0.kml",
+            "1/0/1.jpg",
+            "1/0/1.kml",
+            "1/1/",
+            "1/1/0.jpg",
+            "1/1/0.kml",
+            "1/1/1.jpg",
+            "1/1/1.kml",
+            "tmp.kml",
+        ]
+    )
 
 
 ###############################################################################
 # Test overviews
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_kmlsuperoverlay_4():
 
     vrt_xml = """<VRTDataset rasterXSize="800" rasterYSize="400">
@@ -231,6 +222,10 @@ def test_kmlsuperoverlay_4():
 # Test that a raster which crosses the anti-meridian will be able to be displayed correctly (#4528)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_kmlsuperoverlay_5():
 
     from xml.etree import ElementTree
@@ -398,6 +393,10 @@ def test_kmlsuperoverlay_gx_latlonquad():
 # KML/PNG files in transparent areas
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_kmlsuperoverlay_8():
 
     # a large raster with actual data on each end and blank space in between

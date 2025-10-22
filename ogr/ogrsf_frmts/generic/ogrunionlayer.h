@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  OpenGIS Simple Features Reference Implementation
  * Purpose:  Defines OGRUnionLayer class
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGRUNIONLAYER_H_INCLUDED
@@ -33,6 +16,10 @@
 #ifndef DOXYGEN_SKIP
 
 #include "ogrsf_frmts.h"
+
+#include <algorithm>
+#include <mutex>
+#include <utility>
 
 /************************************************************************/
 /*                      OGRUnionLayerGeomFieldDefn                      */
@@ -49,7 +36,7 @@ class CPL_DLL OGRUnionLayerGeomFieldDefn final : public OGRGeomFieldDefn
     explicit OGRUnionLayerGeomFieldDefn(const OGRGeomFieldDefn *poSrc);
     explicit OGRUnionLayerGeomFieldDefn(
         const OGRUnionLayerGeomFieldDefn *poSrc);
-    ~OGRUnionLayerGeomFieldDefn();
+    ~OGRUnionLayerGeomFieldDefn() override;
 };
 
 /************************************************************************/
@@ -66,40 +53,83 @@ typedef enum
 
 class CPL_DLL OGRUnionLayer final : public OGRLayer
 {
+  private:
     CPL_DISALLOW_COPY_ASSIGN(OGRUnionLayer)
 
-  protected:
-    CPLString osName;
-    int nSrcLayers;
-    OGRLayer **papoSrcLayers;
-    int bHasLayerOwnership;
+    struct Layer
+    {
+        std::unique_ptr<OGRLayer> poLayerKeeper{};
+        OGRLayer *poLayer = nullptr;
+        bool bModified = false;
+        bool bCheckIfAutoWrap = false;
 
-    OGRFeatureDefn *poFeatureDefn;
-    int nFields;
-    OGRFieldDefn **papoFields;
-    int nGeomFields;
-    OGRUnionLayerGeomFieldDefn **papoGeomFields;
-    FieldUnionStrategy eFieldStrategy;
+        CPL_DISALLOW_COPY_ASSIGN(Layer)
+
+        Layer(OGRLayer *poLayerIn, bool bOwnedIn)
+            : poLayerKeeper(bOwnedIn ? poLayerIn : nullptr),
+              poLayer(bOwnedIn ? poLayerKeeper.get() : poLayerIn)
+        {
+        }
+
+        Layer(Layer &&) = default;
+        Layer &operator=(Layer &&) = default;
+
+        OGRLayer *operator->()
+        {
+            return poLayer;
+        }
+
+        const OGRLayer *operator->() const
+        {
+            return poLayer;
+        }
+
+        std::pair<OGRLayer *, bool> release()
+        {
+            const bool bOwnedBackup = poLayerKeeper != nullptr;
+            OGRLayer *poLayerBackup =
+                poLayerKeeper ? poLayerKeeper.release() : poLayer;
+            poLayerKeeper.reset();
+            return std::make_pair(poLayerBackup, bOwnedBackup);
+        }
+
+        void reset(std::unique_ptr<OGRLayer> poLayerIn)
+        {
+            poLayerKeeper = std::move(poLayerIn);
+            poLayer = poLayerKeeper.get();
+        }
+    };
+
+    CPLString osName{};
+
+    std::vector<Layer> m_apoSrcLayers{};
+
+    mutable OGRFeatureDefn *poFeatureDefn = nullptr;
+    int nFields = 0;
+    OGRFieldDefn **papoFields = nullptr;
+    int nGeomFields = 0;
+    OGRUnionLayerGeomFieldDefn **papoGeomFields = nullptr;
+    FieldUnionStrategy eFieldStrategy = FIELD_UNION_ALL_LAYERS;
     CPLString osSourceLayerFieldName{};
 
-    int bPreserveSrcFID;
+    int bPreserveSrcFID = false;
 
-    GIntBig nFeatureCount;
+    GIntBig nFeatureCount = -1;
 
-    int iCurLayer;
-    char *pszAttributeFilter;
-    int nNextFID;
-    int *panMap;
+    int iCurLayer = -1;
+    char *pszAttributeFilter = nullptr;
+    int nNextFID = 0;
+    int *panMap = nullptr;
     CPLStringList m_aosIgnoredFields{};
-    int bAttrFilterPassThroughValue;
-    int *pabModifiedLayers;
-    int *pabCheckIfAutoWrap;
-    const OGRSpatialReference *poGlobalSRS;
+    mutable int bAttrFilterPassThroughValue = -1;
+    mutable const OGRSpatialReference *poGlobalSRS = nullptr;
+
+    std::mutex m_oMutex{};
 
     void AutoWarpLayerIfNecessary(int iSubLayer);
     OGRFeature *TranslateFromSrcLayer(OGRFeature *poSrcFeature);
     void ApplyAttributeFilterToSrcLayer(int iSubLayer);
-    int GetAttrFilterPassThroughValue();
+    int GetAttrFilterPassThroughValue() const;
     void ConfigureActiveLayer();
     void SetSpatialFilterToSourceLayer(OGRLayer *poSrcLayer);
 
@@ -111,7 +141,7 @@ class CPL_DLL OGRUnionLayer final : public OGRLayer
                                ownership depending on bTakeLayerOwnership */
         int bTakeLayerOwnership);
 
-    virtual ~OGRUnionLayer();
+    ~OGRUnionLayer() override;
 
     /* All the following non virtual methods must be called just after the
      * constructor */
@@ -126,23 +156,23 @@ class CPL_DLL OGRUnionLayer final : public OGRLayer
     void SetPreserveSrcFID(int bPreserveSrcFID);
     void SetFeatureCount(int nFeatureCount);
 
-    virtual const char *GetName() override
+    const char *GetName() const override
     {
         return osName.c_str();
     }
 
-    virtual OGRwkbGeometryType GetGeomType() override;
+    OGRwkbGeometryType GetGeomType() const override;
 
-    virtual void ResetReading() override;
-    virtual OGRFeature *GetNextFeature() override;
+    void ResetReading() override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual OGRFeature *GetFeature(GIntBig nFeatureId) override;
+    OGRFeature *GetFeature(GIntBig nFeatureId) override;
 
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
-    virtual OGRErr ISetFeature(OGRFeature *poFeature) override;
+    OGRErr ISetFeature(OGRFeature *poFeature) override;
 
-    virtual OGRErr IUpsertFeature(OGRFeature *poFeature) override;
+    OGRErr IUpsertFeature(OGRFeature *poFeature) override;
 
     OGRErr IUpdateFeature(OGRFeature *poFeature, int nUpdatedFieldsCount,
                           const int *panUpdatedFieldsIdx,
@@ -150,26 +180,25 @@ class CPL_DLL OGRUnionLayer final : public OGRLayer
                           const int *panUpdatedGeomFieldsIdx,
                           bool bUpdateStyleString) override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    virtual OGRSpatialReference *GetSpatialRef() override;
+    const OGRSpatialReference *GetSpatialRef() const override;
 
-    virtual GIntBig GetFeatureCount(int) override;
+    GIntBig GetFeatureCount(int) override;
 
-    virtual OGRErr SetAttributeFilter(const char *) override;
+    OGRErr SetAttributeFilter(const char *) override;
 
-    virtual int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce = TRUE) override;
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) override;
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
-    virtual void SetSpatialFilter(OGRGeometry *poGeomIn) override;
-    virtual void SetSpatialFilter(int iGeomField, OGRGeometry *) override;
+    virtual OGRErr ISetSpatialFilter(int iGeomField,
+                                     const OGRGeometry *) override;
 
-    virtual OGRErr SetIgnoredFields(CSLConstList papszFields) override;
+    OGRErr SetIgnoredFields(CSLConstList papszFields) override;
 
-    virtual OGRErr SyncToDisk() override;
+    OGRErr SyncToDisk() override;
 };
 
 #endif /* #ifndef DOXYGEN_SKIP */

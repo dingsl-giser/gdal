@@ -8,23 +8,7 @@
  * Copyright (c) 2013, Paul Ramsey <pramsey@boundlessgeo.com>
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_geopackage.h"
@@ -33,6 +17,7 @@
 #include "ogr_p.h"
 #include "ogr_recordbatch.h"
 #include "ograrrowarrayhelper.h"
+#include "ogrlayerarrow.h"
 
 /************************************************************************/
 /*                      OGRGeoPackageLayer()                            */
@@ -299,11 +284,11 @@ bool OGRGeoPackageLayer::ParseDateTimeField(const char *pszTxt,
         return false;
     }
 
-    const size_t nLen = strlen(pszTxt);
+    std::string_view sInput(pszTxt);
 
-    if (OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(pszTxt, nLen, psField) ||
-        OGRParseDateTimeYYYYMMDDTHHMMSSZ(pszTxt, nLen, psField) ||
-        OGRParseDateTimeYYYYMMDDTHHMMZ(pszTxt, nLen, psField))
+    if (OGRParseDateTimeYYYYMMDDTHHMMSSsssZ(sInput, psField) ||
+        OGRParseDateTimeYYYYMMDDTHHMMSSZ(sInput, psField) ||
+        OGRParseDateTimeYYYYMMDDTHHMMZ(sInput, psField))
     {
         // nominal format is YYYYMMDDTHHMMSSsssZ before GeoPackage 1.4
         // GeoPackage 1.4 also accepts omission of seconds and milliseconds
@@ -359,7 +344,7 @@ OGRFeature *OGRGeoPackageLayer::TranslateFeature(sqlite3_stmt *hStmt)
         poFeature->SetFID(sqlite3_column_int64(hStmt, m_iFIDCol));
         if (m_pszFidColumn == nullptr && poFeature->GetFID() == 0)
         {
-            // Miht be the case for views with joins.
+            // Might be the case for views with joins.
             poFeature->SetFID(m_iNextShapeId);
         }
     }
@@ -565,6 +550,9 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
     struct tm brokenDown;
     memset(&brokenDown, 0, sizeof(brokenDown));
+
+    const bool bDateTimeAsString = m_aosArrowArrayStreamOptions.FetchBool(
+        GAS_OPT_DATETIME_AS_STRING, false);
 
     const uint32_t nMemLimit = OGRArrowArrayHelper::GetMemLimit();
     int iFeat = 0;
@@ -861,15 +849,23 @@ int OGRGeoPackageLayer::GetNextArrowArray(struct ArrowArrayStream *stream,
 
                 case OFTDateTime:
                 {
-                    OGRField ogrField;
-                    if (ParseDateTimeField(hStmt, iRawField, nSqlite3ColType,
-                                           &ogrField, poFieldDefn, nFID))
+                    if (!bDateTimeAsString)
                     {
-                        sHelper.SetDateTime(psArray, iFeat, brokenDown,
-                                            sHelper.m_anTZFlags[iField],
-                                            ogrField);
+                        OGRField ogrField;
+                        if (ParseDateTimeField(hStmt, iRawField,
+                                               nSqlite3ColType, &ogrField,
+                                               poFieldDefn, nFID))
+                        {
+                            sHelper.SetDateTime(psArray, iFeat, brokenDown,
+                                                sHelper.m_anTZFlags[iField],
+                                                ogrField);
+                        }
+                        break;
                     }
-                    break;
+                    else
+                    {
+                        [[fallthrough]];
+                    }
                 }
 
                 case OFTString:
@@ -937,7 +933,7 @@ error:
 /*                      GetFIDColumn()                                  */
 /************************************************************************/
 
-const char *OGRGeoPackageLayer::GetFIDColumn()
+const char *OGRGeoPackageLayer::GetFIDColumn() const
 {
     if (!m_pszFidColumn)
         return "";
@@ -949,7 +945,7 @@ const char *OGRGeoPackageLayer::GetFIDColumn()
 /*                      TestCapability()                                */
 /************************************************************************/
 
-int OGRGeoPackageLayer::TestCapability(const char *pszCap)
+int OGRGeoPackageLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCIgnoreFields))
         return TRUE;
@@ -1160,12 +1156,10 @@ void OGRGeoPackageLayer::BuildFeatureDefn(const char *pszLayerName,
                                                 wkbUnknown);
 
                     /* Read the SRS */
-                    OGRSpatialReference *poSRS =
-                        m_poDS->GetSpatialRef(nSRID, true);
+                    auto poSRS = m_poDS->GetSpatialRef(nSRID, true);
                     if (poSRS)
                     {
-                        oGeomField.SetSpatialRef(poSRS);
-                        poSRS->Dereference();
+                        oGeomField.SetSpatialRef(poSRS.get());
                     }
 
                     OGRwkbGeometryType eGeomType = poGeom->getGeometryType();

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "zarr.h"
@@ -40,13 +24,27 @@
 
 ZarrGroupBase::~ZarrGroupBase()
 {
-    // We need to explicitly flush arrays so that the _ARRAY_DIMENSIONS
-    // is properly written. As it relies on checking if the dimensions of the
-    // array have an indexing variable, then still need to be all alive.
+    CPL_IGNORE_RET_VAL(ZarrGroupBase::Close());
+}
+
+/************************************************************************/
+/*                            Close()                                   */
+/************************************************************************/
+
+bool ZarrGroupBase::Close()
+{
+    bool ret = true;
+
+    for (auto &kv : m_oMapGroups)
+    {
+        ret = kv.second->Close() && ret;
+    }
+
     for (auto &kv : m_oMapMDArrays)
     {
-        kv.second->Flush();
+        ret = kv.second->Flush() && ret;
     }
+    return ret;
 }
 
 /************************************************************************/
@@ -71,9 +69,9 @@ std::vector<std::string> ZarrGroupBase::GetMDArrayNames(CSLConstList) const
 void ZarrGroupBase::RegisterArray(const std::shared_ptr<ZarrArray> &array) const
 {
     m_oMapMDArrays[array->GetName()] = array;
-    if (std::find(m_aosArrays.begin(), m_aosArrays.end(), array->GetName()) ==
-        m_aosArrays.end())
+    if (!cpl::contains(m_oSetArrayNames, array->GetName()))
     {
+        m_oSetArrayNames.insert(array->GetName());
         m_aosArrays.emplace_back(array->GetName());
     }
     array->RegisterGroup(
@@ -111,7 +109,12 @@ bool ZarrGroupBase::DeleteGroup(const std::string &osName,
                  "Dataset not open in update mode");
         return false;
     }
-
+    if (CPLHasPathTraversal(osName.c_str()))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Path traversal detected in %s",
+                 osName.c_str());
+        return false;
+    }
     GetGroupNames();
 
     auto oIterNames = std::find(m_aosGroups.begin(), m_aosGroups.end(), osName);
@@ -123,7 +126,7 @@ bool ZarrGroupBase::DeleteGroup(const std::string &osName,
     }
 
     const std::string osSubDirName =
-        CPLFormFilename(m_osDirectoryName.c_str(), osName.c_str(), nullptr);
+        CPLFormFilenameSafe(m_osDirectoryName.c_str(), osName.c_str(), nullptr);
     if (VSIRmdirRecursive(osSubDirName.c_str()) != 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot delete %s",
@@ -133,6 +136,7 @@ bool ZarrGroupBase::DeleteGroup(const std::string &osName,
 
     m_poSharedResource->DeleteZMetadataItemRecursive(osSubDirName);
 
+    m_oSetGroupNames.erase(osName);
     m_aosGroups.erase(oIterNames);
 
     auto oIter = m_oMapGroups.find(osName);
@@ -256,7 +260,12 @@ bool ZarrGroupBase::DeleteMDArray(const std::string &osName,
                  "Dataset not open in update mode");
         return false;
     }
-
+    if (CPLHasPathTraversal(osName.c_str()))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Path traversal detected in %s",
+                 osName.c_str());
+        return false;
+    }
     GetMDArrayNames();
 
     auto oIterNames = std::find(m_aosArrays.begin(), m_aosArrays.end(), osName);
@@ -268,7 +277,7 @@ bool ZarrGroupBase::DeleteMDArray(const std::string &osName,
     }
 
     const std::string osSubDirName =
-        CPLFormFilename(m_osDirectoryName.c_str(), osName.c_str(), nullptr);
+        CPLFormFilenameSafe(m_osDirectoryName.c_str(), osName.c_str(), nullptr);
     if (VSIRmdirRecursive(osSubDirName.c_str()) != 0)
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot delete %s",
@@ -278,6 +287,7 @@ bool ZarrGroupBase::DeleteMDArray(const std::string &osName,
 
     m_poSharedResource->DeleteZMetadataItemRecursive(osSubDirName);
 
+    m_oSetArrayNames.erase(osName);
     m_aosArrays.erase(oIterNames);
 
     auto oIter = m_oMapMDArrays.find(osName);
@@ -543,8 +553,8 @@ void ZarrGroupBase::ParentRenamed(const std::string &osNewParentFullName)
     // The parent necessarily exist, since it notified us
     CPLAssert(pParent);
 
-    m_osDirectoryName = CPLFormFilename(pParent->m_osDirectoryName.c_str(),
-                                        m_osName.c_str(), nullptr);
+    m_osDirectoryName = CPLFormFilenameSafe(pParent->m_osDirectoryName.c_str(),
+                                            m_osName.c_str(), nullptr);
 
     GDALGroup::ParentRenamed(osNewParentFullName);
 }

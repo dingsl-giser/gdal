@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2023, kikitte.lee <kikitte.lee@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef POLYGONIZE_POLYGONIZER_H_INCLUDED
@@ -200,8 +184,11 @@ template <typename DataType>
 class OGRPolygonWriter : public PolygonReceiver<DataType>
 {
     OGRLayer *poOutLayer_ = nullptr;
-    int iPixValField_;
-    double *padfGeoTransform_;
+    GDALDataset *poOutDS_ = nullptr;
+    const int iPixValField_;
+    const GDALGeoTransform gt_;
+    int nCommitInterval_ = 0;
+    GIntBig nFeaturesWrittenInTransaction_ = 0;
     std::unique_ptr<OGRFeature> poFeature_{};
     OGRPolygon *poPolygon_ =
         nullptr;  // = poFeature_->GetGeometryRef(), owned by poFeature
@@ -210,14 +197,15 @@ class OGRPolygonWriter : public PolygonReceiver<DataType>
 
   public:
     OGRPolygonWriter(OGRLayerH hOutLayer, int iPixValField,
-                     double *padfGeoTransform);
+                     const GDALGeoTransform &gt, int nCommitInterval);
+    ~OGRPolygonWriter() override;
 
     OGRPolygonWriter(const OGRPolygonWriter<DataType> &) = delete;
 
-    ~OGRPolygonWriter() = default;
-
     OGRPolygonWriter<DataType> &
     operator=(const OGRPolygonWriter<DataType> &) = delete;
+
+    bool Finalize();
 
     void receive(RPolygon *poPolygon, DataType nPolygonCellValue) override;
 

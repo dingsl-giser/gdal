@@ -9,23 +9,7 @@
  * Copyright (c) 1999, Intergraph Corporation
  * Copyright (c) 2007-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************
  *
  * hfaopen.cpp
@@ -46,9 +30,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -217,7 +198,7 @@ HFAHandle HFAOpen(const char *pszFilename, const char *pszAccess)
         static_cast<HFAInfo_t *>(CPLCalloc(sizeof(HFAInfo_t), 1));
 
     psInfo->pszFilename = CPLStrdup(CPLGetFilename(pszFilename));
-    psInfo->pszPath = CPLStrdup(CPLGetPath(pszFilename));
+    psInfo->pszPath = CPLStrdup(CPLGetPathSafe(pszFilename).c_str());
     psInfo->fp = fp;
     if (EQUAL(pszAccess, "r") || EQUAL(pszAccess, "rb"))
         psInfo->eAccess = HFA_ReadOnly;
@@ -294,9 +275,9 @@ HFAInfo_t *HFACreateDependent(HFAInfo_t *psBase)
         return psBase->psDependent;
 
     // Create desired RRD filename.
-    const CPLString oBasename = CPLGetBasename(psBase->pszFilename);
+    const CPLString oBasename = CPLGetBasenameSafe(psBase->pszFilename);
     const CPLString oRRDFilename =
-        CPLFormFilename(psBase->pszPath, oBasename, "rrd");
+        CPLFormFilenameSafe(psBase->pszPath, oBasename, "rrd");
 
     // Does this file already exist?  If so, re-use it.
     VSILFILE *fp = VSIFOpenL(oRRDFilename, "rb");
@@ -356,8 +337,8 @@ HFAInfo_t *HFAGetDependent(HFAInfo_t *psBase, const char *pszFilename)
     // Try to open the dependent file.
     const char *pszMode = psBase->eAccess == HFA_Update ? "r+b" : "rb";
 
-    char *pszDependent =
-        CPLStrdup(CPLFormFilename(psBase->pszPath, pszFilename, nullptr));
+    char *pszDependent = CPLStrdup(
+        CPLFormFilenameSafe(psBase->pszPath, pszFilename, nullptr).c_str());
 
     VSILFILE *fp = VSIFOpenL(pszDependent, pszMode);
     if (fp != nullptr)
@@ -547,8 +528,19 @@ CPLErr HFADelete(const char *pszFilename)
                 poDMS->GetStringField("fileName.string");
 
             if (pszRawFilename != nullptr)
-                HFARemove(
-                    CPLFormFilename(psInfo->pszPath, pszRawFilename, nullptr));
+            {
+                if (CPLHasPathTraversal(pszRawFilename))
+                {
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Path traversal detected in %s", pszRawFilename);
+                }
+                else
+                {
+                    HFARemove(CPLFormFilenameSafe(psInfo->pszPath,
+                                                  pszRawFilename, nullptr)
+                                  .c_str());
+                }
+            }
         }
 
         CPL_IGNORE_RET_VAL(HFAClose(psInfo));
@@ -1824,7 +1816,7 @@ HFAHandle HFACreateLL(const char *pszFilename)
     psInfo->pProParameters = nullptr;
     psInfo->bTreeDirty = false;
     psInfo->pszFilename = CPLStrdup(CPLGetFilename(pszFilename));
-    psInfo->pszPath = CPLStrdup(CPLGetPath(pszFilename));
+    psInfo->pszPath = CPLStrdup(CPLGetPathSafe(pszFilename).c_str());
 
     // Write out the Ehfa_HeaderTag.
     bool bRet = VSIFWriteL((void *)"EHFA_HEADER_TAG", 1, 16, fp) > 0;
@@ -1889,18 +1881,18 @@ HFAHandle HFACreateLL(const char *pszFilename)
 
     // If an .ige or .rrd file exists with the same base name,
     // delete them.  (#1784)
-    CPLString osExtension = CPLGetExtension(pszFilename);
+    CPLString osExtension = CPLGetExtensionSafe(pszFilename);
     if (!EQUAL(osExtension, "rrd") && !EQUAL(osExtension, "aux"))
     {
-        CPLString osPath = CPLGetPath(pszFilename);
-        CPLString osBasename = CPLGetBasename(pszFilename);
+        CPLString osPath = CPLGetPathSafe(pszFilename);
+        CPLString osBasename = CPLGetBasenameSafe(pszFilename);
         VSIStatBufL sStatBuf;
-        CPLString osSupFile = CPLFormCIFilename(osPath, osBasename, "rrd");
+        CPLString osSupFile = CPLFormCIFilenameSafe(osPath, osBasename, "rrd");
 
         if (VSIStatL(osSupFile, &sStatBuf) == 0)
             VSIUnlink(osSupFile);
 
-        osSupFile = CPLFormCIFilename(osPath, osBasename, "ige");
+        osSupFile = CPLFormCIFilenameSafe(osPath, osBasename, "ige");
 
         if (VSIStatL(osSupFile, &sStatBuf) == 0)
             VSIUnlink(osSupFile);
@@ -2024,8 +2016,8 @@ int HFACreateLayer(HFAHandle psInfo, HFAEntry *poParent,
     }
 
     // Work out some details about the tiling scheme.
-    const int nBlocksPerRow = (nXSize + nBlockSize - 1) / nBlockSize;
-    const int nBlocksPerColumn = (nYSize + nBlockSize - 1) / nBlockSize;
+    const int nBlocksPerRow = DIV_ROUND_UP(nXSize, nBlockSize);
+    const int nBlocksPerColumn = DIV_ROUND_UP(nYSize, nBlockSize);
     const int nBlocks = nBlocksPerRow * nBlocksPerColumn;
     const int nBytesPerBlock =
         (nBlockSize * nBlockSize * HFAGetDataTypeBits(eDataType) + 7) / 8;
@@ -2242,6 +2234,12 @@ HFAHandle HFACreate(const char *pszFilename, int nXSize, int nYSize, int nBands,
                     EPTType eDataType, char **papszOptions)
 
 {
+    if (nXSize == 0 || nYSize == 0)
+    {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "nXSize == 0 || nYSize == 0 not supported");
+        return nullptr;
+    }
     int nBlockSize = 64;
     const char *pszValue = CSLFetchNameValue(papszOptions, "BLOCKSIZE");
 
@@ -2897,7 +2895,7 @@ CPLErr HFASetMetadata(HFAHandle hHFA, int nBand, char **papszMD)
 /*      NOTE: Returns full path, not just the filename portion.         */
 /************************************************************************/
 
-const char *HFAGetIGEFilename(HFAHandle hHFA)
+std::string HFAGetIGEFilename(HFAHandle hHFA)
 
 {
     if (hHFA->pszIGEFilename == nullptr)
@@ -2915,22 +2913,31 @@ const char *HFAGetIGEFilename(HFAHandle hHFA)
 
             if (pszRawFilename != nullptr)
             {
-                VSIStatBufL sStatBuf;
-                CPLString osFullFilename =
-                    CPLFormFilename(hHFA->pszPath, pszRawFilename, nullptr);
+                if (CPLHasPathTraversal(pszRawFilename))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "Path traversal detected in %s", pszRawFilename);
+                    return std::string();
+                }
 
-                if (VSIStatL(osFullFilename, &sStatBuf) != 0)
+                VSIStatBufL sStatBuf;
+                std::string osFullFilename =
+                    CPLFormFilenameSafe(hHFA->pszPath, pszRawFilename, nullptr);
+
+                if (VSIStatL(osFullFilename.c_str(), &sStatBuf) != 0)
                 {
                     const CPLString osExtension =
-                        CPLGetExtension(pszRawFilename);
+                        CPLGetExtensionSafe(pszRawFilename);
                     const CPLString osBasename =
-                        CPLGetBasename(hHFA->pszFilename);
-                    osFullFilename =
-                        CPLFormFilename(hHFA->pszPath, osBasename, osExtension);
+                        CPLGetBasenameSafe(hHFA->pszFilename);
+                    osFullFilename = CPLFormFilenameSafe(
+                        hHFA->pszPath, osBasename, osExtension);
 
-                    if (VSIStatL(osFullFilename, &sStatBuf) == 0)
-                        hHFA->pszIGEFilename = CPLStrdup(
-                            CPLFormFilename(nullptr, osBasename, osExtension));
+                    if (VSIStatL(osFullFilename.c_str(), &sStatBuf) == 0)
+                        hHFA->pszIGEFilename =
+                            CPLStrdup(CPLFormFilenameSafe(nullptr, osBasename,
+                                                          osExtension)
+                                          .c_str());
                     else
                         hHFA->pszIGEFilename = CPLStrdup(pszRawFilename);
                 }
@@ -2944,9 +2951,10 @@ const char *HFAGetIGEFilename(HFAHandle hHFA)
 
     // Return the full filename.
     if (hHFA->pszIGEFilename)
-        return CPLFormFilename(hHFA->pszPath, hHFA->pszIGEFilename, nullptr);
+        return CPLFormFilenameSafe(hHFA->pszPath, hHFA->pszIGEFilename,
+                                   nullptr);
 
-    return nullptr;
+    return std::string();
 }
 
 /************************************************************************/
@@ -2971,19 +2979,21 @@ bool HFACreateSpillStack(HFAInfo_t *psInfo, int nXSize, int nYSize, int nLayers,
 
     if (psInfo->pszIGEFilename == nullptr)
     {
-        if (EQUAL(CPLGetExtension(psInfo->pszFilename), "rrd"))
-            psInfo->pszIGEFilename =
-                CPLStrdup(CPLResetExtension(psInfo->pszFilename, "rde"));
-        else if (EQUAL(CPLGetExtension(psInfo->pszFilename), "aux"))
-            psInfo->pszIGEFilename =
-                CPLStrdup(CPLResetExtension(psInfo->pszFilename, "axe"));
+        const auto osExt = CPLGetExtensionSafe(psInfo->pszFilename);
+        if (EQUAL(osExt.c_str(), "rrd"))
+            psInfo->pszIGEFilename = CPLStrdup(
+                CPLResetExtensionSafe(psInfo->pszFilename, "rde").c_str());
+        else if (EQUAL(osExt.c_str(), "aux"))
+            psInfo->pszIGEFilename = CPLStrdup(
+                CPLResetExtensionSafe(psInfo->pszFilename, "axe").c_str());
         else
-            psInfo->pszIGEFilename =
-                CPLStrdup(CPLResetExtension(psInfo->pszFilename, "ige"));
+            psInfo->pszIGEFilename = CPLStrdup(
+                CPLResetExtensionSafe(psInfo->pszFilename, "ige").c_str());
     }
 
     char *pszFullFilename = CPLStrdup(
-        CPLFormFilename(psInfo->pszPath, psInfo->pszIGEFilename, nullptr));
+        CPLFormFilenameSafe(psInfo->pszPath, psInfo->pszIGEFilename, nullptr)
+            .c_str());
 
     // Try and open it.  If we fail, create it and write the magic header.
     static const char *const pszMagick = "ERDAS_IMG_EXTERNAL_RASTER";
@@ -3008,8 +3018,8 @@ bool HFACreateSpillStack(HFAInfo_t *psInfo, int nXSize, int nYSize, int nLayers,
     CPLFree(pszFullFilename);
 
     // Work out some details about the tiling scheme.
-    const int nBlocksPerRow = (nXSize + nBlockSize - 1) / nBlockSize;
-    const int nBlocksPerColumn = (nYSize + nBlockSize - 1) / nBlockSize;
+    const int nBlocksPerRow = DIV_ROUND_UP(nXSize, nBlockSize);
+    const int nBlocksPerColumn = DIV_ROUND_UP(nYSize, nBlockSize);
     // const int nBlocks = nBlocksPerRow * nBlocksPerColumn;
     const int nBytesPerBlock =
         (nBlockSize * nBlockSize * HFAGetDataTypeBits(eDataType) + 7) / 8;
@@ -3736,46 +3746,48 @@ CPLErr HFARenameReferences(HFAHandle hHFA, const char *pszNewBase,
 
         // Collect all the existing names.
         const int nNameCount = poRRDNL->GetFieldCount("nameList");
-
-        CPLString osAlgorithm = poRRDNL->GetStringField("algorithm.string");
-        for (int i = 0; i < nNameCount; i++)
+        if (nNameCount >= 0)
         {
-            CPLString osFN;
-            osFN.Printf("nameList[%d].string", i);
-            aosNL.push_back(poRRDNL->GetStringField(osFN));
-        }
-
-        // Adjust the names to the new form.
-        for (int i = 0; i < nNameCount; i++)
-        {
-            if (strncmp(aosNL[i], pszOldBase, strlen(pszOldBase)) == 0)
+            CPLString osAlgorithm = poRRDNL->GetStringField("algorithm.string");
+            for (int i = 0; i < nNameCount; i++)
             {
-                std::string osNew = pszNewBase;
-                osNew += aosNL[i].c_str() + strlen(pszOldBase);
-                aosNL[i] = std::move(osNew);
+                CPLString osFN;
+                osFN.Printf("nameList[%d].string", i);
+                aosNL.push_back(poRRDNL->GetStringField(osFN));
             }
-        }
 
-        // Try to make sure the RRDNamesList is big enough to hold the
-        // adjusted name list.
-        if (strlen(pszNewBase) > strlen(pszOldBase))
-        {
-            CPLDebug("HFA", "Growing RRDNamesList to hold new names");
-            poRRDNL->MakeData(static_cast<int>(
-                poRRDNL->GetDataSize() +
-                nNameCount * (strlen(pszNewBase) - strlen(pszOldBase))));
-        }
+            // Adjust the names to the new form.
+            for (int i = 0; i < nNameCount; i++)
+            {
+                if (strncmp(aosNL[i], pszOldBase, strlen(pszOldBase)) == 0)
+                {
+                    std::string osNew = pszNewBase;
+                    osNew += aosNL[i].c_str() + strlen(pszOldBase);
+                    aosNL[i] = std::move(osNew);
+                }
+            }
 
-        // Initialize the whole thing to zeros for a clean start.
-        memset(poRRDNL->GetData(), 0, poRRDNL->GetDataSize());
+            // Try to make sure the RRDNamesList is big enough to hold the
+            // adjusted name list.
+            if (strlen(pszNewBase) > strlen(pszOldBase))
+            {
+                CPLDebug("HFA", "Growing RRDNamesList to hold new names");
+                poRRDNL->MakeData(static_cast<int>(
+                    poRRDNL->GetDataSize() +
+                    nNameCount * (strlen(pszNewBase) - strlen(pszOldBase))));
+            }
 
-        // Write the updates back to the file.
-        poRRDNL->SetStringField("algorithm.string", osAlgorithm);
-        for (int i = 0; i < nNameCount; i++)
-        {
-            CPLString osFN;
-            osFN.Printf("nameList[%d].string", i);
-            poRRDNL->SetStringField(osFN, aosNL[i]);
+            // Initialize the whole thing to zeros for a clean start.
+            memset(poRRDNL->GetData(), 0, poRRDNL->GetDataSize());
+
+            // Write the updates back to the file.
+            poRRDNL->SetStringField("algorithm.string", osAlgorithm);
+            for (int i = 0; i < nNameCount; i++)
+            {
+                CPLString osFN;
+                osFN.Printf("nameList[%d].string", i);
+                poRRDNL->SetStringField(osFN, aosNL[i]);
+            }
         }
     }
 

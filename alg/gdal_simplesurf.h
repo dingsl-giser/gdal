@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012, Andrew Migal
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /**
@@ -76,7 +60,7 @@ class GDALFeaturePoint
      * which provides all necessary parameters.
      */
     GDALFeaturePoint(int nX, int nY, int nScale, int nRadius, int nSign);
-    virtual ~GDALFeaturePoint();
+    ~GDALFeaturePoint();
 
     /** Assignment operator */
     GDALFeaturePoint &operator=(const GDALFeaturePoint &point);
@@ -191,7 +175,7 @@ class GDALFeaturePoint
 };
 
 /**
- * @author Andrew Migal migal.drew@gmail.com
+ * @author Andrew Migal migal.drew at gmail.com
  * @brief Integral image class (summed area table).
  * @details Integral image is a table for fast computing the sum of
  * values in rectangular subarea. In more detail, for 2-dimensional array
@@ -205,7 +189,7 @@ class GDALIntegralImage
 
   public:
     GDALIntegralImage();
-    virtual ~GDALIntegralImage();
+    ~GDALIntegralImage();
 
     /**
      * Compute integral image for specified array. Result is stored internally.
@@ -283,7 +267,7 @@ class GDALIntegralImage
 };
 
 /**
- * @author Andrew Migal migal.drew@gmail.com
+ * @author Andrew Migal migal.drew at gmail.com
  * @brief Class for computation and storage of Hessian values in SURF-based
  * algorithm.
  *
@@ -307,7 +291,7 @@ class GDALOctaveLayer
      * @note Normally constructor is invoked only by SURF-based algorithm.
      */
     GDALOctaveLayer(int nOctave, int nInterval);
-    virtual ~GDALOctaveLayer();
+    ~GDALOctaveLayer();
 
     /**
      * Perform calculation of Hessian determinants and their signs
@@ -355,7 +339,7 @@ class GDALOctaveLayer
 };
 
 /**
- * @author Andrew Migal migal.drew@gmail.com
+ * @author Andrew Migal migal.drew at gmail.com
  * @brief Class for handling octave layers in SURF-based algorithm.
  * @details Class contains OctaveLayers and provides capability to construct
  * octave space and distinguish feature points. Normally this class is used only
@@ -375,7 +359,7 @@ class GDALOctaveMap
      * OctaveStart
      */
     GDALOctaveMap(int nOctaveStart, int nOctaveEnd);
-    virtual ~GDALOctaveMap();
+    ~GDALOctaveMap();
 
     /**
      * Calculate Hessian values for octave space
@@ -430,7 +414,7 @@ class GDALOctaveMap
 };
 
 /**
- * @author Andrew Migal migal.drew@gmail.com
+ * @author Andrew Migal migal.drew at gmail.com
  * @brief Class for searching corresponding points on images.
  * @details Provides capability for detection feature points
  * and finding equal points on different images.
@@ -441,7 +425,7 @@ class GDALOctaveMap
  * unstable results.
  */
 
-class GDALSimpleSURF
+class GDALSimpleSURF final
 {
   private:
     /**
@@ -489,7 +473,7 @@ class GDALSimpleSURF
      * or only one octave if execution time is significant.
      */
     GDALSimpleSURF(int nOctaveStart, int nOctaveEnd);
-    virtual ~GDALSimpleSURF();
+    ~GDALSimpleSURF();
 
     /**
      * Convert image with RGB channels to grayscale using "luminosity" method.

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test PostGIS driver functionality.
@@ -1620,6 +1619,47 @@ def test_ogr_pg_31(pg_ds):
         i = i + 1
     ds.ReleaseResultSet(sql_lyr)
     assert i == 501
+
+
+###############################################################################
+# Test the TABLES open option
+
+
+def test_ogr_pg_tables_open_option(pg_ds):
+
+    pg_ds.CreateLayer(
+        "test (with parenthesis and \\)",
+        geom_type=ogr.wkbPoint,
+    )
+    pg_ds.CreateLayer(
+        "test with, comma",
+        geom_type=ogr.wkbPoint,
+    )
+    pg_ds.FlushCache()
+
+    with gdal.OpenEx(
+        pg_ds.GetDescription(),
+        gdal.OF_VECTOR,
+        open_options=["TABLES=test \\(with parenthesis and \\\\)"],
+    ) as ds:
+        assert ds.GetLayerCount() == 1
+        assert ds.GetLayer(0).GetName() == "test (with parenthesis and \\)"
+
+    with gdal.OpenEx(
+        pg_ds.GetDescription(),
+        gdal.OF_VECTOR,
+        open_options=["TABLES=test \\(with parenthesis and \\\\)(geometry)"],
+    ) as ds:
+        assert ds.GetLayerCount() == 1
+        assert ds.GetLayer(0).GetName() == "test (with parenthesis and \\)"
+
+    with gdal.OpenEx(
+        pg_ds.GetDescription(),
+        gdal.OF_VECTOR,
+        open_options=['TABLES="test with, comma"'],
+    ) as ds:
+        assert ds.GetLayerCount() == 1
+        assert ds.GetLayer(0).GetName() == "test with, comma"
 
 
 ###############################################################################
@@ -4849,6 +4889,13 @@ def test_ogr_pg_84(pg_ds):
 def test_ogr_pg_metadata(pg_ds, run_number):
 
     pg_ds = reconnect(pg_ds, update=1)
+
+    if run_number == 1:
+        pg_ds.ExecuteSQL(
+            "DROP EVENT TRIGGER IF EXISTS ogr_system_tables_event_trigger_for_metadata"
+        )
+        pg_ds.ExecuteSQL("DROP SCHEMA ogr_system_tables CASCADE")
+
     pg_ds.StartTransaction()
     lyr = pg_ds.CreateLayer(
         "test_ogr_pg_metadata", geom_type=ogr.wkbPoint, options=["OVERWRITE=YES"]
@@ -4903,7 +4950,6 @@ def test_ogr_pg_metadata_restricted_user(pg_ds):
     pg_ds = reconnect(pg_ds, update=1)
 
     try:
-
         pg_ds.ExecuteSQL("CREATE ROLE test_ogr_pg_metadata_restricted_user")
         with pg_ds.ExecuteSQL("SELECT current_schema()") as lyr:
             f = lyr.GetNextFeature()
@@ -4923,6 +4969,7 @@ def test_ogr_pg_metadata_restricted_user(pg_ds):
         )
 
         pg_ds = reconnect(pg_ds, update=1)
+        pg_ds.ExecuteSQL("DROP SCHEMA ogr_system_tables CASCADE")
         pg_ds.ExecuteSQL("SET ROLE test_ogr_pg_metadata_restricted_user")
 
         lyr = pg_ds.CreateLayer(
@@ -4933,9 +4980,12 @@ def test_ogr_pg_metadata_restricted_user(pg_ds):
         with gdal.quiet_errors():
             lyr.SetMetadata({"foo": "bar"})
 
-        gdal.ErrorReset()
-        pg_ds = reconnect(pg_ds, update=1)
-        assert gdal.GetLastErrorMsg() == ""
+            gdal.ErrorReset()
+            pg_ds = reconnect(pg_ds, update=1)
+        assert (
+            gdal.GetLastErrorMsg()
+            == "User lacks super user privilege to be able to create event trigger ogr_system_tables_event_trigger_for_metadata"
+        )
 
     finally:
         pg_ds = reconnect(pg_ds, update=1)
@@ -5380,7 +5430,7 @@ def test_ogr_pg_url(pg_autotest_ds, pg_version):
 @only_with_postgis
 def test_ogr_pg_copy_error(pg_ds):
 
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     src_lyr = src_ds.CreateLayer(
         "layer_polygon_with_multipolygon", geom_type=ogr.wkbPolygon
     )
@@ -5399,7 +5449,7 @@ def test_ogr_pg_copy_error(pg_ds):
 @only_with_postgis
 def test_ogr_pg_vector_translate_geography(pg_ds):
 
-    src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     src_lyr = src_ds.CreateLayer(
         "test_ogr_pg_vector_translate_geography", geom_type=ogr.wkbNone
     )
@@ -5910,6 +5960,27 @@ def test_ogr_pg_long_identifiers(pg_ds):
     assert lyr.CreateFeature(f) == ogr.OGRERR_NONE
     assert lyr.SyncToDisk() == ogr.OGRERR_NONE
 
+    long_name3 = "test_" + ("X" * (64 - len("test_")))
+    assert len(long_name3) == 64
+    short_name3 = "test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_b7ebb17c"
+    assert len(short_name3) == 63
+    with gdal.quiet_errors():
+        lyr = pg_ds.CreateLayer(long_name3)
+    assert lyr.GetName() == short_name3
+    f = ogr.Feature(lyr.GetLayerDefn())
+    assert lyr.CreateFeature(f) == ogr.OGRERR_NONE
+    assert lyr.SyncToDisk() == ogr.OGRERR_NONE
+
+    long_name4 = "test_" + ("X" * (63 - len("test_")))
+    assert len(long_name4) == 63
+    short_name4 = "test_" + ("x" * (63 - len("test_")))
+    with gdal.quiet_errors():
+        lyr = pg_ds.CreateLayer(long_name4)
+    assert lyr.GetName() == short_name4
+    f = ogr.Feature(lyr.GetLayerDefn())
+    assert lyr.CreateFeature(f) == ogr.OGRERR_NONE
+    assert lyr.SyncToDisk() == ogr.OGRERR_NONE
+
     pg_ds = reconnect(pg_ds, update=1)
 
     got_lyr = pg_ds.GetLayerByName(short_name)
@@ -5919,6 +5990,14 @@ def test_ogr_pg_long_identifiers(pg_ds):
     got_lyr = pg_ds.GetLayerByName(short_name2)
     assert got_lyr
     assert got_lyr.GetName() == short_name2
+
+    got_lyr = pg_ds.GetLayerByName(short_name3)
+    assert got_lyr
+    assert got_lyr.GetName() == short_name3
+
+    got_lyr = pg_ds.GetLayerByName(short_name4)
+    assert got_lyr
+    assert got_lyr.GetName() == short_name4
 
 
 ###############################################################################
@@ -6139,7 +6218,7 @@ def test_ogr_pg_ogr2ogr_with_multiple_dotted_table_name(pg_ds):
     tmp_schema = "tmp_schema_issue_10311"
     pg_ds.ExecuteSQL(f'CREATE SCHEMA "{tmp_schema}"')
     try:
-        src_ds = gdal.GetDriverByName("Memory").Create("", 0, 0, 0, gdal.GDT_Unknown)
+        src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
         lyr = src_ds.CreateLayer(tmp_schema + ".table1", geom_type=ogr.wkbNone)
         lyr.CreateField(ogr.FieldDefn("str"))
         f = ogr.Feature(lyr.GetLayerDefn())
@@ -6161,3 +6240,139 @@ def test_ogr_pg_ogr2ogr_with_multiple_dotted_table_name(pg_ds):
 
     finally:
         pg_ds.ExecuteSQL(f'DROP SCHEMA "{tmp_schema}" CASCADE')
+
+
+###############################################################################
+# Test scenario of https://lists.osgeo.org/pipermail/gdal-dev/2024-October/059608.html
+# and bugfix of https://github.com/OSGeo/gdal/issues/11386
+
+
+@only_without_postgis
+@gdaltest.enable_exceptions()
+def test_ogr_pg_empty_search_path(pg_ds):
+
+    with pg_ds.ExecuteSQL("SHOW search_path") as sql_lyr:
+        f = sql_lyr.GetNextFeature()
+        old_search_path = f.GetField(0)
+        old_search_path = old_search_path.replace(
+            "test_ogr_pg_empty_search_path_no_postgis, ", ""
+        )
+
+    with pg_ds.ExecuteSQL("SELECT CURRENT_USER") as lyr:
+        f = lyr.GetNextFeature()
+        current_user = f.GetField(0)
+
+    pg_ds.ExecuteSQL(f"ALTER ROLE {current_user} SET search_path = ''")
+    try:
+        ds = reconnect(pg_ds, update=1)
+
+        with ds.ExecuteSQL("SHOW search_path") as sql_lyr:
+            f = sql_lyr.GetNextFeature()
+            new_search_path = f.GetField(0)
+            assert (
+                new_search_path
+                == 'test_ogr_pg_empty_search_path_no_postgis, "", public'
+            )
+
+    finally:
+        ds.ExecuteSQL(f"ALTER ROLE {current_user} SET search_path = {old_search_path}")
+
+    pg_ds.ExecuteSQL(f"ALTER ROLE {current_user} SET search_path = '', '$user'")
+    try:
+        ds = reconnect(pg_ds, update=1)
+
+        with ds.ExecuteSQL("SHOW search_path") as sql_lyr:
+            f = sql_lyr.GetNextFeature()
+            new_search_path = f.GetField(0)
+            assert (
+                new_search_path
+                == 'test_ogr_pg_empty_search_path_no_postgis, "", "$user", public'
+            )
+
+    finally:
+        ds.ExecuteSQL(f"ALTER ROLE {current_user} SET search_path = {old_search_path}")
+
+
+###############################################################################
+# Test appending to a layer where a field name was truncated to 63 characters.
+
+
+@only_without_postgis
+@gdaltest.enable_exceptions()
+def test_ogr_pg_findfield(pg_ds):
+
+    src_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+    src_lyr = src_ds.CreateLayer("test_very_long_field_name")
+    src_lyr.CreateField(
+        ogr.FieldDefn(
+            "veeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeryyyyyyyyyyyyyyyyyyyyyyloooooooooooooong"
+        )
+    )
+    f = ogr.Feature(src_lyr.GetLayerDefn())
+    f.SetField(0, "foo")
+    src_lyr.CreateFeature(f)
+
+    with gdal.quiet_errors():
+        gdal.VectorTranslate(pg_ds.GetDescription(), src_ds)
+
+    with gdal.quiet_errors():
+        gdal.VectorTranslate(pg_ds.GetDescription(), src_ds, accessMode="append")
+
+    lyr = pg_ds.GetLayerByName("test_very_long_field_name")
+    assert [f.GetField(0) for f in lyr] == ["foo", None]
+
+    with gdal.quiet_errors():
+        gdal.VectorTranslate(
+            pg_ds.GetDescription(),
+            src_ds,
+            accessMode="append",
+            relaxedFieldNameMatch=True,
+        )
+    assert [f.GetField(0) for f in lyr] == ["foo", None, "foo"]
+
+
+###############################################################################
+# Test that we open the PG driver and not the PostGISRaster one with
+# "gdal vector pipeline"
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_pg_gdal_vector_pipeline(pg_ds):
+
+    pg_ds.CreateLayer("test")
+
+    with gdal.Run(
+        "vector",
+        "pipeline",
+        {
+            "pipeline": "read ! write",
+            "input": pg_ds,
+            "output_format": "stream",
+            "output": "",
+        },
+    ) as alg:
+        assert alg.Output().GetLayerCount() == 1
+
+
+###############################################################################
+# Test field content truncation related to SetWidth()
+
+
+@gdaltest.enable_exceptions()
+@only_without_postgis
+def test_ogr_pg_field_truncation(pg_ds):
+
+    lyr = pg_ds.CreateLayer("test")
+    fld_defn = ogr.FieldDefn("field", ogr.OFTString)
+    fld_defn.SetWidth(5)
+    lyr.CreateField(fld_defn)
+
+    ds = reconnect(pg_ds, update=1)
+    lyr = ds.GetLayerByName("test")
+
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f["field"] = b"abcd\xc3\xa9f".decode("UTF-8")
+    lyr.CreateFeature(f)
+    lyr.ResetReading()
+    f = lyr.GetNextFeature()
+    assert f["field"] == b"abcd\xc3\xa9".decode("UTF-8")

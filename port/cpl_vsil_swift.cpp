@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2017-2018, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_json.h"
@@ -101,6 +85,15 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
             if (osName.size() > osPrefix.size() &&
                 osName.substr(0, osPrefix.size()) == osPrefix)
             {
+                if (CPLHasUnbalancedPathTraversal(osName.c_str()))
+                {
+                    CPLError(
+                        CE_Warning, CPLE_AppDefined,
+                        "Ignoring name '%s' that has a path traversal pattern",
+                        osName.c_str());
+                    continue;
+                }
+
                 if (bHasCount)
                 {
                     // Case when listing /vsiswift/
@@ -152,6 +145,14 @@ void VSICurlFilesystemHandlerBase::AnalyseSwiftFileList(
                 osSubdir.pop_back();
             if (STARTS_WITH(osSubdir.c_str(), osPrefix.c_str()))
             {
+                if (CPLHasUnbalancedPathTraversal(osSubdir.c_str()))
+                {
+                    CPLError(CE_Warning, CPLE_AppDefined,
+                             "Ignoring subdir '%s' that has a path traversal "
+                             "pattern",
+                             osSubdir.c_str());
+                    continue;
+                }
 
                 FileProp prop;
                 prop.eExists = EXIST_YES;
@@ -279,10 +280,9 @@ class VSISwiftHandle final : public IVSIS3LikeHandle
     VSISwiftHandleHelper *m_poHandleHelper = nullptr;
 
   protected:
-    struct curl_slist *
-    GetCurlHeaders(const std::string &osVerb,
-                   const struct curl_slist *psExistingHeaders) override;
-    virtual bool Authenticate(const char *pszFilename) override;
+    struct curl_slist *GetCurlHeaders(const std::string &osVerb,
+                                      struct curl_slist *psHeaders) override;
+    bool Authenticate(const char *pszFilename) override;
 
   public:
     VSISwiftHandle(VSISwiftFSHandler *poFS, const char *pszFilename,
@@ -469,7 +469,8 @@ int VSISwiftFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
     if (std::count(osFilename.begin(), osFilename.end(), '/') < 2)
         return -1;
 
-    char **papszContents = VSIReadDir(CPLGetPath(osFilename.c_str()));
+    char **papszContents =
+        VSIReadDir(CPLGetPathSafe(osFilename.c_str()).c_str());
     int nRet = CSLFindStringCaseSensitive(
                    papszContents, CPLGetFilename(osFilename.c_str())) >= 0
                    ? 0
@@ -578,7 +579,8 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
             }
 
             struct curl_slist *headers = VSICurlSetOptions(
-                hCurlHandle, poS3HandleHelper->GetURL().c_str(), nullptr);
+                hCurlHandle, poS3HandleHelper->GetURL().c_str(),
+                aosHTTPOptions.List());
             // Disable automatic redirection
             unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_FOLLOWLOCATION, 0);
 
@@ -603,8 +605,7 @@ char **VSISwiftFSHandler::GetFileList(const char *pszDirname, int nMaxFiles,
             unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_ERRORBUFFER,
                                        szCurlErrBuf);
 
-            headers = VSICurlMergeHeaders(
-                headers, poS3HandleHelper->GetCurlHeaders("GET", headers));
+            headers = poS3HandleHelper->GetCurlHeaders("GET", headers);
             unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER,
                                        headers);
 
@@ -702,11 +703,10 @@ VSISwiftHandle::~VSISwiftHandle()
 /*                           GetCurlHeaders()                           */
 /************************************************************************/
 
-struct curl_slist *
-VSISwiftHandle::GetCurlHeaders(const std::string &osVerb,
-                               const struct curl_slist *psExistingHeaders)
+struct curl_slist *VSISwiftHandle::GetCurlHeaders(const std::string &osVerb,
+                                                  struct curl_slist *psHeaders)
 {
-    return m_poHandleHelper->GetCurlHeaders(osVerb, psExistingHeaders);
+    return m_poHandleHelper->GetCurlHeaders(osVerb, psHeaders);
 }
 
 /************************************************************************/
@@ -735,7 +735,6 @@ bool VSISwiftHandle::Authenticate(const char *pszFilename)
  See :ref:`/vsiswift/ documentation <vsiswift>`
  \endverbatim
 
- @since GDAL 2.3
  */
 void VSIInstallSwiftFileHandler(void)
 {

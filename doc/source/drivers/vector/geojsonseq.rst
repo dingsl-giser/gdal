@@ -3,8 +3,6 @@
 GeoJSONSeq: sequence of GeoJSON features
 ========================================
 
-.. versionadded:: 2.4
-
 .. shortname:: GeoJSONSeq
 
 .. built_in_by_default::
@@ -134,7 +132,7 @@ Geometry coordinate precision
 .. versionadded:: GDAL 3.9
 
 On creation, the GeoJSONSeq driver supports using the geometry coordinate
-precision, from th :cpp:class:`OGRGeomCoordinatePrecision` settings of the
+precision, from the :cpp:class:`OGRGeomCoordinatePrecision` settings of the
 :cpp:class:`OGRGeomFieldDefn`. Those settings are used to round the coordinates
 of the geometry of the features to an appropriate decimal precision.
 

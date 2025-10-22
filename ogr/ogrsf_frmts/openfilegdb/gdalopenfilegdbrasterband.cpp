@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -68,9 +52,9 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
 
     FileGDBTable oTable;
 
-    const CPLString osBndFilename(CPLFormFilename(
+    const std::string osBndFilename(CPLFormFilenameSafe(
         m_osDirName, CPLSPrintf("a%08x.gdbtable", nBndIdx), nullptr));
-    if (!oTable.Open(osBndFilename, false))
+    if (!oTable.Open(osBndFilename.c_str(), false))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot open table %s",
                  osBndTableName.c_str());
@@ -416,10 +400,10 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
             nWidth = 1 + static_cast<int>(
                              std::round((dfMaxX - dfMinXAdjusted) / dfResX));
         }
-        m_adfGeoTransform[0] =
+        m_gt[0] =
             (dfBlockOriginX + m_nShiftBlockX * dfBlockGeorefWidth) - dfResX / 2;
-        m_adfGeoTransform[1] = dfResX;
-        m_adfGeoTransform[2] = 0.0;
+        m_gt[1] = dfResX;
+        m_gt[2] = 0.0;
         const double dfBlockGeorefHeight = dfResY * nBlockHeight;
         if (dfMaxY != dfBlockOriginY)
         {
@@ -442,11 +426,10 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
             nHeight = 1 + static_cast<int>(
                               std::round((dfMaxYAdjusted - dfMinY) / dfResY));
         }
-        m_adfGeoTransform[3] =
-            (dfBlockOriginY - m_nShiftBlockY * dfBlockGeorefHeight) +
-            dfResY / 2;
-        m_adfGeoTransform[4] = 0.0;
-        m_adfGeoTransform[5] = -dfResY;
+        m_gt[3] = (dfBlockOriginY - m_nShiftBlockY * dfBlockGeorefHeight) +
+                  dfResY / 2;
+        m_gt[4] = 0.0;
+        m_gt[5] = -dfResY;
     }
 
     // Two cases:
@@ -470,9 +453,9 @@ bool OGROpenFileGDBDataSource::OpenRaster(const GDALOpenInfo *poOpenInfo,
 
             FileGDBTable oTableMain;
 
-            const CPLString osTableMain(CPLFormFilename(
+            const std::string osTableMain(CPLFormFilenameSafe(
                 m_osDirName, CPLSPrintf("a%08x.gdbtable", nTableIdx), nullptr));
-            if (oTableMain.Open(osTableMain, false))
+            if (oTableMain.Open(osTableMain.c_str(), false))
             {
                 const int iRasterFieldIdx = oTableMain.GetFieldIdx("RASTER");
                 if (iRasterFieldIdx >= 0)
@@ -906,8 +889,8 @@ void OGROpenFileGDBDataSource::GuessJPEGQuality(int nOverviewCount)
                 }
                 if (nJPEGSize)
                 {
-                    CPLString osTmpFilename;
-                    osTmpFilename.Printf("/vsimem/_openfilegdb/%p.jpg", this);
+                    const CPLString osTmpFilename(
+                        VSIMemGenerateHiddenFilename("openfilegdb.jpg"));
                     VSIFCloseL(VSIFileFromMemBuffer(
                         osTmpFilename.c_str(),
                         const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize,
@@ -1085,10 +1068,9 @@ void OGROpenFileGDBDataSource::ReadAuxTable(const std::string &osLayerName)
 /*                         GetGeoTransform()                            */
 /************************************************************************/
 
-CPLErr OGROpenFileGDBDataSource::GetGeoTransform(double *padfGeoTransform)
+CPLErr OGROpenFileGDBDataSource::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfGeoTransform, m_adfGeoTransform.data(),
-           sizeof(m_adfGeoTransform));
+    gt = m_gt;
     return m_bHasGeoTransform ? CE_None : CE_Failure;
 }
 
@@ -1551,8 +1533,8 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
                 return CE_Failure;
             }
 
-            CPLString osTmpFilename;
-            osTmpFilename.Printf("/vsimem/_openfilegdb/%p.jpg", this);
+            const CPLString osTmpFilename(
+                VSIMemGenerateHiddenFilename("openfilegdb.jpg"));
             VSIFCloseL(VSIFileFromMemBuffer(
                 osTmpFilename.c_str(),
                 const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize, false));
@@ -1674,8 +1656,8 @@ CPLErr GDALOpenFileGDBRasterBand::IReadBlock(int nBlockXOff, int nBlockYOff,
                 return CE_Failure;
             }
 
-            CPLString osTmpFilename;
-            osTmpFilename.Printf("/vsimem/_openfilegdb/%p.j2k", this);
+            const CPLString osTmpFilename(
+                VSIMemGenerateHiddenFilename("openfilegdb.j2k"));
             VSIFCloseL(VSIFileFromMemBuffer(
                 osTmpFilename.c_str(),
                 const_cast<GByte *>(pabyData + nJPEGOffset), nJPEGSize, false));
@@ -1956,4 +1938,22 @@ GDALRasterAttributeTable *GDALOpenFileGDBRasterBand::GetDefaultRAT()
     m_poRAT = std::make_unique<GDALOpenFileGDBRasterAttributeTable>(
         std::move(poDSNew), osVATTableName, std::move(poVatLayer));
     return m_poRAT.get();
+}
+
+/************************************************************************/
+/*               GDALOpenFileGDBRasterAttributeTable::Clone()           */
+/************************************************************************/
+
+GDALRasterAttributeTable *GDALOpenFileGDBRasterAttributeTable::Clone() const
+{
+    auto poDS = std::make_unique<OGROpenFileGDBDataSource>();
+    GDALOpenInfo oOpenInfo(m_poDS->m_osDirName.c_str(), GA_ReadOnly);
+    bool bRetryFileGDBUnused = false;
+    if (!poDS->Open(&oOpenInfo, bRetryFileGDBUnused))
+        return nullptr;
+    auto poVatLayer = poDS->BuildLayerFromName(m_osVATTableName.c_str());
+    if (!poVatLayer)
+        return nullptr;
+    return new GDALOpenFileGDBRasterAttributeTable(
+        std::move(poDS), m_osVATTableName, std::move(poVatLayer));
 }

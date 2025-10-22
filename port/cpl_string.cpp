@@ -9,23 +9,7 @@
  * Copyright (c) 1998, Daniel Morissette
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * Independent Security Audit 2003/04/04 Andrey Kiselev:
@@ -316,7 +300,6 @@ char **CSLMerge(char **papszOrig, CSLConstList papszOverride)
  * @return a string list with the files lines, now owned by caller. To be freed
  * with CSLDestroy()
  *
- * @since GDAL 1.7.0
  */
 
 char **CSLLoad2(const char *pszFname, int nMaxLines, int nMaxCols,
@@ -699,7 +682,6 @@ int CSLFindString(CSLConstList papszList, const char *pszTarget)
  *
  * @return the index of the string within the list or -1 on failure.
  *
- * @since GDAL 2.0
  */
 
 int CSLFindStringCaseSensitive(CSLConstList papszList, const char *pszTarget)
@@ -1142,7 +1124,6 @@ static const char *CPLvsnprintf_get_end_of_formatting(const char *fmt)
  * @return the number of characters (excluding terminating nul) that would be
  * written if size is big enough. Or potentially -1 with Microsoft C runtime
  * for Visual Studio < 2015.
- * @since GDAL 2.0
  */
 int CPLvsnprintf(char *str, size_t size, CPL_FORMAT_STRING(const char *fmt),
                  va_list args)
@@ -1361,7 +1342,6 @@ int CPLvsnprintf(char *str, size_t size, CPL_FORMAT_STRING(const char *fmt),
  * @return the number of characters (excluding terminating nul) that would be
  * written if size is big enough. Or potentially -1 with Microsoft C runtime
  * for Visual Studio < 2015.
- * @since GDAL 2.0
  */
 
 int CPLsnprintf(char *str, size_t size, CPL_FORMAT_STRING(const char *fmt), ...)
@@ -1391,7 +1371,6 @@ int CPLsnprintf(char *str, size_t size, CPL_FORMAT_STRING(const char *fmt), ...)
   * @param ... arguments
   * @return the number of characters (excluding terminating nul) written in
 ` * output buffer.
-  * @since GDAL 2.0
   */
 int CPLsprintf(char *str, CPL_FORMAT_STRING(const char *fmt), ...)
 {
@@ -1417,7 +1396,6 @@ int CPLsprintf(char *str, CPL_FORMAT_STRING(const char *fmt), ...)
  * @param ... arguments
  * @return the number of characters (excluding terminating nul) written in
  * output buffer.
- * @since GDAL 2.0
  */
 int CPLprintf(CPL_FORMAT_STRING(const char *fmt), ...)
 {
@@ -1478,7 +1456,6 @@ int CPLprintf(CPL_FORMAT_STRING(const char *fmt), ...)
  * @param fmt formatting string
  * @param ... arguments
  * @return the number of matched patterns;
- * @since GDAL 2.0
  */
 #ifdef DOXYGEN_XML
 int CPLsscanf(const char *str, const char *fmt, ...)
@@ -1748,6 +1725,137 @@ int CSLFindName(CSLConstList papszStrList, const char *pszName)
         ++papszStrList;
     }
     return -1;
+}
+
+/************************************************************************/
+/*                     CPLParseMemorySize()                             */
+/************************************************************************/
+
+/** Parse a memory size from a string.
+ *
+ * The string may indicate the units of the memory (e.g., "230k", "500 MB"),
+ * using the prefixes "k", "m", or "g" in either lower or upper-case,
+ * optionally followed by a "b" or "B". The string may alternatively specify
+ * memory as a fraction of the usable RAM (e.g., "25%"). Spaces before the
+ * number, between the number and the units, or after the units are ignored,
+ * but other characters will cause a parsing failure. If the string cannot
+ * be understood, the function will return CE_Failure.
+ *
+ * @param pszValue the string to parse
+ * @param[out] pnValue the parsed size, converted to bytes (if unit was specified)
+ * @param[out] pbUnitSpecified whether the string indicated the units
+ *
+ * @return CE_None on success, CE_Failure otherwise
+ * @since 3.10
+ */
+CPLErr CPLParseMemorySize(const char *pszValue, GIntBig *pnValue,
+                          bool *pbUnitSpecified)
+{
+    const char *start = pszValue;
+    char *end = nullptr;
+
+    // trim leading whitespace
+    while (*start == ' ')
+    {
+        start++;
+    }
+
+    auto len = CPLStrnlen(start, 100);
+    double value = CPLStrtodM(start, &end);
+    const char *unit = nullptr;
+    bool unitIsNotPercent = false;
+
+    if (end == start)
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg, "Received non-numeric value: %s",
+                 pszValue);
+        return CE_Failure;
+    }
+
+    if (value < 0 || !std::isfinite(value))
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Memory size must be a positive number or zero.");
+        return CE_Failure;
+    }
+
+    for (const char *c = end; c < start + len; c++)
+    {
+        if (unit == nullptr)
+        {
+            // check various suffixes and convert number into bytes
+            if (*c == '%')
+            {
+                if (value < 0 || value > 100)
+                {
+                    CPLError(CE_Failure, CPLE_IllegalArg,
+                             "Memory percentage must be between 0 and 100.");
+                    return CE_Failure;
+                }
+                auto bytes = CPLGetUsablePhysicalRAM();
+                if (bytes == 0)
+                {
+                    CPLError(CE_Failure, CPLE_NotSupported,
+                             "Cannot determine usable physical RAM");
+                    return CE_Failure;
+                }
+                value *= static_cast<double>(bytes / 100);
+                unit = c;
+            }
+            else
+            {
+                switch (*c)
+                {
+                    case 'G':
+                    case 'g':
+                        value *= 1024;
+                        [[fallthrough]];
+                    case 'M':
+                    case 'm':
+                        value *= 1024;
+                        [[fallthrough]];
+                    case 'K':
+                    case 'k':
+                        value *= 1024;
+                        unit = c;
+                        unitIsNotPercent = true;
+                        break;
+                    case ' ':
+                        break;
+                    default:
+                        CPLError(CE_Failure, CPLE_IllegalArg,
+                                 "Failed to parse memory size: %s", pszValue);
+                        return CE_Failure;
+                }
+            }
+        }
+        else if (unitIsNotPercent && c == unit + 1 && (*c == 'b' || *c == 'B'))
+        {
+            // ignore 'B' or 'b' as part of unit
+            continue;
+        }
+        else if (*c != ' ')
+        {
+            CPLError(CE_Failure, CPLE_IllegalArg,
+                     "Failed to parse memory size: %s", pszValue);
+            return CE_Failure;
+        }
+    }
+
+    if (value > static_cast<double>(std::numeric_limits<GIntBig>::max()) ||
+        value > static_cast<double>(std::numeric_limits<size_t>::max()))
+    {
+        CPLError(CE_Failure, CPLE_IllegalArg, "Memory size is too large: %s",
+                 pszValue);
+        return CE_Failure;
+    }
+
+    *pnValue = static_cast<GIntBig>(value);
+    if (pbUnitSpecified)
+    {
+        *pbUnitSpecified = (unit != nullptr);
+    }
+    return CE_None;
 }
 
 /**********************************************************************
@@ -2078,7 +2186,8 @@ void CSLSetNameValueSeparator(char **papszList, const char *pszSeparator)
  * '$', '-', '_', '.', '+', '!', '*', ''', '(', ')' and ',' (see RFC1738) are
  * converted to a percent followed by a two digit hex encoding of the character
  * (leading zero supplied if needed).  This is the mechanism used for encoding
- * values to be passed in URLs.
+ * values to be passed in URLs. Note that this is different from what
+ * CPLString::URLEncode() does.
  *
  * CPLES_SQL(3): All single quotes are replaced with two single quotes.
  * Suitable for use when constructing literal values for SQL commands where
@@ -2680,12 +2789,19 @@ char *CPLUnescapeString(const char *pszInput, int *pnLength, int nScheme)
 char *CPLBinaryToHex(int nBytes, const GByte *pabyData)
 
 {
-    char *pszHex = static_cast<char *>(CPLMalloc(nBytes * 2 + 1));
+    CPLAssert(nBytes >= 0);
+    char *pszHex = static_cast<char *>(
+        VSI_MALLOC_VERBOSE(static_cast<size_t>(nBytes) * 2 + 1));
+    if (!pszHex)
+    {
+        pszHex = CPLStrdup("");
+        return pszHex;
+    }
     pszHex[nBytes * 2] = '\0';
 
     constexpr char achHex[] = "0123456789ABCDEF";
 
-    for (int i = 0; i < nBytes; ++i)
+    for (size_t i = 0; i < static_cast<size_t>(nBytes); ++i)
     {
         const int nLow = pabyData[i] & 0x0f;
         const int nHigh = (pabyData[i] & 0xf0) >> 4;
@@ -2791,6 +2907,10 @@ CPLValueType CPLGetValueType(const char *pszValue)
     // Skip leading + or -.
     if (*pszValue == '+' || *pszValue == '-')
         ++pszValue;
+
+    constexpr char DIGIT_ZERO = '0';
+    if (pszValue[0] == DIGIT_ZERO && pszValue[1] != '\0' && pszValue[1] != '.')
+        return CPL_VALUE_STRING;
 
     bool bFoundDot = false;
     bool bFoundExponent = false;
@@ -2900,7 +3020,6 @@ if( CPLStrlcpy(szDest, "abcde", sizeof(szDest)) >= sizeof(szDest) )
  *
  * @return the length of the source string (=strlen(pszSrc))
  *
- * @since GDAL 1.7.0
  */
 size_t CPLStrlcpy(char *pszDest, const char *pszSrc, size_t nDestSize)
 {
@@ -2957,7 +3076,6 @@ if( CPLStrlcat(szDest, "cde", sizeof(szDest)) >= sizeof(szDest) )
  *         If strlen(pszDest_before) >= nDestSize, then it returns
  *         nDestSize + strlen(pszSrc)
  *
- * @since GDAL 1.7.0
  */
 size_t CPLStrlcat(char *pszDest, const char *pszSrc, size_t nDestSize)
 {
@@ -2991,7 +3109,6 @@ size_t CPLStrlcat(char *pszDest, const char *pszSrc, size_t nDestSize)
  * @return strlen(pszStr) if the length is lesser than nMaxLen, otherwise
  * nMaxLen if the NUL character has not been found in the first nMaxLen bytes.
  *
- * @since GDAL 1.7.0
  */
 
 size_t CPLStrnlen(const char *pszStr, size_t nMaxLen)
@@ -3016,7 +3133,6 @@ size_t CPLStrnlen(const char *pszStr, size_t nMaxLen)
  *
  * @return NULL terminated list of strings to free with CSLDestroy()
  *
- * @since GDAL 2.1
  */
 char **CSLParseCommandLine(const char *pszCommandLine)
 {
@@ -3051,4 +3167,59 @@ int CPLToupper(int c)
 int CPLTolower(int c)
 {
     return (c >= 'A' && c <= 'Z') ? (c - 'A' + 'a') : c;
+}
+
+/************************************************************************/
+/*                      CPLRemoveSQLComments()                          */
+/************************************************************************/
+
+/** Remove SQL comments from a string
+ *
+ * @param osInput Input string.
+ * @since GDAL 3.11
+ */
+std::string CPLRemoveSQLComments(const std::string &osInput)
+{
+    const CPLStringList aosLines(
+        CSLTokenizeStringComplex(osInput.c_str(), "\r\n", FALSE, FALSE));
+    std::string osSQL;
+    for (const char *pszLine : aosLines)
+    {
+        char chQuote = 0;
+        int i = 0;
+        for (; pszLine[i] != '\0'; ++i)
+        {
+            if (chQuote)
+            {
+                if (pszLine[i] == chQuote)
+                {
+                    // Deal with escaped quote character which is repeated,
+                    // so 'foo''bar' or "foo""bar"
+                    if (pszLine[i + 1] == chQuote)
+                    {
+                        i++;
+                    }
+                    else
+                    {
+                        chQuote = 0;
+                    }
+                }
+            }
+            else if (pszLine[i] == '\'' || pszLine[i] == '"')
+            {
+                chQuote = pszLine[i];
+            }
+            else if (pszLine[i] == '-' && pszLine[i + 1] == '-')
+            {
+                break;
+            }
+        }
+        if (i > 0)
+        {
+            if (!osSQL.empty())
+                osSQL += ' ';
+            osSQL.append(pszLine, i);
+        }
+    }
+    return osSQL;
 }

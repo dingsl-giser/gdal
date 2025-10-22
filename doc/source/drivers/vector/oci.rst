@@ -177,8 +177,7 @@ The following layer creation options are supported:
       :choices: 2, 3
 
       This may be set to 2 or 3 to force the dimension of the
-      created layer. Prior to GDAL 2.2, 3 is used by default. Starting with
-      GDAL 2.2, the dimension of the layer geometry type is used by
+      created layer. The dimension of the layer geometry type is used by
       default.
 
 -  .. lco:: SPATIAL_INDEX
@@ -187,8 +186,7 @@ The following layer creation options are supported:
       This may be set to NO to disable creation of a
       spatial index when a layer load is complete. By default an index is
       created if any of the layer features have valid geometries. The
-      default is "YES". Note: option was called INDEX in releases before
-      GDAL 2
+      default is "YES".
 
 -  .. lco:: INDEX_PARAMETERS
 
@@ -288,6 +286,17 @@ The following layer creation options are supported:
       name, it can be supplied with the GEOMETRY_NAME layer creation
       option.
 
+-  .. lco:: TIMESTAMP_WITH_TIME_ZONE
+      :choices: YES, NO
+      :default: NO
+      :since: 3.10.1
+
+      Whether DateTime fields should be created with TIMESTAMP WITH TIME ZONE
+      Oracle type (otherwise without timezone).
+      When creating a field, if it advertises a known or mixed time zone,
+      TIMESTAMP_WITH_TIME_ZONE will default to YES, otherwise it will default to
+      NO.
+
 Layer Open Options
 ~~~~~~~~~~~~~~~~~~
 
@@ -319,17 +328,6 @@ created with the features from abc.shp and attributes from abc.dbf.
 ::
 
    % ogr2ogr -f OCI OCI:warmerda/password@gdal800.dreadfest.com abc.shp
-
-This second example loads a political boundaries layer from VPF (via the
-:ref:`OGDI driver <vector.ogdi>`), and renames the layer from the cryptic
-OGDI layer name to something more sensible. If an existing table of the
-desired name exists it is overwritten.
-
-::
-
-   % ogr2ogr  -f OCI OCI:warmerda/password \
-           gltp:/vrf/usr4/mpp1/v0eur/vmaplv0/eurnasia \
-           -lco OVERWRITE=yes -nln polbndl_bnd 'polbndl@bnd(*)_line'
 
 This example shows using ogrinfo to evaluate an SQL query statement
 within Oracle. More sophisticated Oracle Spatial specific queries may

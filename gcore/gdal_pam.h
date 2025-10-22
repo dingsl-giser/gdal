@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL Core
  * Purpose:  Declaration for Peristable Auxiliary Metadata classes.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_PAM_H_INCLUDED
@@ -32,8 +15,25 @@
 
 //! @cond Doxygen_Suppress
 
+#if !defined(GDAL_COMPILATION) &&                                              \
+    !defined(GDAL_PAM_SKIP_OTHER_GDAL_HEADERS) && !defined(GDAL_4_0_COMPAT)
+
 #include "cpl_minixml.h"
 #include "gdal_priv.h"
+#include "gdal_pam_multidim.h"
+
+#else
+
+#include "gdal_dataset.h"
+#include "gdal_rasterband.h"
+#include "gdal_gcp.h"
+
+typedef struct CPLXMLNode CPLXMLNode;
+
+#endif
+
+#include <array>
+#include <cstddef>
 #include <limits>
 #include <map>
 #include <vector>
@@ -53,6 +53,7 @@ class GDALPamRasterBand;
 #define GCIF_SCALEOFFSET 0x008000
 #define GCIF_UNITTYPE 0x010000
 #define GCIF_COLORTABLE 0x020000
+/* Same value as GCIF_COLORTABLE */
 #define GCIF_COLORINTERP 0x020000
 #define GCIF_BAND_METADATA 0x040000
 #define GCIF_RAT 0x080000
@@ -65,8 +66,8 @@ class GDALPamRasterBand;
 #define GCIF_PAM_DEFAULT                                                       \
     (GCIF_GEOTRANSFORM | GCIF_PROJECTION | GCIF_METADATA | GCIF_GCPS |         \
      GCIF_NODATA | GCIF_CATEGORYNAMES | GCIF_MINMAX | GCIF_SCALEOFFSET |       \
-     GCIF_UNITTYPE | GCIF_COLORTABLE | GCIF_COLORINTERP | GCIF_BAND_METADATA | \
-     GCIF_RAT | GCIF_MASK | GCIF_ONLY_IF_MISSING | GCIF_PROCESS_BANDS |        \
+     GCIF_UNITTYPE | GCIF_COLORTABLE | GCIF_BAND_METADATA | GCIF_RAT |         \
+     GCIF_MASK | GCIF_ONLY_IF_MISSING | GCIF_PROCESS_BANDS |                   \
      GCIF_BAND_DESCRIPTION)
 
 /* GDAL PAM Flags */
@@ -94,8 +95,8 @@ class GDALDatasetPamInfo
 
     OGRSpatialReference *poSRS = nullptr;
 
-    int bHaveGeoTransform = false;
-    double adfGeoTransform[6]{0, 0, 0, 0, 0, 0};
+    bool bHaveGeoTransform = false;
+    GDALGeoTransform gt{};
 
     std::vector<gdal::GCP> asGCPs{};
     OGRSpatialReference *poGCP_SRS = nullptr;
@@ -152,13 +153,16 @@ class CPL_DLL GDALPamDataset : public GDALDataset
   public:
     ~GDALPamDataset() override;
 
+    CPLErr Close() override;
+
     CPLErr FlushCache(bool bAtClosing) override;
 
     const OGRSpatialReference *GetSpatialRef() const override;
+    const OGRSpatialReference *GetSpatialRefRasterOnly() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    CPLErr GetGeoTransform(double *) override;
-    CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &) override;
     void DeleteGeoTransform();
 
     int GetGCPCount() override;
@@ -211,6 +215,9 @@ class CPL_DLL GDALPamDataset : public GDALDataset
 
   private:
     CPL_DISALLOW_COPY_ASSIGN(GDALPamDataset)
+
+    // cached return of GetMetadataItem("OVERVIEW_FILE", "OVERVIEWS")
+    std::string m_osOverviewFile{};
 };
 
 //! @cond Doxygen_Suppress
@@ -268,6 +275,8 @@ struct GDALRasterBandPamInfo
 
     bool bOffsetSet = false;
     bool bScaleSet = false;
+
+    void CopyFrom(const GDALRasterBandPamInfo &sOther);
 };
 
 //! @endcond
@@ -365,88 +374,6 @@ class CPL_DLL GDALPamRasterBand : public GDALRasterBand
 };
 
 //! @cond Doxygen_Suppress
-
-/* ******************************************************************** */
-/*                          GDALPamMultiDim                             */
-/* ******************************************************************** */
-
-/** Class that serializes/deserializes metadata on multidimensional objects.
- * Currently SRS on GDALMDArray.
- */
-class CPL_DLL GDALPamMultiDim
-{
-    struct Private;
-    std::unique_ptr<Private> d;
-
-    void Load();
-    void Save();
-
-  public:
-    explicit GDALPamMultiDim(const std::string &osFilename);
-    virtual ~GDALPamMultiDim();
-
-    std::shared_ptr<OGRSpatialReference>
-    GetSpatialRef(const std::string &osArrayFullName,
-                  const std::string &osContext);
-
-    void SetSpatialRef(const std::string &osArrayFullName,
-                       const std::string &osContext,
-                       const OGRSpatialReference *poSRS);
-
-    CPLErr GetStatistics(const std::string &osArrayFullName,
-                         const std::string &osContext, bool bApproxOK,
-                         double *pdfMin, double *pdfMax, double *pdfMean,
-                         double *pdfStdDev, GUInt64 *pnValidCount);
-
-    void SetStatistics(const std::string &osArrayFullName,
-                       const std::string &osContext, bool bApproxStats,
-                       double dfMin, double dfMax, double dfMean,
-                       double dfStdDev, GUInt64 nValidCount);
-
-    void ClearStatistics();
-
-    void ClearStatistics(const std::string &osArrayFullName,
-                         const std::string &osContext);
-
-    static std::shared_ptr<GDALPamMultiDim>
-    GetPAM(const std::shared_ptr<GDALMDArray> &poParent);
-};
-
-/* ******************************************************************** */
-/*                          GDALPamMDArray                              */
-/* ******************************************************************** */
-
-/** Class that relies on GDALPamMultiDim to serializes/deserializes metadata. */
-class CPL_DLL GDALPamMDArray : public GDALMDArray
-{
-    std::shared_ptr<GDALPamMultiDim> m_poPam;
-
-  protected:
-    GDALPamMDArray(const std::string &osParentName, const std::string &osName,
-                   const std::shared_ptr<GDALPamMultiDim> &poPam,
-                   const std::string &osContext = std::string());
-
-    bool SetStatistics(bool bApproxStats, double dfMin, double dfMax,
-                       double dfMean, double dfStdDev, GUInt64 nValidCount,
-                       CSLConstList papszOptions) override;
-
-  public:
-    const std::shared_ptr<GDALPamMultiDim> &GetPAM() const
-    {
-        return m_poPam;
-    }
-
-    CPLErr GetStatistics(bool bApproxOK, bool bForce, double *pdfMin,
-                         double *pdfMax, double *pdfMean, double *padfStdDev,
-                         GUInt64 *pnValidCount, GDALProgressFunc pfnProgress,
-                         void *pProgressData) override;
-
-    void ClearStatistics() override;
-
-    bool SetSpatialRef(const OGRSpatialReference *poSRS) override;
-
-    std::shared_ptr<OGRSpatialReference> GetSpatialRef() const override;
-};
 
 // These are mainly helper functions for internal use.
 int CPL_DLL PamParseHistogram(CPLXMLNode *psHistItem, double *pdfMin,

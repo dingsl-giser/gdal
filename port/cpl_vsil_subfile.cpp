@@ -8,23 +8,7 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2009-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -33,9 +17,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 #include <limits>
 
 #include "cpl_conv.h"
@@ -91,9 +72,9 @@ class VSISubFileFilesystemHandler final : public VSIFilesystemHandler
                              vsi_l_offset &nSubFileOffset,
                              vsi_l_offset &nSubFileSize);
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError,
-                           CSLConstList /* papszOptions */) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList /* papszOptions */) override;
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     int Unlink(const char *pszFilename) override;
@@ -354,10 +335,10 @@ int VSISubFileFilesystemHandler::DecomposePath(const char *pszPath,
 /*                                Open()                                */
 /************************************************************************/
 
-VSIVirtualHandle *
+VSIVirtualHandleUniquePtr
 VSISubFileFilesystemHandler::Open(const char *pszFilename,
-                                  const char *pszAccess, bool /* bSetError */,
-                                  CSLConstList /* papszOptions */)
+                                  const char *pszAccess, bool bSetError,
+                                  CSLConstList papszOptions)
 
 {
     if (!STARTS_WITH_CI(pszFilename, "/vsisubfile/"))
@@ -387,7 +368,8 @@ VSISubFileFilesystemHandler::Open(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Open the underlying file.                                       */
     /* -------------------------------------------------------------------- */
-    VSILFILE *fp = VSIFOpenL(osSubFilePath, pszAccess);
+    auto fp = VSIFilesystemHandler::OpenStatic(osSubFilePath, pszAccess,
+                                               bSetError, papszOptions);
 
     if (fp == nullptr)
         return nullptr;
@@ -395,27 +377,23 @@ VSISubFileFilesystemHandler::Open(const char *pszFilename,
     /* -------------------------------------------------------------------- */
     /*      Setup the file handle on this file.                             */
     /* -------------------------------------------------------------------- */
-    VSISubFileHandle *poHandle = new VSISubFileHandle;
+    auto poHandle = std::make_unique<VSISubFileHandle>();
 
-    poHandle->fp = fp;
+    poHandle->fp = fp.release();
     poHandle->nSubregionOffset = nOff;
     poHandle->nSubregionSize = nSize;
 
     // In read-only mode validate (offset, size) against underlying file size
     if (strchr(pszAccess, 'r') != nullptr && strchr(pszAccess, '+') == nullptr)
     {
-        if (VSIFSeekL(fp, 0, SEEK_END) != 0)
+        if (VSIFSeekL(poHandle->fp, 0, SEEK_END) != 0)
         {
-            poHandle->Close();
-            delete poHandle;
             return nullptr;
         }
-        vsi_l_offset nFpSize = VSIFTellL(fp);
+        vsi_l_offset nFpSize = VSIFTellL(poHandle->fp);
         // For a directory, the size will be max(vsi_l_offset) / 2
         if (nFpSize == ~(static_cast<vsi_l_offset>(0)) / 2 || nOff > nFpSize)
         {
-            poHandle->Close();
-            delete poHandle;
             return nullptr;
         }
         if (nOff + nSize > nFpSize)
@@ -425,14 +403,12 @@ VSISubFileFilesystemHandler::Open(const char *pszFilename,
         }
     }
 
-    if (VSIFSeekL(fp, nOff, SEEK_SET) != 0)
+    if (VSIFSeekL(poHandle->fp, nOff, SEEK_SET) != 0)
     {
-        poHandle->Close();
-        delete poHandle;
-        poHandle = nullptr;
+        poHandle.reset();
     }
 
-    return poHandle;
+    return VSIVirtualHandleUniquePtr(poHandle.release());
 }
 
 /************************************************************************/

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  ASI CEOS Translator
  * Purpose:  CEOS field layout recipes.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2000, Atlantis Scientific Inc
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ceos.h"
@@ -97,7 +80,7 @@ static const CeosRecipeType_t RadarSatRecipe[] = {
     {CEOS_REC_DATATYPE, 1, CEOS_IMAGRY_OPT_FILE, IMAGE_OPT, 429, 4,
      CEOS_REC_TYP_A}, /* Data type */
     {CEOS_REC_BPR, 0, CEOS_IMAGRY_OPT_FILE, IMAGE_OPT, 0, 0,
-     CEOS_REC_TYP_A}, /* For Defeault CEOS, this is done using other vals */
+     CEOS_REC_TYP_A}, /* For Default CEOS, this is done using other vals */
     {CEOS_REC_LINES, 1, CEOS_IMAGRY_OPT_FILE, IMAGE_OPT, 237, 8,
      CEOS_REC_TYP_I}, /* How many lines */
     {CEOS_REC_TBP, 0, CEOS_IMAGRY_OPT_FILE, IMAGE_OPT, 261, 4, CEOS_REC_TYP_I},
@@ -152,7 +135,7 @@ static const CeosRecipeType_t JersRecipe[] = {
     {CEOS_REC_DATATYPE, 1, CEOS_IMAGRY_OPT_FILE, IMAGE_JERS_OPT, 429, 4,
      CEOS_REC_TYP_A}, /* Data type */
     {CEOS_REC_BPR, 0, CEOS_IMAGRY_OPT_FILE, IMAGE_JERS_OPT, 0, 0,
-     CEOS_REC_TYP_A}, /* For Defeault CEOS, this is done using other vals */
+     CEOS_REC_TYP_A}, /* For Default CEOS, this is done using other vals */
     {CEOS_REC_LINES, 1, CEOS_IMAGRY_OPT_FILE, IMAGE_JERS_OPT, 237, 8,
      CEOS_REC_TYP_I}, /* How many lines */
     {CEOS_REC_TBP, 0, CEOS_IMAGRY_OPT_FILE, IMAGE_JERS_OPT, 261, 4,

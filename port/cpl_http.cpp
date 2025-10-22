@@ -8,23 +8,7 @@
  * Copyright (c) 2006, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -51,6 +35,9 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
+#ifdef HAVE_WFLAG_CAST_FUNCTION_TYPE
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+#endif
 #endif
 
 #ifdef HAVE_CURL
@@ -533,7 +520,6 @@ constexpr TupleEnvVarOptionName asAssocEnvVarOptionName[] = {
     {"GDAL_CURL_CA_BUNDLE", "CAINFO"},
     {"CURL_CA_BUNDLE", "CAINFO"},
     {"SSL_CERT_FILE", "CAINFO"},
-    {"GDAL_HTTP_HEADER_FILE", "HEADER_FILE"},
     {"GDAL_HTTP_CAPATH", "CAPATH"},
     {"GDAL_HTTP_SSL_VERIFYSTATUS", "SSL_VERIFYSTATUS"},
     {"GDAL_HTTP_USE_CAPI_STORE", "USE_CAPI_STORE"},
@@ -550,6 +536,7 @@ constexpr TupleEnvVarOptionName asAssocEnvVarOptionName[] = {
     {"GDAL_HTTP_TCP_KEEPALIVE", "TCP_KEEPALIVE"},
     {"GDAL_HTTP_TCP_KEEPIDLE", "TCP_KEEPIDLE"},
     {"GDAL_HTTP_TCP_KEEPINTVL", "TCP_KEEPINTVL"},
+    {"GDAL_HTTP_PATH_VERBATIM", "PATH_VERBATIM"},
 };
 
 char **CPLHTTPGetOptionsFromEnv(const char *pszFilename)
@@ -635,7 +622,8 @@ static double CPLHTTPGetNewRetryDelay(int response_code, double dfOldDelay,
               (strstr(pszCurlError, "Connection timed out") ||
                strstr(pszCurlError, "Operation timed out") ||
                strstr(pszCurlError, "Connection reset by peer") ||
-               strstr(pszCurlError, "Connection was reset"))))
+               strstr(pszCurlError, "Connection was reset") ||
+               strstr(pszCurlError, "SSL connection timeout"))))
     {
         bRetry = true;
     }
@@ -652,8 +640,11 @@ static double CPLHTTPGetNewRetryDelay(int response_code, double dfOldDelay,
 
         // Use an exponential backoff factor of 2 plus some random jitter
         // We don't care about cryptographic quality randomness, hence:
-        // coverity[dont_call]
+#ifndef __COVERITY__
         return dfOldDelay * (2 + rand() * 0.5 / RAND_MAX);
+#else
+        return dfOldDelay * 2;
+#endif
     }
     else
     {
@@ -1049,7 +1040,7 @@ int CPLHTTPPopFetchCallback(void)
  * <ul>
  * <li>CONNECTTIMEOUT=val, where
  * val is in seconds (possibly with decimals). This is the maximum delay for the
- * connection to be established before being aborted (GDAL >= 2.2).
+ * connection to be established before being aborted.
  * Corresponding configuration option: GDAL_HTTP_CONNECTTIMEOUT.
  * </li>
  * <li>TIMEOUT=val, where val is in seconds. This is the maximum delay for the
@@ -1059,11 +1050,11 @@ int CPLHTTPPopFetchCallback(void)
  * <li>LOW_SPEED_TIME=val,
  * where val is in seconds. This is the maximum time where the transfer speed
  * should be below the LOW_SPEED_LIMIT (if not specified 1b/s), before the
- * transfer to be considered too slow and aborted. (GDAL >= 2.1).
+ * transfer to be considered too slow and aborted.
  * Corresponding configuration option: GDAL_HTTP_LOW_SPEED_TIME.
  * </li>
  * <li>LOW_SPEED_LIMIT=val, where val is in bytes/second. See LOW_SPEED_TIME.
- * Has only effect if LOW_SPEED_TIME is specified too. (GDAL >= 2.1).
+ * Has only effect if LOW_SPEED_TIME is specified too.
  * Corresponding configuration option: GDAL_HTTP_LOW_SPEED_LIMIT.
  * </li>
  * <li>HEADERS=val, where val is an extra header to use when getting a web page.
@@ -1080,7 +1071,7 @@ int CPLHTTPPopFetchCallback(void)
  * </li>
  * <li>HEADER_FILE=filename: filename of a text file with "key: value" headers.
  *     The content of the file is not cached, and thus it is read again before
- *     issuing each HTTP request. (GDAL >= 2.2)
+ *     issuing each HTTP request.
  * Corresponding configuration option: GDAL_HTTP_HEADER_FILE.
  * </li>
  * <li>HTTPAUTH=[BASIC/NTLM/NEGOTIATE/ANY/ANYSAFE/BEARER] to specify an
@@ -1149,10 +1140,9 @@ int CPLHTTPPopFetchCallback(void)
  * </li>
  * <li>COOKIE=val, where val is formatted as COOKIE1=VALUE1; COOKIE2=VALUE2;...
  * Corresponding configuration option: GDAL_HTTP_COOKIE.</li>
- * <li>COOKIEFILE=val, where val is file name to read cookies from
- * (GDAL >= 2.4).
+ * <li>COOKIEFILE=val, where val is file name to read cookies from.
  * Corresponding configuration option: GDAL_HTTP_COOKIEFILE.</li>
- * <li>COOKIEJAR=val, where val is file name to store cookies to (GDAL >= 2.4).
+ * <li>COOKIEJAR=val, where val is file name to store cookies to.
  * Corresponding configuration option: GDAL_HTTP_COOKIEJAR.</li>
  * <li>MAX_RETRY=val, where val is the maximum number of
  * retry attempts, when a retry is allowed (cf RETRY_CODES option).
@@ -1168,17 +1158,17 @@ int CPLHTTPPopFetchCallback(void)
  * HTTP or Curl error message. (GDAL >= 3.10).
  * Corresponding configuration option: GDAL_HTTP_RETRY_CODES.
  * </li>
- * <li>MAX_FILE_SIZE=val, where val is a number of bytes (GDAL >= 2.2)
+ * <li>MAX_FILE_SIZE=val, where val is a number of bytes.
  * No corresponding configuration option.
  * </li>
  * <li>CAINFO=/path/to/bundle.crt. This is path to Certificate Authority (CA)
  *     bundle file. By default, it will be looked for in a system location. If
  *     the CAINFO option is not defined, GDAL will also look in the
  *     CURL_CA_BUNDLE and SSL_CERT_FILE environment variables respectively
- *     and use the first one found as the CAINFO value (GDAL >= 2.1.3). The
+ *     and use the first one found as the CAINFO value. The
  *     GDAL_CURL_CA_BUNDLE environment variable may also be used to set the
  *     CAINFO value in GDAL >= 3.2.</li>
- * <li>HTTP_VERSION=1.0/1.1/2/2TLS (GDAL >= 2.3)/2PRIOR_KNOWLEDGE (GDAL >= 3.10).
+ * <li>HTTP_VERSION=1.0/1.1/2/2TLS/2PRIOR_KNOWLEDGE (2PRIOR_KNOWLEDGE since GDAL 3.10).
  *     Specify HTTP version to use.
  *     Will default to 1.1 generally (except on some controlled environments,
  *     like Google Compute Engine VMs, where 2TLS will be the default).
@@ -1189,16 +1179,15 @@ int CPLHTTPPopFetchCallback(void)
  *     HTTP/2.
  *     Corresponding configuration option: GDAL_HTTP_VERSION.
  * </li>
- * <li>SSL_VERIFYSTATUS=YES/NO (GDAL >= 2.3, and curl >= 7.41): determines
+ * <li>SSL_VERIFYSTATUS=YES/NO (curl >= 7.41): determines
  * whether the status of the server cert using the "Certificate Status Request"
  * TLS extension (aka. OCSP stapling) should be checked. If this option is
  * enabled but the server does not support the TLS extension, the verification
  * will fail. Default to NO.
  * Corresponding configuration option: GDAL_HTTP_SSL_VERIFYSTATUS.
  * </li>
- * <li>USE_CAPI_STORE=YES/NO (GDAL >= 2.3,
- * Windows only): whether CA certificates from the Windows certificate store.
- * Defaults to NO.
+ * <li>USE_CAPI_STORE=YES/NO (Windows only): whether CA certificates from the
+ * Windows certificate store. Defaults to NO.
  * Corresponding configuration option: GDAL_HTTP_USE_CAPI_STORE.
  * </li>
  * <li>TCP_KEEPALIVE=YES/NO (GDAL >= 3.6): whether to
@@ -1236,6 +1225,12 @@ int CPLHTTPPopFetchCallback(void)
  * <li>KEYPASSWD=string (GDAL >= 3.7): Passphrase to private key.
  * Cf https://curl.se/libcurl/c/CURLOPT_KEYPASSWD.html.
  * Corresponding configuration option: GDAL_HTTP_KEYPASSWD.
+ * <li>PATH_VERBATIM=[YES/NO] Can be set to YES so that sequences of "/../" or "/./"
+ * that may exist in the URL's path part are kept as it. Otherwise, by default,
+ * they are squashed, according to RFC 3986 section 5.2.4
+ * Cf https://curl.se/libcurl/c/CURLOPT_PATH_AS_IS.html
+ * Corresponding configuration option: GDAL_HTTP_PATH_VERBATIM.
+ * </li>
  * </ul>
  *
  * If an option is specified through papszOptions and as a configuration option,
@@ -1776,7 +1771,6 @@ class CPLHTTPErrorBuffer
  * @return an array of CPLHTTPResult* structures that must be freed by
  * CPLHTTPDestroyMultiResult() or NULL if libcurl support is disabled
  *
- * @since GDAL 2.3
  */
 CPLHTTPResult **CPLHTTPMultiFetch(const char *const *papszURL, int nURLCount,
                                   int nMaxSimultaneous,
@@ -2031,7 +2025,6 @@ CPLHTTPResult **CPLHTTPMultiFetch(const char *const *papszURL, int nURLCount,
  *
  * @param papsResults pointer to the return value of CPLHTTPMultiFetch()
  * @param nCount value of the nURLCount parameter passed to CPLHTTPMultiFetch()
- * @since GDAL 2.3
  */
 void CPLHTTPDestroyMultiResult(CPLHTTPResult **papsResults, int nCount)
 {
@@ -2140,11 +2133,19 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     {
         unchecked_curl_easy_setopt(http_handle, CURLOPT_VERBOSE, 1);
 
-        if (CPLGetConfigOption("CPL_DEBUG", nullptr) != nullptr)
+        if (CPLIsDebugEnabled())
         {
             unchecked_curl_easy_setopt(http_handle, CURLOPT_DEBUGFUNCTION,
                                        CPLHTTPCurlDebugFunction);
         }
+    }
+
+    const char *pszPathAsIt = CSLFetchNameValue(papszOptions, "PATH_VERBATIM");
+    if (pszPathAsIt == nullptr)
+        pszPathAsIt = CPLGetConfigOption("GDAL_HTTP_PATH_VERBATIM", nullptr);
+    if (pszPathAsIt && CPLTestBool(pszPathAsIt))
+    {
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_PATH_AS_IS, 1L);
     }
 
     const char *pszHttpVersion =
@@ -2237,14 +2238,22 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                                    CURLAUTH_ANYSAFE);
     else if (EQUAL(pszHttpAuth, "BEARER"))
     {
-        const char *pszBearer = CSLFetchNameValue(papszOptions, "HTTP_BEARER");
-        if (pszBearer == nullptr)
-            pszBearer = CPLGetConfigOption("GDAL_HTTP_BEARER", nullptr);
-        if (pszBearer != nullptr)
-            unchecked_curl_easy_setopt(http_handle, CURLOPT_XOAUTH2_BEARER,
-                                       pszBearer);
-        unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
-                                   CURLAUTH_BEARER);
+        const char *pszAuthorizationHeaderAllowed = CSLFetchNameValueDef(
+            papszOptions, "AUTHORIZATION_HEADER_ALLOWED", "YES");
+        const bool bAuthorizationHeaderAllowed =
+            CPLTestBool(pszAuthorizationHeaderAllowed);
+        if (bAuthorizationHeaderAllowed)
+        {
+            const char *pszBearer =
+                CSLFetchNameValue(papszOptions, "HTTP_BEARER");
+            if (pszBearer == nullptr)
+                pszBearer = CPLGetConfigOption("GDAL_HTTP_BEARER", nullptr);
+            if (pszBearer != nullptr)
+                unchecked_curl_easy_setopt(http_handle, CURLOPT_XOAUTH2_BEARER,
+                                           pszBearer);
+            unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
+                                       CURLAUTH_BEARER);
+        }
     }
     else if (EQUAL(pszHttpAuth, "NEGOTIATE"))
         unchecked_curl_easy_setopt(http_handle, CURLOPT_HTTPAUTH,
@@ -2365,6 +2374,15 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                                1L);
 
     unchecked_curl_easy_setopt(http_handle, CURLOPT_FOLLOWLOCATION, 1);
+    const char *pszUnrestrictedAuth = CPLGetConfigOption(
+        "CPL_VSIL_CURL_AUTHORIZATION_HEADER_ALLOWED_IF_REDIRECT",
+        "IF_SAME_HOST");
+    if (!EQUAL(pszUnrestrictedAuth, "IF_SAME_HOST") &&
+        CPLTestBool(pszUnrestrictedAuth))
+    {
+        unchecked_curl_easy_setopt(http_handle, CURLOPT_UNRESTRICTED_AUTH, 1);
+    }
+
     unchecked_curl_easy_setopt(http_handle, CURLOPT_MAXREDIRS, 10);
     unchecked_curl_easy_setopt(http_handle, CURLOPT_POSTREDIR,
                                CURL_REDIR_POST_ALL);
@@ -2617,6 +2635,35 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
     }
 
     struct curl_slist *headers = nullptr;
+    const char *pszAccept = CSLFetchNameValue(papszOptions, "ACCEPT");
+    if (pszAccept)
+    {
+        headers =
+            curl_slist_append(headers, CPLSPrintf("Accept: %s", pszAccept));
+    }
+
+    const auto AddHeader = [&headers, pszAccept](const char *pszHeader)
+    {
+        if (STARTS_WITH_CI(pszHeader, "Accept:") && pszAccept)
+        {
+            const char *pszVal = pszHeader + strlen("Accept:");
+            while (*pszVal == ' ')
+                ++pszVal;
+            if (!EQUAL(pszVal, pszAccept))
+            {
+                // Cf https://github.com/OSGeo/gdal/issues/7691#issuecomment-2873711603
+                CPLDebug(
+                    "HTTP",
+                    "Ignoring '%s' since ACCEPT option = '%s' is specified",
+                    pszHeader, pszAccept);
+            }
+        }
+        else
+        {
+            headers = curl_slist_append(headers, pszHeader);
+        }
+    };
+
     const char *pszHeaderFile = CSLFetchNameValue(papszOptions, "HEADER_FILE");
     if (pszHeaderFile == nullptr)
         pszHeaderFile = CPLGetConfigOption("GDAL_HTTP_HEADER_FILE", nullptr);
@@ -2640,7 +2687,7 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
             const char *pszLine = nullptr;
             while ((pszLine = CPLReadLineL(fp)) != nullptr)
             {
-                headers = curl_slist_append(headers, pszLine);
+                AddHeader(pszLine);
             }
             VSIFCloseL(fp);
         }
@@ -2658,12 +2705,17 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
             const char *pszComma = strchr(pszHeaders, ',');
             if (pszComma != nullptr && strchr(pszComma, ':') == nullptr)
             {
-                headers = curl_slist_append(headers, pszHeaders);
+                AddHeader(pszHeaders);
                 bHeadersDone = true;
             }
         }
         if (!bHeadersDone)
         {
+            const char *pszAuthorizationHeaderAllowed = CSLFetchNameValueDef(
+                papszOptions, "AUTHORIZATION_HEADER_ALLOWED", "YES");
+            const bool bAuthorizationHeaderAllowed =
+                CPLTestBool(pszAuthorizationHeaderAllowed);
+
             // We accept both raw headers with \r\n as a separator, or as
             // a comma separated list of foo: bar values.
             const CPLStringList aosTokens(
@@ -2672,7 +2724,11 @@ void *CPLHTTPSetOptions(void *pcurl, const char *pszURL,
                     : CSLTokenizeString2(pszHeaders, ",", CSLT_HONOURSTRINGS));
             for (int i = 0; i < aosTokens.size(); ++i)
             {
-                headers = curl_slist_append(headers, aosTokens[i]);
+                if (bAuthorizationHeaderAllowed ||
+                    !STARTS_WITH_CI(aosTokens[i], "Authorization:"))
+                {
+                    AddHeader(aosTokens[i]);
+                }
             }
         }
     }

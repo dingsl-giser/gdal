@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  netCDF read/write Driver
  * Purpose:  GDAL bindings over netCDF library.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2004, Frank Warmerdam
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef NETCDFDATASET_H_INCLUDED_
@@ -96,7 +79,7 @@
    geotransform has been found, and is within the bounds -180,360 -90,90, if YES
    assume OGC:CRS84. Default is NO.
 
-   // TODO: this unusued and a few others occur in the source that are not
+   // TODO: this unused and a few others occur in the source that are not
    documented, flush out unused opts and document the rest mdsumner@gmail.com
    GDAL_NETCDF_CONVERT_LAT_180=YES/NO convert longitude values from ]180,360] to
    [-180,180]
@@ -407,7 +390,7 @@ class netCDFDataset final : public GDALPamDataset
     bool bWriteGDALHistory = true;
 
     /* projection/GT */
-    double m_adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     OGRSpatialReference m_oSRS{};
     int nXDimID;
     int nYDimID;
@@ -562,7 +545,7 @@ class netCDFDataset final : public GDALPamDataset
     static GDALDataset *OpenMultiDim(GDALOpenInfo *);
     std::shared_ptr<GDALGroup> m_poRootGroup{};
 
-    void SetGeoTransformNoUpdate(double *);
+    void SetGeoTransformNoUpdate(const GDALGeoTransform &gt);
     void SetSpatialRefNoUpdate(const OGRSpatialReference *);
 
   protected:
@@ -574,33 +557,32 @@ class netCDFDataset final : public GDALPamDataset
 
   public:
     netCDFDataset();
-    virtual ~netCDFDataset();
+    ~netCDFDataset() override;
     bool SGCommitPendingTransaction();
     void SGLogPendingTransaction();
     static std::string generateLogName();
 
     /* Projection/GT */
-    CPLErr GetGeoTransform(double *) override;
-    CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
-    virtual char **GetMetadataDomainList() override;
+    char **GetMetadataDomainList() override;
     char **GetMetadata(const char *) override;
 
-    virtual CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
-                                   const char *pszDomain = "") override;
-    virtual CPLErr SetMetadata(char **papszMD,
-                               const char *pszDomain = "") override;
+    CPLErr SetMetadataItem(const char *pszName, const char *pszValue,
+                           const char *pszDomain = "") override;
+    CPLErr SetMetadata(char **papszMD, const char *pszDomain = "") override;
 
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 
-    virtual int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(this->papoLayers.size());
     }
 
-    virtual OGRLayer *GetLayer(int nIdx) override;
+    const OGRLayer *GetLayer(int nIdx) const override;
 
     std::shared_ptr<GDALGroup> GetRootGroup() const override;
 
@@ -733,7 +715,7 @@ class netCDFLayer final : public OGRLayer
   public:
     netCDFLayer(netCDFDataset *poDS, int nLayerCDFId, const char *pszName,
                 OGRwkbGeometryType eGeomType, OGRSpatialReference *poSRS);
-    virtual ~netCDFLayer();
+    ~netCDFLayer() override;
 
     bool Create(char **papszOptions,
                 const netCDFWriterConfigLayer *poLayerConfig);
@@ -771,16 +753,17 @@ class netCDFLayer final : public OGRLayer
         return m_layerSGDefn;
     }
 
-    virtual void ResetReading() override;
-    virtual OGRFeature *GetNextFeature() override;
+    void ResetReading() override;
+    OGRFeature *GetNextFeature() override;
 
-    virtual GIntBig GetFeatureCount(int bForce) override;
+    GIntBig GetFeatureCount(int bForce) override;
 
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() override;
+    using OGRLayer::GetLayerDefn;
+    const OGRFeatureDefn *GetLayerDefn() const override;
 
-    virtual OGRErr ICreateFeature(OGRFeature *poFeature) override;
+    OGRErr ICreateFeature(OGRFeature *poFeature) override;
     virtual OGRErr CreateField(const OGRFieldDefn *poFieldDefn,
                                int bApproxOK) override;
 

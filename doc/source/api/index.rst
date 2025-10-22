@@ -16,9 +16,11 @@ API
        :maxdepth: 1
 
        cpl
+       gdal_fwd
        raster_c_api
        vector_c_api
        gdal_alg
+       cli_algorithm_c
        ogr_srs_api
        gdal_utils
 
@@ -31,9 +33,13 @@ API
    .. toctree::
        :maxdepth: 1
 
+       gdal_raster_cpp
+       gdalmajorobject_cpp
        gdaldriver_cpp
        gdaldataset_cpp
        gdalrasterband_cpp
+       gdalcolortable_cpp
+       gdalrasterattributetable_cpp
        gdalwarp_cpp
 
    Vector API
@@ -42,9 +48,11 @@ API
    .. toctree::
        :maxdepth: 1
 
+       gdal_vector_cpp
        ogrfeature_cpp
        ogrfeaturestyle_cpp
        ogrgeometry_cpp
+       ogrgeomcoordinateprecision_cpp
        ogrlayer_cpp
 
    Spatial reference system API
@@ -61,6 +69,7 @@ API
    .. toctree::
        :maxdepth: 1
 
+       gdal_multidim_cpp
        gdalgroup_cpp
        gdaldimension_cpp
        gdalabstractmdarray_cpp
@@ -74,6 +83,7 @@ API
    .. toctree::
        :maxdepth: 1
 
+       cli_algorithm_cpp
        cpl_cpp
        gnm_cpp
 
@@ -81,18 +91,9 @@ API
    ----------
 
    .. toctree::
-       :maxdepth: 1
+       :maxdepth: 2
 
-       python_bindings
-       python/raster_api
-       python/vector_api
-       python/spatial_ref_api
-       python/mdim_api
-       python/utilities
-       python/general
-       python/osgeo
-       python_gotchas
-       python_samples
+       python/index
 
 
    `Java API <../java/index.html>`_
@@ -117,7 +118,6 @@ API
 
        Go <https://github.com/lukeroth/gdal>
        Julia <https://github.com/JuliaGeo/GDAL.jl>
-       Lua <https://trac.osgeo.org/gdal/wiki/GdalOgrInLua>
        Original Node.js bindings <https://github.com/naturalatlas/node-gdal>
        Node.js fork with full Promise-based async and TypeScript support <https://www.npmjs.com/package/gdal-async>
        Perl <https://metacpan.org/release/Geo-GDAL-FFI>
@@ -125,10 +125,6 @@ API
        R <https://cran.r-project.org/web/packages/gdalraster/index.html>
        Ruby <https://github.com/telus-agcg/ffi-gdal>
        Rust <https://github.com/georust/gdal>
-
-    .. warning::
-        For Perl, since GDAL 3.5 the link `Perl <https://trac.osgeo.org/gdal/wiki/GdalOgrInPerl>`__ is deprecated, use above link instead.
-
 
 
     There are also more Pythonic ways of using the vector/OGR functions with

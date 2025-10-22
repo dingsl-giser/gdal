@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <algorithm>
@@ -30,10 +14,19 @@
 #include <limits>
 #include <map>
 
+#include "cpl_multiproc.h"
+#include "gdal_pam_multidim.h"
+#include "gdal_rat.h"
+#include "memdataset.h"
+
 #include "netcdfdataset.h"
 #include "netcdfdrivercore.h"
 
 #include "netcdf_mem.h"
+
+static bool BuildDataType(int gid, int varid, int nVarType,
+                          std::unique_ptr<GDALExtendedDataType> &dt,
+                          bool &bPerfectDataTypeMatch);
 
 /************************************************************************/
 /*                         netCDFSharedResources                        */
@@ -286,7 +279,7 @@ class netCDFGroup final : public GDALGroup, public netCDFAttributeHolder
                 int gid);
 
   public:
-    ~netCDFGroup();
+    ~netCDFGroup() override;
 
     static std::shared_ptr<netCDFGroup>
     Create(const std::shared_ptr<netCDFSharedResources> &poShared, int cdfid);
@@ -405,7 +398,7 @@ class netCDFDimension final : public GDALDimension
                     int cfid, int dimid, size_t nForcedSize,
                     const std::string &osType);
 
-    ~netCDFDimension();
+    ~netCDFDimension() override;
 
     static std::shared_ptr<netCDFDimension>
     Create(const std::shared_ptr<netCDFSharedResources> &poShared,
@@ -763,6 +756,8 @@ netCDFGroup::netCDFGroup(const std::shared_ptr<netCDFSharedResources> &poShared,
     : GDALGroup(NCDFGetParentGroupName(gid), retrieveName(gid)),
       m_poShared(poShared), m_gid(gid)
 {
+    CPLMutexHolderD(&hNCMutex);
+
     if (m_gid == m_poShared->GetCDFId())
     {
         int nFormat = 0;
@@ -790,6 +785,31 @@ netCDFGroup::netCDFGroup(const std::shared_ptr<netCDFSharedResources> &poShared,
         else if (nFormat == NC_FORMAT_NETCDF4_CLASSIC)
         {
             m_aosStructuralInfo.SetNameValue("NC_FORMAT", "NETCDF4_CLASSIC");
+        }
+    }
+
+    // Get enuerations associated with the group
+    int nCustomTypeCount = 0;
+    NCDF_ERR(nc_inq_typeids(m_gid, &nCustomTypeCount, nullptr));
+    if (nCustomTypeCount > 0)
+    {
+        std::vector<int> anCustomTypeIDs(nCustomTypeCount);
+        NCDF_ERR(
+            nc_inq_typeids(m_gid, &nCustomTypeCount, anCustomTypeIDs.data()));
+
+        CPLErrorStateBackuper oBackuper(CPLQuietErrorHandler);
+
+        for (int i = 0; i < nCustomTypeCount; ++i)
+        {
+            std::unique_ptr<GDALExtendedDataType> dt;
+            bool bPerfectDataTypeMatch = false;
+            if (BuildDataType(m_gid, /* varId = */ -1, anCustomTypeIDs[i], dt,
+                              bPerfectDataTypeMatch) &&
+                dt && dt->GetRAT())
+            {
+                m_apoTypes.push_back(
+                    std::shared_ptr<GDALExtendedDataType>(dt.release()));
+            }
         }
     }
 }
@@ -898,6 +918,7 @@ netCDFGroup::CreateDimension(const std::string &osName,
 static int CreateOrGetComplexDataType(int gid, GDALDataType eDT)
 {
     const char *pszName = "";
+    CPL_IGNORE_RET_VAL(pszName);  // Make CSA happy
     int nSubTypeId = NC_NAT;
     switch (eDT)
     {
@@ -1940,7 +1961,7 @@ std::shared_ptr<GDALMDArray> netCDFDimension::GetIndexingVariable() const
     std::shared_ptr<GDALMDArray> candidateIndexingVariable;
     for (const auto &arrayName : arrayNames)
     {
-        const auto poArray = oGroup.OpenMDArray(arrayName, nullptr);
+        auto poArray = oGroup.OpenMDArray(arrayName, nullptr);
         const auto poArrayNC =
             std::dynamic_pointer_cast<netCDFVariable>(poArray);
         if (!poArrayNC)
@@ -1960,7 +1981,7 @@ std::shared_ptr<GDALMDArray> netCDFDimension::GetIndexingVariable() const
                 // variable, provided it is the only such variable.
                 if (!candidateIndexingVariable)
                 {
-                    candidateIndexingVariable = poArray;
+                    candidateIndexingVariable = std::move(poArray);
                 }
                 else
                 {
@@ -2342,10 +2363,6 @@ static GDALDataType GetComplexDataType(int gid, int nVarType)
 /*                       GetCompoundDataType()                          */
 /************************************************************************/
 
-static bool BuildDataType(int gid, int varid, int nVarType,
-                          std::unique_ptr<GDALExtendedDataType> &dt,
-                          bool &bPerfectDataTypeMatch);
-
 static bool GetCompoundDataType(int gid, int nVarType,
                                 std::unique_ptr<GDALExtendedDataType> &dt,
                                 bool &bPerfectDataTypeMatch)
@@ -2405,16 +2422,17 @@ static bool GetCompoundDataType(int gid, int nVarType,
 /*                            BuildDataType()                           */
 /************************************************************************/
 
-static bool BuildDataType(int gid, int varid, int nVarType,
+static bool BuildDataType(int gid, int varid, const int nVarTypeIn,
                           std::unique_ptr<GDALExtendedDataType> &dt,
                           bool &bPerfectDataTypeMatch)
 {
+    int nVarType = nVarTypeIn;
     GDALDataType eDataType = GDT_Unknown;
     bPerfectDataTypeMatch = false;
+    int eClass = 0;
     if (NCDFIsUserDefinedType(gid, nVarType))
     {
         nc_type nBaseType = NC_NAT;
-        int eClass = 0;
         nc_inq_user_type(gid, nVarType, nullptr, nullptr, &nBaseType, nullptr,
                          &eClass);
         if (eClass == NC_COMPOUND)
@@ -2572,7 +2590,39 @@ static bool BuildDataType(int gid, int varid, int nVarType,
             return false;
         }
     }
-    dt.reset(new GDALExtendedDataType(GDALExtendedDataType::Create(eDataType)));
+
+    if (eClass == NC_ENUM && GDALDataTypeIsInteger(eDataType) &&
+        !GDALDataTypeIsComplex(eDataType))
+    {
+        char szEnumName[NC_MAX_NAME + 1] = {};
+        size_t nMemberCount = 0;
+        NCDF_ERR(nc_inq_enum(gid, nVarTypeIn, szEnumName, nullptr, nullptr,
+                             &nMemberCount));
+        auto poRAT = std::make_unique<GDALDefaultRasterAttributeTable>();
+        poRAT->CreateColumn("value", GFT_Integer, GFU_MinMax);
+        poRAT->CreateColumn("name", GFT_String, GFU_Name);
+        std::vector<GByte> abyValue(GDALGetDataTypeSizeBytes(eDataType));
+        char szName[NC_MAX_NAME + 1] = {};
+        for (int i = 0;
+             i < static_cast<int>(std::min<size_t>(nMemberCount, INT_MAX)); ++i)
+        {
+            szName[0] = 0;
+            NCDF_ERR(nc_inq_enum_member(gid, nVarTypeIn, i, szName,
+                                        abyValue.data()));
+            int nValue = 0;
+            GDALCopyWords(abyValue.data(), eDataType, 0, &nValue, GDT_Int32, 0,
+                          1);
+            poRAT->SetValue(i, 0, nValue);
+            poRAT->SetValue(i, 1, szName);
+        }
+        dt.reset(new GDALExtendedDataType(GDALExtendedDataType::Create(
+            szEnumName, eDataType, std::move(poRAT))));
+    }
+    else
+    {
+        dt.reset(
+            new GDALExtendedDataType(GDALExtendedDataType::Create(eDataType)));
+    }
     return true;
 }
 
@@ -2661,8 +2711,9 @@ std::shared_ptr<OGRSpatialReference> netCDFVariable::GetSpatialRef() const
         m_poSRS.reset(poSRS->Clone());
         if (iDimX > 0 && iDimY > 0)
         {
-            if (m_poSRS->GetDataAxisToSRSAxisMapping() ==
-                std::vector<int>{2, 1})
+            const auto &oMapping = m_poSRS->GetDataAxisToSRSAxisMapping();
+            if (oMapping == std::vector<int>{2, 1} ||
+                oMapping == std::vector<int>{2, 1, 3})
                 m_poSRS->SetDataAxisToSRSAxisMapping({iDimY, iDimX});
             else
                 m_poSRS->SetDataAxisToSRSAxisMapping({iDimX, iDimY});
@@ -3508,25 +3559,26 @@ bool netCDFVariable::IRead(const GUInt64 *arrayStartIdx, const size_t *count,
 
         if (bufferDataType.GetClass() != GEDTC_STRING)
             return false;
-        GByte *pabyDstBuffer = static_cast<GByte *>(pDstBuffer);
+        char **ppszDstBuffer = static_cast<char **>(pDstBuffer);
         size_t array_idx[2] = {static_cast<size_t>(arrayStartIdx[0]), 0};
         size_t array_count[2] = {1, m_nTextLength};
         std::string osTmp(m_nTextLength, 0);
-        const char *pszTmp = osTmp.c_str();
-        for (size_t i = 0; i < count[0]; i++)
+        char *pszTmp = &osTmp[0];
+        bool ret = true;
+        for (size_t i = 0; ret && i < count[0]; i++)
         {
-            int ret =
-                nc_get_vara(m_gid, m_varid, array_idx, array_count, &osTmp[0]);
-            NCDF_ERR(ret);
-            if (ret != NC_NOERR)
-                return false;
-            // coverity[use_after_free]
-            GDALExtendedDataType::CopyValue(&pszTmp, GetDataType(),
-                                            pabyDstBuffer, GetDataType());
-            array_idx[0] = static_cast<size_t>(array_idx[0] + arrayStep[0]);
-            pabyDstBuffer += bufferStride[0] * sizeof(char *);
+            int ncErr =
+                nc_get_vara(m_gid, m_varid, array_idx, array_count, pszTmp);
+            NCDF_ERR(ncErr);
+            ret = ncErr == NC_NOERR;
+            if (ret)
+            {
+                *ppszDstBuffer = CPLStrdup(pszTmp);
+                array_idx[0] = static_cast<size_t>(array_idx[0] + arrayStep[0]);
+                ppszDstBuffer += bufferStride[0];
+            }
         }
-        return true;
+        return ret;
     }
 
     if (m_poCachedArray)
@@ -3584,10 +3636,6 @@ bool netCDFVariable::IAdviseRead(const GUInt64 *arrayStartIdx,
     if (eDT.GetClass() != GEDTC_NUMERIC)
         return false;
 
-    auto poMemDriver = static_cast<GDALDriver *>(GDALGetDriverByName("MEM"));
-    if (poMemDriver == nullptr)
-        return false;
-
     m_poCachedArray.reset();
 
     size_t nElts = 1;
@@ -3604,9 +3652,9 @@ bool netCDFVariable::IAdviseRead(const GUInt64 *arrayStartIdx,
         return false;
     }
 
-    auto poDS = poMemDriver->CreateMultiDimensional("", nullptr, nullptr);
+    auto poDS = std::unique_ptr<GDALDataset>(
+        MEMDataset::CreateMultiDimensional("", nullptr, nullptr));
     auto poGroup = poDS->GetRootGroup();
-    delete poDS;
 
     std::vector<std::shared_ptr<GDALDimension>> apoMemDims;
     const auto &poDims = GetDimensions();
@@ -4985,7 +5033,7 @@ GDALDataset *netCDFDataset::OpenMultiDim(GDALOpenInfo *poOpenInfo)
         if (osFilename.empty())
         {
             bFileToDestroyAtClosing = true;
-            osFilename = CPLGenerateTempFilename("netcdf_tmp");
+            osFilename = CPLGenerateTempFilenameSafe("netcdf_tmp");
         }
         if (!netCDFDatasetCreateTempFile(NCDF_FORMAT_NC4, osFilename.c_str(),
                                          poOpenInfo->fpL))

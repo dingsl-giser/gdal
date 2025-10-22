@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test some functions of HFA driver.  Most testing in ../gcore/hfa_*
@@ -10,25 +9,11 @@
 # Copyright (c) 2004, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
+import datetime
+import math
 import os
 import shutil
 import struct
@@ -36,7 +21,9 @@ import struct
 import gdaltest
 import pytest
 
-from osgeo import gdal
+from osgeo import gdal, ogr
+
+pytestmark = pytest.mark.require_driver("HFA")
 
 ###############################################################################
 # Verify we can read the special histogram metadata from a provided image.
@@ -666,10 +653,15 @@ def test_hfa_vsimem():
 # the .img file.  (#2422)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_hfa_proName():
 
     drv = gdal.GetDriverByName("HFA")
-    src_ds = gdal.Open("data/hfa/stateplane.vrt")
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ALL"):
+        src_ds = gdal.Open("data/hfa/stateplane.vrt")
     dst_ds = drv.CreateCopy("tmp/proname.img", src_ds)
 
     del dst_ds
@@ -1285,3 +1277,101 @@ def test_hfa_read_elevation_units():
 
 ###############################################################################
 #
+
+
+def test_hfa_read_nan_nodata(tmp_vsimem):
+
+    filename = tmp_vsimem / "test.img"
+    ds = gdal.GetDriverByName("HFA").Create(filename, 1, 1, 1, gdal.GDT_Float32)
+    ds.GetRasterBand(1).SetNoDataValue(float("nan"))
+    ds.Close()
+
+    with gdaltest.disable_exceptions():
+        gdal.ErrorReset()
+        with gdal.Open(filename) as ds:
+            assert gdal.GetLastErrorMsg() == ""
+            assert math.isnan(ds.GetRasterBand(1).GetNoDataValue())
+
+
+###############################################################################
+#
+
+
+def test_hfa_rat_grow_string(tmp_vsimem):
+    with gdal.GetDriverByName("HFA").Create(
+        tmp_vsimem / "test.img", 1, 1, 1, gdal.GDT_Byte
+    ) as ds:
+        rat = gdal.RasterAttributeTable()
+        rat.CreateColumn("str", gdal.GFT_String, gdal.GFU_Generic)
+        rat.SetValueAsString(0, 0, "x" * 5)
+        rat.SetValueAsString(1, 0, "y" * 5)
+        ds.GetRasterBand(1).SetDefaultRAT(rat)
+
+    with gdal.Open(tmp_vsimem / "test.img", gdal.GA_Update) as ds:
+        rat = ds.GetRasterBand(1).GetDefaultRAT()
+        rat.SetValueAsString(0, 0, "x" * 50)
+
+    with gdal.Open(tmp_vsimem / "test.img", gdal.GA_Update) as ds:
+        rat = ds.GetRasterBand(1).GetDefaultRAT()
+        assert rat.GetValueAsString(0, 0) == "x" * 50
+        assert rat.GetValueAsString(1, 0) == "y" * 5
+
+
+###############################################################################
+#
+
+
+def test_hfa_rat_new_types(tmp_vsimem):
+
+    with gdal.GetDriverByName("HFA").Create(
+        tmp_vsimem / "test.img", 1, 1, 1, gdal.GDT_Byte
+    ) as ds:
+        rat = gdal.RasterAttributeTable()
+        rat.CreateColumn("bool", gdal.GFT_Boolean, gdal.GFU_Generic)
+        rat.CreateColumn("datetime", gdal.GFT_DateTime, gdal.GFU_Generic)
+        rat.CreateColumn("wkbgeometry", gdal.GFT_WKBGeometry, gdal.GFU_Generic)
+        rat.SetValueAsBoolean(0, 0, True)
+        rat.SetValueAsString(0, 1, "2025-10-11T12:34:56.500+01:30")
+        rat.SetValueAsString(0, 2, "POINT (1.0 2)")
+        ds.GetRasterBand(1).SetDefaultRAT(rat)
+
+    with gdal.Open(tmp_vsimem / "test.img", gdal.GA_Update) as ds:
+        j = gdal.Info(ds, format="json")["bands"][0]["rat"]
+
+        assert j == {
+            "fieldDefn": [
+                {"index": 0, "name": "bool", "type": 0, "usage": 0},
+                {"index": 1, "name": "datetime", "type": 2, "usage": 0},
+                {"index": 2, "name": "wkbgeometry", "type": 2, "usage": 0},
+            ],
+            "row": [
+                {"f": [1, "2025-10-11T12:34:56.500+01:30", "POINT (1 2)"], "index": 0}
+            ],
+            "tableType": "athematic",
+        }
+
+        rat = ds.GetRasterBand(1).GetDefaultRAT()
+
+        rat.SetValueAsBoolean(0, 0, True)
+        assert rat.GetValueAsBoolean(0, 0) == True
+
+        dt = datetime.datetime(
+            2025,
+            12,
+            31,
+            23,
+            58,
+            59,
+            500000,
+            tzinfo=datetime.timezone(datetime.timedelta(seconds=4500)),
+        )
+        rat.SetValueAsDateTime(0, 1, dt)
+        assert rat.GetValueAsString(0, 1) == "2025-12-31T23:58:59.500+01:15"
+        assert rat.GetValueAsDateTime(0, 1) == dt
+
+        g = ogr.Geometry(ogr.wkbPoint)
+        g.SetPoint_2D(0, 1, 2)
+        wkb = g.ExportToWkb()
+
+        rat.SetValueAsWKBGeometry(0, 2, wkb)
+        assert rat.GetValueAsWKBGeometry(0, 2) == wkb

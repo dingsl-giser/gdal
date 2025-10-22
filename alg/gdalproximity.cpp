@@ -8,23 +8,7 @@
  * Copyright (c) 2008, Frank Warmerdam
  * Copyright (c) 2009-2010, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -279,7 +263,7 @@ CPLErr CPL_STDCALL GDALComputeProximity(GDALRasterBandH hSrcBand,
             eErr = CE_Failure;
             goto end;
         }
-        CPLString osTmpFile = CPLGenerateTempFilename("proximity");
+        CPLString osTmpFile = CPLGenerateTempFilenameSafe("proximity");
         hWorkProximityDS = GDALCreate(hDriver, osTmpFile, nXSize, nYSize, 1,
                                       GDT_Float32, nullptr);
         if (hWorkProximityDS == nullptr)
@@ -396,15 +380,15 @@ CPLErr CPL_STDCALL GDALComputeProximity(GDALRasterBandH hSrcBand,
         // Final post processing of distances.
         for (int i = 0; i < nXSize; i++)
         {
-            if (pafProximity[i] < 0.0)
+            if (pafProximity[i] < 0.0f)
                 pafProximity[i] = fNoDataValue;
-            else if (pafProximity[i] > 0.0)
+            else if (pafProximity[i] > 0.0f)
             {
                 if (bFixedBufVal)
                     pafProximity[i] = static_cast<float>(dfFixedBufVal);
                 else
                     pafProximity[i] =
-                        static_cast<float>(pafProximity[i] * dfDistMult);
+                        pafProximity[i] * static_cast<float>(dfDistMult);
             }
         }
 
@@ -583,8 +567,10 @@ static CPLErr ProcessProximityLine(GInt32 *panSrcScanline, int *panNearX,
             dfNearDistSq <= dfMaxDist * dfMaxDist &&
             (pafProximity[iPixel] < 0 ||
              dfNearDistSq < static_cast<double>(pafProximity[iPixel]) *
-                                pafProximity[iPixel]))
+                                static_cast<double>(pafProximity[iPixel])))
+        {
             pafProximity[iPixel] = static_cast<float>(sqrt(dfNearDistSq));
+        }
     }
 
     return CE_None;

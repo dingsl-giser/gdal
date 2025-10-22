@@ -7,40 +7,24 @@
  ******************************************************************************
  * Copyright (c) 2017-2018, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_priv.h"
+#include "gdal_frmts.h"
+#include "ogrsf_frmts.h"
 #include "cpl_http.h"
 #include "cpl_conv.h"
-#include "ogrgeojsonreader.h"
-#include "ogrgeojsonwriter.h"
+#include "ogrlibjsonutils.h"
 #include "ogr_swq.h"
 #include "eeda.h"
 
 #include <algorithm>
+#include <cinttypes>
 #include <vector>
 #include <map>
 #include <set>
 #include <limits>
-
-extern "C" void GDALRegister_EEDA();
 
 /************************************************************************/
 /*                     CPLEscapeURLQueryParameter()                     */
@@ -90,14 +74,14 @@ class GDALEEDADataset final : public GDALEEDABaseDataset
 
   public:
     GDALEEDADataset();
-    virtual ~GDALEEDADataset();
+    ~GDALEEDADataset() override;
 
-    virtual int GetLayerCount() CPL_OVERRIDE
+    int GetLayerCount() const override
     {
         return m_poLayer ? 1 : 0;
     }
 
-    virtual OGRLayer *GetLayer(int idx) CPL_OVERRIDE;
+    const OGRLayer *GetLayer(int idx) const override;
 
     bool Open(GDALOpenInfo *poOpenInfo);
     json_object *RunRequest(const CPLString &osURL);
@@ -139,39 +123,29 @@ class GDALEEDALayer final : public OGRLayer
     GDALEEDALayer(GDALEEDADataset *poDS, const CPLString &osCollection,
                   const CPLString &osCollectionName, json_object *poAsset,
                   json_object *poLayerConf);
-    virtual ~GDALEEDALayer();
+    ~GDALEEDALayer() override;
 
-    virtual void ResetReading() CPL_OVERRIDE;
-    virtual OGRFeature *GetNextFeature() CPL_OVERRIDE;
-    virtual int TestCapability(const char *) CPL_OVERRIDE;
+    void ResetReading() override;
+    OGRFeature *GetNextFeature() override;
+    int TestCapability(const char *) const override;
 
-    virtual OGRFeatureDefn *GetLayerDefn() CPL_OVERRIDE
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
 
-    virtual GIntBig GetFeatureCount(int) CPL_OVERRIDE
+    GIntBig GetFeatureCount(int) override
     {
         return -1;
     }
 
-    virtual void SetSpatialFilter(OGRGeometry *poGeom) CPL_OVERRIDE;
+    virtual OGRErr ISetSpatialFilter(int iGeomField,
+                                     const OGRGeometry *poGeom) override;
 
-    virtual void SetSpatialFilter(int iGeomField,
-                                  OGRGeometry *poGeom) CPL_OVERRIDE
-    {
-        OGRLayer::SetSpatialFilter(iGeomField, poGeom);
-    }
+    OGRErr SetAttributeFilter(const char *) override;
 
-    virtual OGRErr SetAttributeFilter(const char *) CPL_OVERRIDE;
-
-    virtual OGRErr GetExtent(OGREnvelope *psExtent, int bForce) CPL_OVERRIDE;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) CPL_OVERRIDE
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 };
 
 /************************************************************************/
@@ -547,23 +521,21 @@ OGRFeature *GDALEEDALayer::GetNextRawFeature()
             int nWidth = 0, nHeight = 0;
             double dfMinPixelSize = std::numeric_limits<double>::max();
             CPLString osSRS(aoBands[0].osWKT);
-            double dfULX = aoBands[0].adfGeoTransform[0];
-            double dfULY = aoBands[0].adfGeoTransform[3];
+            double dfULX = aoBands[0].gt[0];
+            double dfULY = aoBands[0].gt[3];
             bool bULValid = true;
             for (size_t i = 0; i < aoBands.size(); i++)
             {
                 nWidth = std::max(nWidth, aoBands[i].nWidth);
                 nHeight = std::max(nHeight, aoBands[i].nHeight);
                 dfMinPixelSize =
-                    std::min(dfMinPixelSize,
-                             std::min(aoBands[i].adfGeoTransform[1],
-                                      fabs(aoBands[i].adfGeoTransform[5])));
+                    std::min(dfMinPixelSize, std::min(aoBands[i].gt[1],
+                                                      fabs(aoBands[i].gt[5])));
                 if (osSRS != aoBands[i].osWKT)
                 {
                     osSRS.clear();
                 }
-                if (dfULX != aoBands[i].adfGeoTransform[0] ||
-                    dfULY != aoBands[i].adfGeoTransform[3])
+                if (dfULX != aoBands[i].gt[0] || dfULY != aoBands[i].gt[3])
                 {
                     bULValid = false;
                 }
@@ -794,7 +766,7 @@ CPLString GDALEEDALayer::BuildFilter(swq_expr_node *poNode, bool bIsAndTopLevel)
             poNode->papoSubExpr[1]->field_type == SWQ_INTEGER64)
         {
             osFilter +=
-                CPLSPrintf(CPL_FRMT_GIB, poNode->papoSubExpr[1]->int_value);
+                CPLSPrintf("%" PRId64, poNode->papoSubExpr[1]->int_value);
         }
         else if (poNode->papoSubExpr[1]->field_type == SWQ_FLOAT)
         {
@@ -885,7 +857,7 @@ CPLString GDALEEDALayer::BuildFilter(swq_expr_node *poNode, bool bIsAndTopLevel)
                 poNode->papoSubExpr[i]->field_type == SWQ_INTEGER64)
             {
                 osFilter +=
-                    CPLSPrintf(CPL_FRMT_GIB, poNode->papoSubExpr[i]->int_value);
+                    CPLSPrintf("%" PRId64, poNode->papoSubExpr[i]->int_value);
             }
             else if (poNode->papoSubExpr[i]->field_type == SWQ_FLOAT)
             {
@@ -958,10 +930,11 @@ OGRErr GDALEEDALayer::SetAttributeFilter(const char *pszQuery)
 }
 
 /************************************************************************/
-/*                          SetSpatialFilter()                          */
+/*                          ISetSpatialFilter()                         */
 /************************************************************************/
 
-void GDALEEDALayer::SetSpatialFilter(OGRGeometry *poGeomIn)
+OGRErr GDALEEDALayer::ISetSpatialFilter(int /* iGeomField */,
+                                        const OGRGeometry *poGeomIn)
 {
     if (poGeomIn)
     {
@@ -980,13 +953,15 @@ void GDALEEDALayer::SetSpatialFilter(OGRGeometry *poGeomIn)
         InstallFilter(poGeomIn);
 
     ResetReading();
+    return OGRERR_NONE;
 }
 
 /************************************************************************/
 /*                                GetExtent()                           */
 /************************************************************************/
 
-OGRErr GDALEEDALayer::GetExtent(OGREnvelope *psExtent, int /* bForce */)
+OGRErr GDALEEDALayer::IGetExtent(int /* iGeomField*/, OGREnvelope *psExtent,
+                                 bool /* bForce */)
 {
     psExtent->MinX = -180;
     psExtent->MinY = -90;
@@ -999,7 +974,7 @@ OGRErr GDALEEDALayer::GetExtent(OGREnvelope *psExtent, int /* bForce */)
 /*                              TestCapability()                        */
 /************************************************************************/
 
-int GDALEEDALayer::TestCapability(const char *pszCap)
+int GDALEEDALayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCStringsAsUTF8))
         return TRUE;
@@ -1027,7 +1002,7 @@ GDALEEDADataset::~GDALEEDADataset()
 /*                            GetLayer()                                */
 /************************************************************************/
 
-OGRLayer *GDALEEDADataset::GetLayer(int idx)
+const OGRLayer *GDALEEDADataset::GetLayer(int idx) const
 {
     if (idx == 0)
         return m_poLayer;
@@ -1245,11 +1220,16 @@ void GDALRegister_EEDA()
     poDriver->SetMetadataItem(GDAL_DMD_LONGNAME, "Earth Engine Data API");
     poDriver->SetMetadataItem(GDAL_DMD_HELPTOPIC, "drivers/vector/eeda.html");
     poDriver->SetMetadataItem(GDAL_DMD_CONNECTION_PREFIX, "EEDA:");
-    poDriver->SetMetadataItem(GDAL_DMD_OPENOPTIONLIST,
-                              "<OpenOptionList>"
-                              "  <Option name='COLLECTION' type='string' "
-                              "description='Collection name'/>"
-                              "</OpenOptionList>");
+    poDriver->SetMetadataItem(
+        GDAL_DMD_OPENOPTIONLIST,
+        "<OpenOptionList>"
+        "  <Option name='COLLECTION' type='string' "
+        "description='Collection name'/>"
+        "  <Option name='VSI_PATH_FOR_AUTH' type='string' "
+        "description='/vsigs/... path onto which a "
+        "GOOGLE_APPLICATION_CREDENTIALS path specific "
+        "option is set'/>"
+        "</OpenOptionList>");
 
     poDriver->pfnOpen = GDALEEDAOpen;
     poDriver->pfnIdentify = GDALEEDAdentify;

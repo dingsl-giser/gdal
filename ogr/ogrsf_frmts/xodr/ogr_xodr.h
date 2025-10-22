@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright 2024 German Aerospace Center (DLR), Institute of Transportation Systems
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #pragma once
@@ -65,7 +49,7 @@ struct RoadElements
 class OGRXODRLayer : public OGRLayer
 {
   private:
-    virtual OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn.get();
     }
@@ -78,7 +62,7 @@ class OGRXODRLayer : public OGRLayer
   protected:
     RoadElements m_roadElements{};
     bool m_bDissolveTIN{false};
-    OGRSpatialReference m_poSRS{};
+    OGRSpatialReference m_oSRS{};
     /* Unique feature ID which is automatically incremented for any new road feature creation. */
     int m_nNextFID{0};
 
@@ -136,7 +120,7 @@ class OGRXODRLayerReferenceLine
 
     OGRXODRLayerReferenceLine(const RoadElements &xodrRoadElements,
                               const std::string &proj4Defn);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerReferenceLine)
 };
 
@@ -152,7 +136,7 @@ class OGRXODRLayerLaneBorder
 
     OGRXODRLayerLaneBorder(const RoadElements &xodrRoadElements,
                            const std::string &proj4Defn);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerLaneBorder)
 };
 
@@ -170,7 +154,7 @@ class OGRXODRLayerRoadMark
     OGRXODRLayerRoadMark(const RoadElements &xodrRoadElements,
                          const std::string &proj4Defn,
                          const bool dissolveTriangulatedSurface);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerRoadMark)
 };
 
@@ -186,7 +170,7 @@ class OGRXODRLayerRoadObject
 
     OGRXODRLayerRoadObject(const RoadElements &xodrRoadElements,
                            const std::string &proj4Defn);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerRoadObject)
 };
 
@@ -203,7 +187,7 @@ class OGRXODRLayerRoadSignal
     OGRXODRLayerRoadSignal(const RoadElements &xodrRoadElements,
                            const std::string &proj4Defn,
                            const bool dissolveTriangulatedSurface);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerRoadSignal)
 };
 
@@ -219,7 +203,7 @@ class OGRXODRLayerLane : public OGRXODRLayer,
     OGRXODRLayerLane(const RoadElements &xodrRoadElements,
                      const std::string &proj4Defn,
                      const bool dissolveTriangulatedSurface);
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     DEFINE_GET_NEXT_FEATURE_THROUGH_RAW(OGRXODRLayerLane)
 };
 
@@ -248,12 +232,12 @@ class OGRXODRDataSource : public GDALDataset
   public:
     bool Open(const char *pszFilename, CSLConstList openOptions);
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
-    virtual int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
 };

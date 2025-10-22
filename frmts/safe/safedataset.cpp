@@ -7,26 +7,15 @@
  ******************************************************************************
  * Copyright (c) 2015, Delfim Rego <delfimrego@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "safedataset.h"
+
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include "cpl_time.h"
 
@@ -636,7 +625,6 @@ SAFEDataset::~SAFEDataset()
 {
     SAFEDataset::FlushCache(true);
 
-    CPLDestroyXMLNode(psManifest);
     if (nGCPCount > 0)
     {
         GDALDeinitGCPs(nGCPCount, pasGCPList);
@@ -673,13 +661,14 @@ int SAFEDataset::CloseDependentDatasets()
 /*                      GetMetaDataObject()                             */
 /************************************************************************/
 
-CPLXMLNode *SAFEDataset::GetMetaDataObject(CPLXMLNode *psMetaDataObjects,
-                                           const char *metadataObjectId)
+const CPLXMLNode *
+SAFEDataset::GetMetaDataObject(const CPLXMLNode *psMetaDataObjects,
+                               const char *metadataObjectId)
 {
     /* -------------------------------------------------------------------- */
     /*      Look for DataObject Element by ID.                              */
     /* -------------------------------------------------------------------- */
-    for (CPLXMLNode *psMDO = psMetaDataObjects->psChild; psMDO != nullptr;
+    for (const CPLXMLNode *psMDO = psMetaDataObjects->psChild; psMDO != nullptr;
          psMDO = psMDO->psNext)
     {
         if (psMDO->eType != CXT_Element ||
@@ -706,13 +695,13 @@ CPLXMLNode *SAFEDataset::GetMetaDataObject(CPLXMLNode *psMetaDataObjects,
 /*                      GetDataObject()                                 */
 /************************************************************************/
 
-CPLXMLNode *SAFEDataset::GetDataObject(CPLXMLNode *psDataObjects,
-                                       const char *dataObjectId)
+const CPLXMLNode *SAFEDataset::GetDataObject(const CPLXMLNode *psDataObjects,
+                                             const char *dataObjectId)
 {
     /* -------------------------------------------------------------------- */
     /*      Look for DataObject Element by ID.                              */
     /* -------------------------------------------------------------------- */
-    for (CPLXMLNode *psDO = psDataObjects->psChild; psDO != nullptr;
+    for (const CPLXMLNode *psDO = psDataObjects->psChild; psDO != nullptr;
          psDO = psDO->psNext)
     {
         if (psDO->eType != CXT_Element ||
@@ -735,14 +724,15 @@ CPLXMLNode *SAFEDataset::GetDataObject(CPLXMLNode *psDataObjects,
     return nullptr;
 }
 
-CPLXMLNode *SAFEDataset::GetDataObject(CPLXMLNode *psMetaDataObjects,
-                                       CPLXMLNode *psDataObjects,
-                                       const char *metadataObjectId)
+const CPLXMLNode *
+SAFEDataset::GetDataObject(const CPLXMLNode *psMetaDataObjects,
+                           const CPLXMLNode *psDataObjects,
+                           const char *metadataObjectId)
 {
     /* -------------------------------------------------------------------- */
     /*      Look for MetadataObject Element by ID.                          */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psMDO =
+    const CPLXMLNode *psMDO =
         SAFEDataset::GetMetaDataObject(psMetaDataObjects, metadataObjectId);
 
     if (psMDO != nullptr)
@@ -792,8 +782,8 @@ int SAFEDataset::Identify(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->bIsDirectory)
     {
         VSIStatBufL sStat;
-        CPLString osMDFilename = CPLFormCIFilename(poOpenInfo->pszFilename,
-                                                   "manifest.safe", nullptr);
+        CPLString osMDFilename = CPLFormCIFilenameSafe(
+            poOpenInfo->pszFilename, "manifest.safe", nullptr);
 
         if (VSIStatL(osMDFilename, &sStat) == 0 && VSI_ISREG(sStat.st_mode))
         {
@@ -810,11 +800,14 @@ int SAFEDataset::Identify(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->nHeaderBytes < 100)
         return FALSE;
 
-    if (strstr((const char *)poOpenInfo->pabyHeader, "<xfdu:XFDU") == nullptr)
+    const char *pszHeader =
+        reinterpret_cast<const char *>(poOpenInfo->pabyHeader);
+    if (!strstr(pszHeader, "<xfdu:XFDU"))
         return FALSE;
 
-    // This driver doesn't handle Sentinel-2 data
-    if (strstr((const char *)poOpenInfo->pabyHeader, "sentinel-2") != nullptr)
+    // This driver doesn't handle Sentinel-2 or RCM (RADARSAT Constellation Mission) data
+    if (strstr(pszHeader, "sentinel-2") ||
+        strstr(pszHeader, "rcm_prod_manifest.xsd"))
         return FALSE;
 
     return TRUE;
@@ -997,40 +990,36 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->bIsDirectory)
     {
-        osMDFilename =
-            CPLFormCIFilename(osMDFilename.c_str(), "manifest.safe", nullptr);
+        osMDFilename = CPLFormCIFilenameSafe(osMDFilename.c_str(),
+                                             "manifest.safe", nullptr);
     }
 
     /* -------------------------------------------------------------------- */
     /*      Ingest the manifest.safe file.                                  */
     /* -------------------------------------------------------------------- */
 
-    CPLXMLNode *psManifest = CPLParseXMLFile(osMDFilename);
+    auto psManifest = CPLXMLTreeCloser(CPLParseXMLFile(osMDFilename));
     if (psManifest == nullptr)
         return nullptr;
 
-    CPLString osPath(CPLGetPath(osMDFilename));
+    CPLString osPath(CPLGetPathSafe(osMDFilename));
 
     /* -------------------------------------------------------------------- */
     /*      Confirm the requested access is supported.                      */
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLDestroyXMLNode(psManifest);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The SAFE driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("SAFE");
         return nullptr;
     }
 
     /* -------------------------------------------------------------------- */
     /*      Get contentUnit parent element.                                 */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psContentUnits = CPLGetXMLNode(
-        psManifest, "=xfdu:XFDU.informationPackageMap.xfdu:contentUnit");
+    const CPLXMLNode *psContentUnits = CPLGetXMLNode(
+        psManifest.get(), "=xfdu:XFDU.informationPackageMap.xfdu:contentUnit");
     if (psContentUnits == nullptr)
     {
-        CPLDestroyXMLNode(psManifest);
         CPLError(CE_Failure, CPLE_OpenFailed,
                  "Failed to find <xfdu:XFDU><informationPackageMap>"
                  "<xfdu:contentUnit> in manifest file.");
@@ -1040,11 +1029,10 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Get Metadata Objects element.                                   */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psMetaDataObjects =
-        CPLGetXMLNode(psManifest, "=xfdu:XFDU.metadataSection");
+    const CPLXMLNode *psMetaDataObjects =
+        CPLGetXMLNode(psManifest.get(), "=xfdu:XFDU.metadataSection");
     if (psMetaDataObjects == nullptr)
     {
-        CPLDestroyXMLNode(psManifest);
         CPLError(CE_Failure, CPLE_OpenFailed,
                  "Failed to find <xfdu:XFDU><metadataSection>"
                  "in manifest file.");
@@ -1054,11 +1042,10 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Get Data Objects element.                                       */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psDataObjects =
-        CPLGetXMLNode(psManifest, "=xfdu:XFDU.dataObjectSection");
+    const CPLXMLNode *psDataObjects =
+        CPLGetXMLNode(psManifest.get(), "=xfdu:XFDU.dataObjectSection");
     if (psDataObjects == nullptr)
     {
-        CPLDestroyXMLNode(psManifest);
         CPLError(CE_Failure, CPLE_OpenFailed,
                  "Failed to find <xfdu:XFDU><dataObjectSection> in document.");
         return nullptr;
@@ -1069,7 +1056,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     auto poDS = std::make_unique<SAFEDataset>();
 
-    poDS->psManifest = psManifest;
+    poDS->psManifest = std::move(psManifest);
 
     /* -------------------------------------------------------------------- */
     /*      Look for "Measurement Data Unit" contentUnit elements.          */
@@ -1103,7 +1090,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
             if (*pszDataObjectID == '\0' || *pszDmdID == '\0')
                 continue;
 
-            CPLXMLNode *psDataObject =
+            const CPLXMLNode *psDataObject =
                 SAFEDataset::GetDataObject(psDataObjects, pszDataObjectID);
 
             const char *pszRepId = CPLGetXMLValue(psDataObject, "repID", "");
@@ -1115,19 +1102,25 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
             if (*pszMeasurement == '\0')
                 continue;
 
-            char **papszTokens = CSLTokenizeString2(pszDmdID, " ",
-                                                    CSLT_ALLOWEMPTYTOKENS |
-                                                        CSLT_STRIPLEADSPACES |
-                                                        CSLT_STRIPENDSPACES);
-
-            for (int j = 0; j < CSLCount(papszTokens); j++)
+            if (CPLHasPathTraversal(pszMeasurement))
             {
-                const char *pszId = papszTokens[j];
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", pszMeasurement);
+                return nullptr;
+            }
+
+            const CPLStringList aosTokens(CSLTokenizeString2(
+                pszDmdID, " ",
+                CSLT_ALLOWEMPTYTOKENS | CSLT_STRIPLEADSPACES |
+                    CSLT_STRIPENDSPACES));
+
+            for (const char *pszId : aosTokens)
+            {
                 if (*pszId == '\0')
                     continue;
 
                 // Map the metadata ID to the object element
-                CPLXMLNode *psDO = SAFEDataset::GetDataObject(
+                const CPLXMLNode *psDO = SAFEDataset::GetDataObject(
                     psMetaDataObjects, psDataObjects, pszId);
                 if (psDO == nullptr)
                     continue;
@@ -1155,16 +1148,28 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                 }
             }
 
-            CSLDestroy(papszTokens);
-
             if (pszAnnotation == nullptr || pszCalibration == nullptr)
                 continue;
 
+            if (CPLHasPathTraversal(pszAnnotation))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", pszAnnotation);
+                return nullptr;
+            }
+
+            if (CPLHasPathTraversal(pszCalibration))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", pszCalibration);
+                return nullptr;
+            }
+
             // open Annotation XML file
             const CPLString osAnnotationFilePath =
-                CPLFormFilename(osPath, pszAnnotation, nullptr);
+                CPLFormFilenameSafe(osPath, pszAnnotation, nullptr);
             const CPLString osCalibrationFilePath =
-                CPLFormFilename(osPath, pszCalibration, nullptr);
+                CPLFormFilenameSafe(osPath, pszCalibration, nullptr);
 
             CPLXMLTreeCloser psAnnotation(
                 CPLParseXMLFile(osAnnotationFilePath));
@@ -1308,15 +1313,21 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
             /* --------------------------------------------------------------------
              */
             const std::string osFullFilename(
-                CPLFormFilename(osPath, pszMeasurement, nullptr));
+                CPLFormFilenameSafe(osPath, pszMeasurement, nullptr));
 
             /* --------------------------------------------------------------------
              */
             /*      Try and open the file. */
             /* --------------------------------------------------------------------
              */
-            auto poBandFile = std::unique_ptr<GDALDataset>(
-                GDALDataset::Open(osFullFilename.c_str()));
+            std::unique_ptr<GDALDataset> poBandFile;
+            {
+                CPLTurnFailureIntoWarningBackuper oErrorsToWarnings{};
+                poBandFile = std::unique_ptr<GDALDataset>(
+                    GDALDataset::Open(osFullFilename.c_str(),
+                                      GDAL_OF_RASTER | GDAL_OF_VERBOSE_ERROR));
+            }
+
             if (poBandFile == nullptr)
             {
                 // NOP
@@ -1744,7 +1755,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Platform information                                            */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psPlatformAttrs =
+    const CPLXMLNode *psPlatformAttrs =
         SAFEDataset::GetMetaDataObject(psMetaDataObjects, "platform");
 
     if (psPlatformAttrs != nullptr)
@@ -1781,7 +1792,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Acquisition Period information                                  */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psAcquisitionAttrs =
+    const CPLXMLNode *psAcquisitionAttrs =
         SAFEDataset::GetMetaDataObject(psMetaDataObjects, "acquisitionPeriod");
 
     if (psAcquisitionAttrs != nullptr)
@@ -1802,7 +1813,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Processing information                                          */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psProcessingAttrs =
+    const CPLXMLNode *psProcessingAttrs =
         SAFEDataset::GetMetaDataObject(psMetaDataObjects, "processing");
 
     if (psProcessingAttrs != nullptr)
@@ -1816,7 +1827,7 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Measurement Orbit Reference information                         */
     /* -------------------------------------------------------------------- */
-    CPLXMLNode *psOrbitAttrs = SAFEDataset::GetMetaDataObject(
+    const CPLXMLNode *psOrbitAttrs = SAFEDataset::GetMetaDataObject(
         psMetaDataObjects, "measurementOrbitReference");
 
     if (psOrbitAttrs != nullptr)
@@ -1832,6 +1843,46 @@ GDALDataset *SAFEDataset::Open(GDALOpenInfo *poOpenInfo)
                                  ".safe:extension.s1:orbitProperties.s1:pass",
                                  "UNK");
         poDS->SetMetadataItem("ORBIT_DIRECTION", pszItem);
+    }
+
+    /* -------------------------------------------------------------------- */
+    /*      Footprint                                                       */
+    /* -------------------------------------------------------------------- */
+    const CPLXMLNode *psFrameSet = SAFEDataset::GetMetaDataObject(
+        psMetaDataObjects, "measurementFrameSet");
+
+    if (psFrameSet)
+    {
+        const auto psFootPrint = CPLGetXMLNode(psFrameSet, "metadataWrap."
+                                                           "xmlData."
+                                                           "safe:frameSet."
+                                                           "safe:frame."
+                                                           "safe:footPrint");
+        if (psFootPrint)
+        {
+            const char *pszSRSName =
+                CPLGetXMLValue(psFootPrint, "srsName", nullptr);
+            const char *pszCoordinates =
+                CPLGetXMLValue(psFootPrint, "gml:coordinates", nullptr);
+            if (pszSRSName &&
+                EQUAL(pszSRSName,
+                      "http://www.opengis.net/gml/srs/epsg.xml#4326") &&
+                pszCoordinates)
+            {
+                const CPLStringList aosValues(
+                    CSLTokenizeString2(pszCoordinates, " ,", 0));
+                if (aosValues.size() == 8)
+                {
+                    poDS->SetMetadataItem(
+                        "FOOTPRINT",
+                        CPLSPrintf("POLYGON((%s %s,%s %s,%s %s,%s %s, %s %s))",
+                                   aosValues[1], aosValues[0], aosValues[3],
+                                   aosValues[2], aosValues[5], aosValues[4],
+                                   aosValues[7], aosValues[6], aosValues[1],
+                                   aosValues[0]));
+                }
+            }
+        }
     }
 
     /* -------------------------------------------------------------------- */
@@ -1903,20 +1954,6 @@ const GDAL_GCP *SAFEDataset::GetGCPs()
 
 {
     return pasGCPList;
-}
-
-/************************************************************************/
-/*                          GetGeoTransform()                           */
-/************************************************************************/
-
-CPLErr SAFEDataset::GetGeoTransform(double *padfTransform)
-{
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
-
-    if (bHaveGeoTransform)
-        return CE_None;
-
-    return CE_Failure;
 }
 
 /************************************************************************/

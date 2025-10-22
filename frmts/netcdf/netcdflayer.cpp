@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2016, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "netcdfdataset.h"
@@ -537,17 +521,17 @@ bool netCDFLayer::Create(char **papszOptions,
                 m_poFeatureDefn->GetGeomType();
             std::vector<std::string> coordNames;
             std::string strXVarName =
-                std::string(this->GetName()) + std::string("_coordX");
+                std::string(this->GetName()).append("_coordX");
             std::string strYVarName =
-                std::string(this->GetName()) + std::string("_coordY");
-            coordNames.push_back(strXVarName);
-            coordNames.push_back(strYVarName);
+                std::string(this->GetName()).append("_coordY");
+            coordNames.push_back(std::move(strXVarName));
+            coordNames.push_back(std::move(strYVarName));
 
             if (nccfdriver::OGRHasZandSupported(geometryContainerType))
             {
                 std::string strZVarName =
-                    std::string(this->GetName()) + std::string("_coordZ");
-                coordNames.push_back(strZVarName);
+                    std::string(this->GetName()).append("_coordZ");
+                coordNames.push_back(std::move(strZVarName));
             }
 
             if (m_layerSGDefn.getWritableType() == nccfdriver::NONE)
@@ -1327,13 +1311,11 @@ bool netCDFLayer::FillFeatureFromVar(OGRFeature *poFeature, int nMainDimId,
         }
         if (pszWKT != nullptr)
         {
-            OGRGeometry *poGeom = nullptr;
-            CPL_IGNORE_RET_VAL(
-                OGRGeometryFactory::createFromWkt(pszWKT, nullptr, &poGeom));
+            auto [poGeom, _] = OGRGeometryFactory::createFromWkt(pszWKT);
             if (poGeom != nullptr)
             {
                 poGeom->assignSpatialReference(GetSpatialRef());
-                poFeature->SetGeometryDirectly(poGeom);
+                poFeature->SetGeometry(std::move(poGeom));
             }
             CPLFree(pszWKT);
         }
@@ -1367,7 +1349,7 @@ OGRFeature *netCDFLayer::GetNextFeature()
 /*                            GetLayerDefn()                            */
 /************************************************************************/
 
-OGRFeatureDefn *netCDFLayer::GetLayerDefn()
+const OGRFeatureDefn *netCDFLayer::GetLayerDefn() const
 {
     return m_poFeatureDefn;
 }
@@ -2808,7 +2790,7 @@ GIntBig netCDFLayer::GetFeatureCount(int bForce)
 /*                          TestCapability()                            */
 /************************************************************************/
 
-int netCDFLayer::TestCapability(const char *pszCap)
+int netCDFLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCSequentialWrite))
         return m_poDS->GetAccess() == GA_Update;

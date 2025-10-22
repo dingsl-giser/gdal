@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) PCRaster owners
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -155,14 +139,14 @@ PCRasterDataset::createCopy(char const *filename, GDALDataset *source,
     REAL8 north = 0.0;
     REAL8 cellSize = 1.0;
 
-    double transform[6];
-    if (source->GetGeoTransform(transform) == CE_None)
+    GDALGeoTransform gt;
+    if (source->GetGeoTransform(gt) == CE_None)
     {
-        if (transform[2] == 0.0 && transform[4] == 0.0)
+        if (gt[2] == 0.0 && gt[4] == 0.0)
         {
-            west = static_cast<REAL8>(transform[0]);
-            north = static_cast<REAL8>(transform[3]);
-            cellSize = static_cast<REAL8>(transform[1]);
+            west = static_cast<REAL8>(gt[0]);
+            north = static_cast<REAL8>(gt[3]);
+            cellSize = static_cast<REAL8>(gt[1]);
         }
     }
 
@@ -282,8 +266,8 @@ PCRasterDataset::createCopy(char const *filename, GDALDataset *source,
     /* -------------------------------------------------------------------- */
     /*      Re-open dataset, and copy any auxiliary pam information.        */
     /* -------------------------------------------------------------------- */
-    GDALPamDataset *poDS =
-        reinterpret_cast<GDALPamDataset *>(GDALOpen(filename, GA_Update));
+    GDALPamDataset *poDS = cpl::down_cast<GDALPamDataset *>(
+        GDALDataset::Open(filename, GDAL_OF_RASTER | GDAL_OF_UPDATE));
 
     if (poDS)
         poDS->CloneInfo(source, GCIF_PAM_DEFAULT);
@@ -350,24 +334,24 @@ PCRasterDataset::~PCRasterDataset()
 
 //! Sets projections info.
 /*!
-  \param     transform Array to fill.
+  \param     gt Array to fill.
 
   CSF 2.0 supports the notion of y coordinates which increase from north to
   south. Support for this has been dropped and applications reading PCRaster
   rasters will treat or already treat y coordinates as increasing from south
   to north only.
 */
-CPLErr PCRasterDataset::GetGeoTransform(double *transform)
+CPLErr PCRasterDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
     // x = west + nrCols * cellsize
-    transform[0] = d_west;
-    transform[1] = d_cellSize;
-    transform[2] = 0.0;
+    gt[0] = d_west;
+    gt[1] = d_cellSize;
+    gt[2] = 0.0;
 
     // y = north + nrRows * -cellsize
-    transform[3] = d_north;
-    transform[4] = 0.0;
-    transform[5] = -1.0 * d_cellSize;
+    gt[3] = d_north;
+    gt[4] = 0.0;
+    gt[5] = -1.0 * d_cellSize;
 
     return CE_None;
 }
@@ -508,26 +492,20 @@ GDALDataset *PCRasterDataset::create(const char *filename, int nr_cols,
     Mclose(map);
     map = nullptr;
 
-    /* -------------------------------------------------------------------- */
-    /*      Re-open dataset, and copy any auxiliary pam information.        */
-    /* -------------------------------------------------------------------- */
-    GDALPamDataset *poDS =
-        reinterpret_cast<GDALPamDataset *>(GDALOpen(filename, GA_Update));
-
-    return poDS;
+    return GDALDataset::Open(filename, GDAL_OF_RASTER | GDAL_OF_UPDATE);
 }
 
-CPLErr PCRasterDataset::SetGeoTransform(double *transform)
+CPLErr PCRasterDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    if ((transform[2] != 0.0) || (transform[4] != 0.0))
+    if ((gt[2] != 0.0) || (gt[4] != 0.0))
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "PCRaster driver: "
-                 "rotated geotransformations are not supported.");
+                 "rotated geogtations are not supported.");
         return CE_Failure;
     }
 
-    if (transform[1] != transform[5] * -1.0)
+    if (gt[1] != gt[5] * -1.0)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "PCRaster driver: "
@@ -535,9 +513,9 @@ CPLErr PCRasterDataset::SetGeoTransform(double *transform)
         return CE_Failure;
     }
 
-    d_west = transform[0];
-    d_north = transform[3];
-    d_cellSize = transform[1];
+    d_west = gt[0];
+    d_north = gt[3];
+    d_cellSize = gt[1];
     d_location_changed = true;
 
     return CE_None;

@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -104,7 +88,7 @@ static std::string RemoveTrailingSlash(const std::string &osFilename)
 
 class VSIADLSFSHandler;
 
-struct VSIDIRADLS : public VSIDIR
+struct VSIDIRADLS final : public VSIDIR
 {
     int m_nRecurseDepth = 0;
 
@@ -202,7 +186,8 @@ class VSIADLSFSHandler final : public IVSIS3LikeFSHandlerWithMultipartUpload
         return "ADLS";
     }
 
-    int Rename(const char *oldpath, const char *newpath) override;
+    int Rename(const char *oldpath, const char *newpath, GDALProgressFunc,
+               void *) override;
     int Unlink(const char *pszFilename) override;
     int Mkdir(const char *, long) override;
     int Rmdir(const char *) override;
@@ -356,7 +341,7 @@ class VSIADLSWriteHandle final : public VSIAppendWriteHandle
   public:
     VSIADLSWriteHandle(VSIADLSFSHandler *poFS, const char *pszFilename,
                        VSIAzureBlobHandleHelper *poHandleHelper);
-    virtual ~VSIADLSWriteHandle();
+    ~VSIADLSWriteHandle() override;
 
     bool CreateFile(CSLConstList papszOptions);
 };
@@ -631,8 +616,7 @@ bool VSIDIRADLS::IssueListDir()
 
     struct curl_slist *headers = VSICurlSetOptions(
         hCurlHandle, poHandleHelper->GetURL().c_str(), aosHTTPOptions.List());
-    headers = VSICurlMergeHeaders(
-        headers, poHandleHelper->GetCurlHeaders("GET", headers));
+    headers = poHandleHelper->GetCurlHeaders("GET", headers);
     unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
     CurlRequestHelper requestHelper;
@@ -742,7 +726,8 @@ class VSIADLSHandle final : public VSICurlHandle
   protected:
     virtual struct curl_slist *
     GetCurlHeaders(const std::string &osVerb,
-                   const struct curl_slist *psExistingHeaders) override;
+                   struct curl_slist *psHeaders) override;
+    bool CanRestartOnError(const char *, const char *, bool) override;
 
   public:
     VSIADLSHandle(VSIADLSFSHandler *poFS, const char *pszFilename,
@@ -847,8 +832,7 @@ int VSIADLSFSHandler::Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
             VSICurlSetOptions(hCurlHandle, poHandleHelper->GetURL().c_str(),
                               aosHTTPOptions.List());
 
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("HEAD", headers));
+        headers = poHandleHelper->GetCurlHeaders("HEAD", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_NOBODY, 1);
@@ -947,8 +931,7 @@ char **VSIADLSFSHandler::GetFileMetadata(const char *pszFilename,
             VSICurlSetOptions(hCurlHandle, poHandleHelper->GetURL().c_str(),
                               aosHTTPOptions.List());
 
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("HEAD", headers));
+        headers = poHandleHelper->GetCurlHeaders("HEAD", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_NOBODY, 1);
@@ -1125,8 +1108,7 @@ bool VSIADLSFSHandler::SetFileMetadata(const char *pszFilename,
             CPLFree(pszKey);
         }
 
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("PATCH", headers));
+        headers = poHandleHelper->GetCurlHeaders("PATCH", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         NetworkStatisticsLogger::LogPUT(0);
@@ -1202,7 +1184,8 @@ void VSIADLSWriteHandle::InvalidateParentDirectory()
     m_poFS->InvalidateCachedData(m_poHandleHelper->GetURLNoKVP().c_str());
 
     const std::string osFilenameWithoutSlash(RemoveTrailingSlash(m_osFilename));
-    m_poFS->InvalidateDirContent(CPLGetDirname(osFilenameWithoutSlash.c_str()));
+    m_poFS->InvalidateDirContent(
+        CPLGetDirnameSafe(osFilenameWithoutSlash.c_str()));
 }
 
 /************************************************************************/
@@ -1297,7 +1280,8 @@ IVSIS3LikeHandleHelper *VSIADLSFSHandler::CreateHandleHelper(const char *pszURI,
 /*                               Rename()                               */
 /************************************************************************/
 
-int VSIADLSFSHandler::Rename(const char *oldpath, const char *newpath)
+int VSIADLSFSHandler::Rename(const char *oldpath, const char *newpath,
+                             GDALProgressFunc, void *)
 {
     if (!STARTS_WITH_CI(oldpath, GetFSPrefix().c_str()))
         return -1;
@@ -1332,7 +1316,7 @@ int VSIADLSFSHandler::Rename(const char *oldpath, const char *newpath)
 
     InvalidateCachedData(GetURLFromFilename(oldpath).c_str());
     InvalidateCachedData(GetURLFromFilename(newpath).c_str());
-    InvalidateDirContent(CPLGetDirname(oldpath));
+    InvalidateDirContent(CPLGetDirnameSafe(oldpath));
 
     const CPLStringList aosHTTPOptions(CPLHTTPGetOptionsFromEnv(oldpath));
     const CPLHTTPRetryParameters oRetryParameters(aosHTTPOptions);
@@ -1357,8 +1341,7 @@ int VSIADLSFSHandler::Rename(const char *oldpath, const char *newpath)
         osRenameSource +=
             CPLAWSURLEncode(oldpath + GetFSPrefix().size(), false);
         headers = curl_slist_append(headers, osRenameSource.c_str());
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("PUT", headers));
+        headers = poHandleHelper->GetCurlHeaders("PUT", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         CurlRequestHelper requestHelper;
@@ -1459,7 +1442,7 @@ int VSIADLSFSHandler::MkdirInternal(const char *pszDirname, long nMode,
     InvalidateCachedData(GetURLFromFilename(osDirname.c_str()).c_str());
     InvalidateCachedData(
         GetURLFromFilename(osDirnameWithoutEndSlash.c_str()).c_str());
-    InvalidateDirContent(CPLGetDirname(osDirnameWithoutEndSlash.c_str()));
+    InvalidateDirContent(CPLGetDirnameSafe(osDirnameWithoutEndSlash.c_str()));
 
     int nRet = 0;
 
@@ -1498,8 +1481,7 @@ int VSIADLSFSHandler::MkdirInternal(const char *pszDirname, long nMode,
             headers = curl_slist_append(headers, "If-None-Match: \"*\"");
         }
 
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("PUT", headers));
+        headers = poHandleHelper->GetCurlHeaders("PUT", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         CurlRequestHelper requestHelper;
@@ -1607,7 +1589,7 @@ int VSIADLSFSHandler::RmdirInternal(const char *pszDirname, bool bRecursive)
     InvalidateCachedData(GetURLFromFilename(osDirname.c_str()).c_str());
     InvalidateCachedData(
         GetURLFromFilename(osDirnameWithoutEndSlash.c_str()).c_str());
-    InvalidateDirContent(CPLGetDirname(osDirnameWithoutEndSlash.c_str()));
+    InvalidateDirContent(CPLGetDirnameSafe(osDirnameWithoutEndSlash.c_str()));
     if (bRecursive)
     {
         PartialClearCache(osDirnameWithoutEndSlash.c_str());
@@ -1645,8 +1627,7 @@ int VSIADLSFSHandler::RmdirInternal(const char *pszDirname, bool bRecursive)
         struct curl_slist *headers = static_cast<struct curl_slist *>(
             CPLHTTPSetOptions(hCurlHandle, poHandleHelper->GetURL().c_str(),
                               aosHTTPOptions.List()));
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders("DELETE", headers));
+        headers = poHandleHelper->GetCurlHeaders("DELETE", headers);
 
         CurlRequestHelper requestHelper;
         const long response_code = requestHelper.perform(
@@ -1682,7 +1663,7 @@ int VSIADLSFSHandler::RmdirInternal(const char *pszDirname, bool bRecursive)
                              : "(null)");
                 if (requestHelper.sWriteFuncData.pBuffer != nullptr)
                 {
-                    VSIError(VSIE_AWSError, "%s",
+                    VSIError(VSIE_ObjectStorageGenericError, "%s",
                              requestHelper.sWriteFuncData.pBuffer);
                     if (strstr(requestHelper.sWriteFuncData.pBuffer,
                                "PathNotFound"))
@@ -1799,8 +1780,7 @@ int VSIADLSFSHandler::CopyObject(const char *oldpath, const char *newpath,
         headers = curl_slist_append(headers, osSourceHeader.c_str());
         headers = curl_slist_append(headers, "Content-Length: 0");
         headers = VSICurlSetContentTypeFromExt(headers, newpath);
-        headers = VSICurlMergeHeaders(
-            headers, poAzHandleHelper->GetCurlHeaders("PUT", headers));
+        headers = poAzHandleHelper->GetCurlHeaders("PUT", headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         CurlRequestHelper requestHelper;
@@ -1847,7 +1827,8 @@ int VSIADLSFSHandler::CopyObject(const char *oldpath, const char *newpath,
 
             const std::string osFilenameWithoutSlash(
                 RemoveTrailingSlash(newpath));
-            InvalidateDirContent(CPLGetDirname(osFilenameWithoutSlash.c_str()));
+            InvalidateDirContent(
+                CPLGetDirnameSafe(osFilenameWithoutSlash.c_str()));
         }
 
         curl_easy_cleanup(hCurlHandle);
@@ -1873,7 +1854,7 @@ bool VSIADLSFSHandler::UploadFile(
     if (event == Event::CREATE_FILE)
     {
         InvalidateCachedData(poHandleHelper->GetURLNoKVP().c_str());
-        InvalidateDirContent(CPLGetDirname(osFilename.c_str()));
+        InvalidateDirContent(CPLGetDirnameSafe(osFilename.c_str()));
     }
 
     const CPLStringList aosHTTPOptions(
@@ -1948,8 +1929,7 @@ bool VSIADLSFSHandler::UploadFile(
 
         const char *pszVerb = (event == Event::CREATE_FILE) ? "PUT" : "PATCH";
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_CUSTOMREQUEST, pszVerb);
-        headers = VSICurlMergeHeaders(
-            headers, poHandleHelper->GetCurlHeaders(pszVerb, headers));
+        headers = poHandleHelper->GetCurlHeaders(pszVerb, headers);
         unchecked_curl_easy_setopt(hCurlHandle, CURLOPT_HTTPHEADER, headers);
 
         CurlRequestHelper requestHelper;
@@ -2169,11 +2149,21 @@ VSIADLSHandle::VSIADLSHandle(VSIADLSFSHandler *poFSIn, const char *pszFilename,
 /*                          GetCurlHeaders()                            */
 /************************************************************************/
 
-struct curl_slist *
-VSIADLSHandle::GetCurlHeaders(const std::string &osVerb,
-                              const struct curl_slist *psExistingHeaders)
+struct curl_slist *VSIADLSHandle::GetCurlHeaders(const std::string &osVerb,
+                                                 struct curl_slist *psHeaders)
 {
-    return m_poHandleHelper->GetCurlHeaders(osVerb, psExistingHeaders);
+    return m_poHandleHelper->GetCurlHeaders(osVerb, psHeaders);
+}
+
+/************************************************************************/
+/*                          CanRestartOnError()                         */
+/************************************************************************/
+
+bool VSIADLSHandle::CanRestartOnError(const char *pszErrorMsg,
+                                      const char *pszHeaders, bool bSetError)
+{
+    return m_poHandleHelper->CanRestartOnError(pszErrorMsg, pszHeaders,
+                                               bSetError);
 }
 
 } /* end of namespace cpl */

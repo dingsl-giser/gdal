@@ -8,23 +8,7 @@
  * Copyright (c) 2006, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
@@ -56,12 +40,6 @@ WCSDataset::WCSDataset(int version, const char *cache_dir)
       papszHttpOptions(nullptr), nMaxCols(-1), nMaxRows(-1)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 
     apszCoverageOfferingMD[0] = nullptr;
     apszCoverageOfferingMD[1] = nullptr;
@@ -128,19 +106,19 @@ void WCSDataset::SetGeometry(const std::vector<int> &size,
     nRasterXSize = size[0];
     nRasterYSize = size[1];
 
-    adfGeoTransform[0] = origin[0];
-    adfGeoTransform[1] = offsets[0][0];
-    adfGeoTransform[2] = offsets[0].size() == 1 ? 0.0 : offsets[0][1];
-    adfGeoTransform[3] = origin[1];
-    adfGeoTransform[4] = offsets[1].size() == 1 ? 0.0 : offsets[1][0];
-    adfGeoTransform[5] = offsets[1].size() == 1 ? offsets[1][0] : offsets[1][1];
+    m_gt[0] = origin[0];
+    m_gt[1] = offsets[0][0];
+    m_gt[2] = offsets[0].size() == 1 ? 0.0 : offsets[0][1];
+    m_gt[3] = origin[1];
+    m_gt[4] = offsets[1].size() == 1 ? 0.0 : offsets[1][0];
+    m_gt[5] = offsets[1].size() == 1 ? offsets[1][0] : offsets[1][1];
 
     if (!CPLGetXMLBoolean(psService, "OriginAtBoundary"))
     {
-        adfGeoTransform[0] -= adfGeoTransform[1] * 0.5;
-        adfGeoTransform[0] -= adfGeoTransform[2] * 0.5;
-        adfGeoTransform[3] -= adfGeoTransform[4] * 0.5;
-        adfGeoTransform[3] -= adfGeoTransform[5] * 0.5;
+        m_gt[0] -= m_gt[1] * 0.5;
+        m_gt[0] -= m_gt[2] * 0.5;
+        m_gt[3] -= m_gt[4] * 0.5;
+        m_gt[3] -= m_gt[5] * 0.5;
     }
 }
 
@@ -326,7 +304,7 @@ CPLErr WCSDataset::GetCoverage(int nXOff, int nYOff, int nXSize, int nYSize,
     /*      Figure out the georeferenced extents.                           */
     /* -------------------------------------------------------------------- */
     std::vector<double> extent =
-        GetExtent(nXOff, nYOff, nXSize, nYSize, nBufXSize, nBufYSize);
+        GetNativeExtent(nXOff, nYOff, nXSize, nYSize, nBufXSize, nBufYSize);
 
     /* -------------------------------------------------------------------- */
     /*      Build band list if we have the band identifier.                 */
@@ -720,7 +698,7 @@ GDALDataset *WCSDataset::GDALOpenResult(CPLHTTPResult *psResult)
 #endif
     // Eventually we should be looking at mime info and stuff to figure
     // out an optimal filename, but for now we just use a fixed one.
-    osResultFilename = CPLString().Printf("/vsimem/wcs/%p/wcsresult.dat", this);
+    osResultFilename = VSIMemGenerateHiddenFilename("wcsresult.dat");
 
     VSILFILE *fp = VSIFileFromMemBuffer(osResultFilename.c_str(), pabyData,
                                         nDataLen, FALSE);
@@ -745,7 +723,7 @@ GDALDataset *WCSDataset::GDALOpenResult(CPLHTTPResult *psResult)
     /* -------------------------------------------------------------------- */
     if (poDS == nullptr)
     {
-        const std::string osTempFilename =
+        std::string osTempFilename =
             CPLString().Printf("/tmp/%p_wcs.dat", this);
         VSILFILE *fpTemp = VSIFOpenL(osTempFilename.c_str(), "wb");
         if (fpTemp == nullptr)
@@ -768,10 +746,11 @@ GDALDataset *WCSDataset::GDALOpenResult(CPLHTTPResult *psResult)
             {
                 VSIFCloseL(fpTemp);
                 VSIUnlink(osResultFilename.c_str());
-                osResultFilename = osTempFilename;
+                osResultFilename = std::move(osTempFilename);
 
-                poDS = (GDALDataset *)GDALOpen(osResultFilename.c_str(),
-                                               GA_ReadOnly);
+                poDS =
+                    GDALDataset::Open(osResultFilename.c_str(),
+                                      GDAL_OF_RASTER | GDAL_OF_VERBOSE_ERROR);
             }
         }
     }
@@ -1381,9 +1360,7 @@ GDALDataset *WCSDataset::Open(GDALOpenInfo *poOpenInfo)
     {
         CSLDestroy(papszModifiers);
         CPLDestroyXMLNode(service);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The WCS driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("WCS");
         return nullptr;
     }
 
@@ -1625,10 +1602,10 @@ GDALDataset *WCSDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr WCSDataset::GetGeoTransform(double *padfTransform)
+CPLErr WCSDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 

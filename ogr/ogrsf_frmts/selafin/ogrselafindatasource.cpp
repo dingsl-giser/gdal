@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2014,  François Hissel <francois.hissel@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_selafin.h"
@@ -317,7 +301,7 @@ OGRSelafinDataSource::~OGRSelafinDataSource()
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRSelafinDataSource::TestCapability(const char *pszCap)
+int OGRSelafinDataSource::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
         return TRUE;
@@ -333,7 +317,7 @@ int OGRSelafinDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRSelafinDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRSelafinDataSource::GetLayer(int iLayer) const
 {
     if (iLayer < 0 || iLayer >= nLayers)
         return nullptr;
@@ -389,7 +373,7 @@ int OGRSelafinDataSource::Open(const char *pszFilename, int bUpdateIn,
             CSLDestroy(papszFiles);
             return FALSE;
         }
-        osFilename = CPLFormFilename(osFilename, papszFiles[0], nullptr);
+        osFilename = CPLFormFilenameSafe(osFilename, papszFiles[0], nullptr);
         CSLDestroy(papszFiles);
         return OpenTable(osFilename);
     }
@@ -404,8 +388,8 @@ int OGRSelafinDataSource::Open(const char *pszFilename, int bUpdateIn,
     char **papszNames = VSIReadDir(osFilename);
     for (i = 0; papszNames != NULL && papszNames[i] != NULL; i++)
     {
-        CPLString oSubFilename =
-            CPLFormFilename(osFilename, papszNames[i], NULL);
+        const CPLString oSubFilename =
+            CPLFormFilenameSafe(osFilename, papszNames[i], NULL);
         if (EQUAL(papszNames[i], ".") || EQUAL(papszNames[i], ".."))
             continue;
         if (VSIStatL(oSubFilename, &sStatBuf) != 0 ||
@@ -459,7 +443,7 @@ int OGRSelafinDataSource::OpenTable(const char *pszFilename)
     }
     if (!bUpdate && strstr(pszFilename, "/vsigzip/") == nullptr &&
         strstr(pszFilename, "/vsizip/") == nullptr)
-        fp = (VSILFILE *)VSICreateBufferedReaderHandle((VSIVirtualHandle *)fp);
+        fp = VSICreateBufferedReaderHandle(fp);
 
     // Quickly check if the file is in Selafin format, before actually starting
     // to read to make it faster
@@ -485,7 +469,7 @@ int OGRSelafinDataSource::OpenTable(const char *pszFilename)
     } */
 
     // Get layer base name
-    CPLString osBaseLayerName = CPLGetBasename(pszFilename);
+    CPLString osBaseLayerName = CPLGetBasenameSafe(pszFilename);
 
     // Read header of file to get common information for all layers
     // poHeader now owns fp

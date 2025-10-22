@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  ESRIJson driver test suite.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2009-2019, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import contextlib
@@ -98,7 +81,7 @@ def test_ogr_esrijson_read_point():
 
     extent = (2, 2, 49, 49)
 
-    rc = validate_layer(lyr, "esripoint", 1, ogr.wkbPoint, 7, extent)
+    rc = validate_layer(lyr, "esripoint", 1, ogr.wkbPoint, 12, extent)
     assert rc
 
     layer_defn = lyr.GetLayerDefn()
@@ -119,12 +102,47 @@ def test_ogr_esrijson_read_point():
     ogrtest.check_feature_geometry(feature, "POINT(2 49)")
 
     assert feature.GetFID() == 1
+    assert (
+        lyr.GetLayerDefn()
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("fooSmallInt"))
+        .GetSubType()
+        == ogr.OFSTInt16
+    )
     assert feature["fooSmallInt"] == 2
     assert feature["fooInt"] == 1234567890
+    assert (
+        lyr.GetLayerDefn()
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("fooSingle"))
+        .GetSubType()
+        == ogr.OFSTFloat32
+    )
     assert feature["fooSingle"] == 1.5
     assert feature["fooDouble"] == 3.4
     assert feature["fooString"] == "56"
     assert feature["fooDate"] == "2021/12/31 00:00:00+00"
+    assert feature["fooDateOnly"] == "2025/09/20"
+    assert (
+        lyr.GetLayerDefn()
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("fooTimeOnly"))
+        .GetType()
+        == ogr.OFTTime
+    )
+    assert feature["fooTimeOnly"] == "12:34:56"
+    assert feature["fooBigInteger"] == 1234567890123456
+    assert (
+        lyr.GetLayerDefn()
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("fooGlobalID"))
+        .GetSubType()
+        == ogr.OFSTUUID
+    )
+    assert feature["fooGlobalID"] == "{FD04C39C-69C6-4DCC-88D6-7E3E673DD0CB}"
+    assert (
+        lyr.GetLayerDefn()
+        .GetFieldDefn(lyr.GetLayerDefn().GetFieldIndex("fooGUID"))
+        .GetSubType()
+        == ogr.OFSTUUID
+    )
+    assert feature["fooGUID"] == "{3BFE6840-A9E6-432A-AD34-B2067C8A276F}"
 
     lyr = None
     ds = None
@@ -679,7 +697,7 @@ def test_ogr_esrijson_identify_srs():
         {
         "objectIdFieldName" : "objectid",
         "geometryType" : "esriGeometryPoint",
-        "spatialReference":{"wkt":"PROJCS[\\"NAD_1983_StatePlane_Arizona_Central_FIPS_0202_IntlFeet\\",GEOGCS[\\"GCS_North_American_1983\\",DATUM[\\"D_North_American_1983\\",SPHEROID[\\"GRS_1980\\",6378137.0,298.257222101]],PRIMEM[\\"Greenwich\\",0.0],UNIT[\\"Degree\\",0.0174532925199433]],PROJECTION[\\"Transverse_Mercator\\"],PARAMETER[\\"False_Easting\\",700000.0],PARAMETER[\\"False_Northing\\",0.0],PARAMETER[\\"Central_Meridian\\",-111.9166666666667],PARAMETER[\\"Scale_Factor\\",0.9999],PARAMETER[\\"Latitude_Of_Origin\\",31.0],UNIT[\\"Foot\\",0.3048]]"},
+        "spatialReference":{"wkt":"GEOGCS[\\"GCS_WGS_1984\\",DATUM[\\"D_WGS_1984\\",SPHEROID[\\"WGS_1984\\",6378137.0,298.257223563]],PRIMEM[\\"Greenwich\\",0.0],UNIT[\\"Degree\\",0.0174532925199433]]"},
         "fields" : [],
         "features" : []
         }
@@ -690,7 +708,7 @@ def test_ogr_esrijson_identify_srs():
     lyr = ds.GetLayer(0)
     sr = lyr.GetSpatialRef()
     assert sr
-    assert sr.GetAuthorityCode(None) == "2223"
+    assert sr.GetAuthorityCode(None) == "4326"
 
 
 ###############################################################################

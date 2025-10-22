@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GML Reader
  * Purpose:  Declarations for OGR wrapper classes for GML, and GML<->OGR
@@ -10,23 +9,7 @@
  * Copyright (c) 2002, Frank Warmerdam
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_GML_H_INCLUDED
@@ -37,6 +20,7 @@
 #include "gmlutils.h"
 
 #include <memory>
+#include <set>
 #include <vector>
 
 class OGRGMLDataSource;
@@ -56,9 +40,10 @@ class OGRGMLLayer final : public OGRLayer
 {
     OGRFeatureDefn *poFeatureDefn;
 
-    GIntBig iNextGMLId;
-    bool bInvalidFIDFound;
-    char *pszFIDPrefix;
+    GIntBig m_iNextGMLId = 0;
+    bool m_bInvalidFIDFound = false;
+    char *m_pszFIDPrefix = nullptr;
+    std::set<GIntBig> m_oSetFIDs{};
 
     bool bWriter;
 
@@ -77,7 +62,7 @@ class OGRGMLLayer final : public OGRLayer
   public:
     OGRGMLLayer(const char *pszName, bool bWriter, OGRGMLDataSource *poDS);
 
-    virtual ~OGRGMLLayer();
+    ~OGRGMLLayer() override;
 
     GDALDataset *GetDataset() override;
 
@@ -85,17 +70,12 @@ class OGRGMLLayer final : public OGRLayer
     OGRFeature *GetNextFeature() override;
 
     GIntBig GetFeatureCount(int bForce = TRUE) override;
-    OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
@@ -105,21 +85,19 @@ class OGRGMLLayer final : public OGRLayer
     virtual OGRErr CreateGeomField(const OGRGeomFieldDefn *poField,
                                    int bApproxOK = TRUE) override;
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 };
 
 /************************************************************************/
 /*                           OGRGMLDataSource                           */
 /************************************************************************/
 
-class OGRGMLDataSource final : public OGRDataSource
+class OGRGMLDataSource final : public GDALDataset
 {
     OGRLayer **papoLayers;
     int nLayers;
 
-    char *pszName;
-
-    OGRGMLLayer *TranslateGMLSchema(GMLFeatureClass *);
+    OGRLayer *TranslateGMLSchema(GMLFeatureClass *);
 
     char **papszCreateOptions;
 
@@ -127,6 +105,7 @@ class OGRGMLDataSource final : public OGRDataSource
     VSILFILE *fpOutput;
     bool bFpOutputIsNonSeekable;
     bool bFpOutputSingleFile;
+    bool m_bWriteError = false;
     OGREnvelope3D sBoundingRect{};
     bool bBBOX3D;
     int nBoundedByLocation;
@@ -150,6 +129,7 @@ class OGRGMLDataSource final : public OGRDataSource
     // input related parameters.
     CPLString osFilename{};
     CPLString osXSDFilename{};
+    bool m_bUnlinkXSDFilename = false;
 
     IGMLReader *poReader;
     bool bOutIsTempFile;
@@ -186,30 +166,30 @@ class OGRGMLDataSource final : public OGRDataSource
 
     void WriteTopElements();
 
+    // Analyze the OGR_SCHEMA open options and apply changes to the GML reader, return false in case of a critical error
+    bool DealWithOgrSchemaOpenOption(const GDALOpenInfo *poOpenInfo);
+
     CPL_DISALLOW_COPY_ASSIGN(OGRGMLDataSource)
 
   public:
     OGRGMLDataSource();
-    virtual ~OGRGMLDataSource();
+    ~OGRGMLDataSource() override;
 
     bool Open(GDALOpenInfo *poOpenInfo);
+    CPLErr Close() override;
     bool Create(const char *pszFile, char **papszOptions);
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return nLayers;
     }
 
-    OGRLayer *GetLayer(int) override;
+    using GDALDataset::GetLayer;
+    const OGRLayer *GetLayer(int) const override;
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     VSILFILE *GetOutputFP() const
     {
@@ -228,8 +208,8 @@ class OGRGMLDataSource final : public OGRDataSource
         return bExposeGMLId || bExposeFid;
     }
 
-    static void PrintLine(VSILFILE *fp, const char *fmt, ...)
-        CPL_PRINT_FUNC_FORMAT(2, 3);
+    void PrintLine(VSILFILE *fp, const char *fmt, ...)
+        CPL_PRINT_FUNC_FORMAT(3, 4);
 
     bool IsGML3Output() const
     {
@@ -244,6 +224,12 @@ class OGRGMLDataSource final : public OGRDataSource
     bool IsGML32Output() const
     {
         return bIsOutputGML32;
+    }
+
+    /** Returns whether a writing error has occurred */
+    inline bool HasWriteError() const
+    {
+        return m_bWriteError;
     }
 
     OGRGMLSRSNameFormat GetSRSNameFormat() const
@@ -316,10 +302,10 @@ class OGRGMLDataSource final : public OGRDataSource
         return m_bWriteGlobalSRS;
     }
 
-    virtual OGRLayer *ExecuteSQL(const char *pszSQLCommand,
-                                 OGRGeometry *poSpatialFilter,
-                                 const char *pszDialect) override;
-    virtual void ReleaseResultSet(OGRLayer *poResultsSet) override;
+    OGRLayer *ExecuteSQL(const char *pszSQLCommand,
+                         OGRGeometry *poSpatialFilter,
+                         const char *pszDialect) override;
+    void ReleaseResultSet(OGRLayer *poResultsSet) override;
 
     static bool CheckHeader(const char *pszStr);
 };

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdallocationinfo testing
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import sys
@@ -118,10 +101,28 @@ def test_gdallocationinfo_4(gdallocationinfo_path):
     assert ret.startswith(expected_ret)
 
 
+# Test -geoloc at lower right corner
+def test_gdallocationinfo_lr(gdallocationinfo_path):
+
+    ret = gdaltest.runexternal(
+        gdallocationinfo_path + " -geoloc ../gcore/data/byte.tif 441920.000 3750120.000"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """Report:
+  Location: (20P,20L)
+  Band 1:
+    Value: 107"""
+    assert ret.startswith(expected_ret)
+
+
 ###############################################################################
 # Test -lifonly
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdallocationinfo_5(gdallocationinfo_path):
 
     ret = gdaltest.runexternal(
@@ -416,6 +417,9 @@ def test_gdallocationinfo_value_interpolate_invalid_method(gdallocationinfo_path
 
 
 def test_gdallocationinfo_interpolate_float_data(gdallocationinfo_path, tmp_path):
+
+    gdaltest.importorskip_gdal_array()
+
     dst_filename = str(tmp_path / "tmp_float.tif")
     driver = gdal.GetDriverByName("GTiff")
     dst_ds = driver.Create(
@@ -430,3 +434,96 @@ def test_gdallocationinfo_interpolate_float_data(gdallocationinfo_path, tmp_path
         gdallocationinfo_path + " -valonly -r bilinear {} 1 1".format(dst_filename)
     )
     assert float(ret) == pytest.approx(4.45, rel=1e-6)
+
+
+def test_gdallocationinfo_nodata(gdallocationinfo_path, tmp_path):
+
+    filename = tmp_path / "out.tif"
+    # 64 because this is the size of the cache window of GDALInterpolateAtPoint
+    with gdal.GetDriverByName("MEM").Create("", 1, 64 + 1, 2) as src_ds:
+        src_ds.GetRasterBand(1).SetNoDataValue(16)
+        gdal.Translate(
+            filename, src_ds, creationOptions=["BLOCKYSIZE=1", "INTERLEAVE=PIXEL"]
+        )
+    with gdal.Open(filename, gdal.GA_Update) as ds:
+        ds.GetRasterBand(1).WriteRaster(0, 0, 1, 1, b"\x10")
+        ds.GetRasterBand(2).WriteRaster(0, 0, 1, 1, b"\x10")
+        ds.GetRasterBand(1).WriteRaster(0, 1, 1, 1, b"\x10")
+        ds.GetRasterBand(2).WriteRaster(0, 1, 1, 1, b"\x11")
+
+    f = gdal.VSIFOpenL(filename, "rb+")
+    assert f
+    gdal.VSIFTruncateL(f, gdal.VSIStatL(filename).size - 1)
+    gdal.VSIFCloseL(f)
+
+    ret = gdaltest.runexternal(gdallocationinfo_path + f" {filename} 0 0")
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """Report:
+  Location: (0P,0L)
+  Band 1:
+    Value: 16
+  Band 2:
+    Value: 16"""
+    assert ret.startswith(expected_ret)
+
+    ret = gdaltest.runexternal(gdallocationinfo_path + f" -xml {filename} 0 0")
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """<Report pixel="0" line="0">
+  <BandReport band="1">
+    <Value>16</Value>
+  </BandReport>
+  <BandReport band="2">
+    <Value>16</Value>
+  </BandReport>
+</Report>
+"""
+    assert ret.startswith(expected_ret)
+
+    ret = gdaltest.runexternal(
+        gdallocationinfo_path + f" -valonly -field_sep , {filename} 0 0"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """16,16"""
+    assert ret.startswith(expected_ret)
+
+    ret = gdaltest.runexternal(
+        gdallocationinfo_path + f" -valonly -field_sep , {filename} 0 1"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """16,17"""
+    assert ret.startswith(expected_ret)
+
+    ret, err = gdaltest.runexternal_out_and_err(
+        gdallocationinfo_path + f" {filename} 0 64"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """Report:
+  Location: (0P,64L)
+  Band 1:
+  Band 2:"""
+    assert ret.startswith(expected_ret)
+    assert "ret code = 1" in err
+
+    ret, err = gdaltest.runexternal_out_and_err(
+        gdallocationinfo_path + f" -xml {filename} 0 64"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """<Report pixel="0" line="64">
+  <BandReport band="1">
+    <IOError />
+  </BandReport>
+  <BandReport band="2">
+    <IOError />
+  </BandReport>
+</Report>"""
+    assert ret.startswith(expected_ret)
+    assert "ret code = 1" in err
+
+    ret, err = gdaltest.runexternal_out_and_err(
+        gdallocationinfo_path + f" -valonly -field_sep , {filename} 0 64"
+    )
+    ret = ret.replace("\r\n", "\n")
+    expected_ret = """,
+"""
+    assert ret.startswith(expected_ret)
+    assert "ret code = 1" in err

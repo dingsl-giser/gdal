@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test read/write functionality for Erdas Imagine (.img) HFA driver.
@@ -11,23 +10,7 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -39,15 +22,19 @@ import pytest
 
 from osgeo import gdal, osr
 
+pytestmark = pytest.mark.require_driver("HFA")
+
 ###############################################################################
 # test that we can write a small file with a custom layer name.
 
 
-def test_hfa_write_desc():
+def test_hfa_write_desc(tmp_path):
+
+    img_path = tmp_path / "test_desc.img"
 
     src_ds = gdal.Open("data/byte.tif")
 
-    new_ds = gdal.GetDriverByName("HFA").CreateCopy("tmp/test_desc.img", src_ds)
+    new_ds = gdal.GetDriverByName("HFA").CreateCopy(img_path, src_ds)
 
     bnd = new_ds.GetRasterBand(1)
     bnd.SetDescription("CustomBandName")
@@ -56,56 +43,39 @@ def test_hfa_write_desc():
     src_ds = None
     new_ds = None
 
-    new_ds = gdal.Open("tmp/test_desc.img")
+    new_ds = gdal.Open(img_path)
     bnd = new_ds.GetRasterBand(1)
     assert bnd.GetDescription() == "CustomBandName", "Didn't get custom band name."
 
-    bnd = None
-    new_ds = None
-
-    gdal.GetDriverByName("HFA").Delete("tmp/test_desc.img")
-
 
 ###############################################################################
-# test writing 4 bit files.
+# test writing n-bit files.
 
 
-def test_hfa_write_4bit():
+@pytest.mark.parametrize(
+    "options,expected_cs",
+    [
+        (["NBITS=1"], 252),
+        (["NBITS=1", "COMPRESSED=YES"], 252),
+        (["NBITS=2"], 718),
+        (["NBITS=2", "COMPRESSED=YES"], 718),
+        (["NBITS=4"], 2578),
+        (["NBITS=4", "COMPRESSED=YES"], 2578),
+    ],
+)
+def test_hfa_write_nbits(tmp_path, options, expected_cs):
+
+    img_path = tmp_path / "nbits.img"
+
     drv = gdal.GetDriverByName("HFA")
     src_ds = gdal.Open("data/byte.tif")
-    ds = drv.CreateCopy("tmp/4bit.img", src_ds, options=["NBITS=1"])
+    ds = drv.CreateCopy(img_path, src_ds, options=options)
     ds = None
     src_ds = None
 
-    ds = gdal.Open("tmp/4bit.img")
+    ds = gdal.Open(img_path)
     cs = ds.GetRasterBand(1).Checksum()
-
-    assert cs == 252, "Got wrong checksum on 4bit image."
-
-    ds = None
-
-    drv.Delete("tmp/4bit.img")
-
-
-###############################################################################
-# test writing 4 bit files compressed.
-
-
-def test_hfa_write_4bit_compressed():
-    drv = gdal.GetDriverByName("HFA")
-    src_ds = gdal.Open("data/byte.tif")
-    ds = drv.CreateCopy("tmp/4bitc.img", src_ds, options=["NBITS=1", "COMPRESSED=YES"])
-    ds = None
-    src_ds = None
-
-    ds = gdal.Open("tmp/4bitc.img")
-    cs = ds.GetRasterBand(1).Checksum()
-
-    assert cs == 252, "Got wrong checksum on 4bit image."
-
-    ds = None
-
-    drv.Delete("tmp/4bitc.img")
+    assert cs == expected_cs
 
 
 ###############################################################################
@@ -113,21 +83,19 @@ def test_hfa_write_4bit_compressed():
 # blocks and verifying they are the nodata value.  (#2427)
 
 
-def test_hfa_write_nd_invalid():
+def test_hfa_write_nd_invalid(tmp_path):
+
+    img_path = tmp_path / "ndinvalid.img"
 
     drv = gdal.GetDriverByName("HFA")
-    ds = drv.Create("tmp/ndinvalid.img", 512, 512, 1, gdal.GDT_Byte, [])
+    ds = drv.Create(img_path, 512, 512, 1, gdal.GDT_Byte, [])
     ds.GetRasterBand(1).SetNoDataValue(200)
     ds = None
 
-    ds = gdal.Open("tmp/ndinvalid.img")
+    ds = gdal.Open(img_path)
     cs = ds.GetRasterBand(1).Checksum()
 
     assert cs == 29754, "Got wrong checksum on invalid image."
-
-    ds = None
-
-    drv.Delete("tmp/ndinvalid.img")
 
 
 ###############################################################################
@@ -136,8 +104,8 @@ def test_hfa_write_nd_invalid():
 
 def test_hfa_update_overviews(tmp_path):
 
-    img_path = str(tmp_path / "small.img")
-    rrd_path = str(tmp_path / "small.rrd")
+    img_path = tmp_path / "small.img"
+    rrd_path = tmp_path / "small.rrd"
 
     shutil.copyfile("data/small_ov.img", img_path)
     shutil.copyfile("data/small_ov.rrd", rrd_path)
@@ -146,7 +114,6 @@ def test_hfa_update_overviews(tmp_path):
     result = ds.BuildOverviews(overviewlist=[2])
 
     assert result == 0, "BuildOverviews() failed."
-    ds = None
 
 
 ###############################################################################
@@ -155,8 +122,8 @@ def test_hfa_update_overviews(tmp_path):
 
 def test_hfa_clean_external_overviews(tmp_path):
 
-    img_path = str(tmp_path / "small.img")
-    rrd_path = str(tmp_path / "small.rrd")
+    img_path = tmp_path / "small.img"
+    rrd_path = tmp_path / "small.rrd"
 
     shutil.copyfile("data/small_ov.img", img_path)
     shutil.copyfile("data/small_ov.rrd", rrd_path)
@@ -175,17 +142,18 @@ def test_hfa_clean_external_overviews(tmp_path):
 
     assert not os.path.exists(rrd_path)
 
-    gdal.GetDriverByName("HFA").Delete(img_path)
-
 
 ###############################################################################
 # Test writing high frequency data (#2525).
 
 
-def test_hfa_bug_2525():
+def test_hfa_bug_2525(tmp_path):
+
+    tmp_filename = tmp_path / "test_hfa"
+
     drv = gdal.GetDriverByName("HFA")
     ds = drv.Create(
-        "tmp/test_hfa.img", 64, 64, 1, gdal.GDT_UInt16, options=["COMPRESSED=YES"]
+        tmp_filename, 64, 64, 1, gdal.GDT_UInt16, options=["COMPRESSED=YES"]
     )
     import struct
 
@@ -258,39 +226,32 @@ def test_hfa_bug_2525():
     )
     for i in range(64):
         ds.GetRasterBand(1).WriteRaster(0, i, 64, 1, data)
-    ds = None
-
-    drv.Delete("tmp/test_hfa.img")
+    ds.Close()
 
 
 ###############################################################################
 # Test building external overviews with HFA_USE_RRD=YES
 
 
-def test_hfa_use_rrd():
+def test_hfa_use_rrd(tmp_path):
 
-    shutil.copyfile("data/small_ov.img", "tmp/small.img")
+    tmp_filename = tmp_path / "small.img"
+
+    shutil.copyfile("data/small_ov.img", tmp_filename)
 
     with gdal.config_option("HFA_USE_RRD", "YES"):
-        ds = gdal.Open("tmp/small.img", gdal.GA_Update)
+        ds = gdal.Open(tmp_filename, gdal.GA_Update)
         result = ds.BuildOverviews(overviewlist=[2])
 
     assert result == 0, "BuildOverviews() failed."
     ds = None
 
-    try:
-        os.stat("tmp/small.rrd")
-    except OSError:
-        pytest.fail("small.rrd not present.")
+    assert os.path.exists(tmp_path / "small.rrd")
 
-    ds = gdal.Open("tmp/small.img")
+    ds = gdal.Open(tmp_filename)
     assert (
         ds.GetRasterBand(1).GetOverview(0).Checksum() == 26148
     ), "Unexpected checksum."
-
-    ds = None
-
-    gdal.GetDriverByName("HFA").Delete("tmp/small.img")
 
 
 ###############################################################################
@@ -298,23 +259,30 @@ def test_hfa_use_rrd():
 
 
 @pytest.mark.require_driver("BMP")
-def test_hfa_update_existing_aux_overviews():
+def test_hfa_update_existing_aux_overviews(tmp_path):
+
+    tmp_filename = tmp_path / "hfa_update_existing_aux_overviews.bmp"
 
     with gdal.config_option("USE_RRD", "YES"):
 
-        ds = gdal.GetDriverByName("BMP").Create(
-            "tmp/hfa_update_existing_aux_overviews.bmp", 100, 100, 1
-        )
+        ds = gdal.GetDriverByName("BMP").Create(tmp_filename, 100, 100, 1)
         ds.GetRasterBand(1).Fill(255)
         ds = None
 
         # Create overviews
-        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
-        ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        ds = gdal.Open(tmp_filename)
+        with gdaltest.disable_exceptions():
+            ret = ds.BuildOverviews("NEAR", overviewlist=[2, 4])
+        if (
+            gdal.GetLastErrorMsg()
+            == "This build does not support creating .aux overviews"
+        ):
+            pytest.skip(gdal.GetLastErrorMsg())
+        assert ret == 0
         ds = None
 
         # Save overviews checksum
-        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        ds = gdal.Open(tmp_filename)
         cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
         cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
 
@@ -322,7 +290,7 @@ def test_hfa_update_existing_aux_overviews():
         ds.BuildOverviews("NEAR", overviewlist=[2, 4])
         ds = None
 
-        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        ds = gdal.Open(tmp_filename)
         # Check overviews checksum
         new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
         new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
@@ -336,7 +304,7 @@ def test_hfa_update_existing_aux_overviews():
         ds.BuildOverviews("NEAR", overviewlist=[2, 4])
         ds = None
 
-        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        ds = gdal.Open(tmp_filename)
         # Check overviews checksum
         new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
         new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
@@ -349,7 +317,7 @@ def test_hfa_update_existing_aux_overviews():
         ds.BuildOverviews("NEAR", overviewlist=[8])
         ds = None
 
-        ds = gdal.Open("tmp/hfa_update_existing_aux_overviews.bmp")
+        ds = gdal.Open(tmp_filename)
         # Check overviews checksum
         new_cs_ovr0 = ds.GetRasterBand(1).GetOverview(0).Checksum()
         new_cs_ovr1 = ds.GetRasterBand(1).GetOverview(1).Checksum()
@@ -358,8 +326,6 @@ def test_hfa_update_existing_aux_overviews():
         if cs_ovr1 != new_cs_ovr1:
             pytest.fail()
         ds = None
-
-        gdal.GetDriverByName("BMP").Delete("tmp/hfa_update_existing_aux_overviews.bmp")
 
 
 ###############################################################################
@@ -444,25 +410,22 @@ def test_hfa_create_compress(filename, checksum, testfunction):
     getattr(ut, testfunction)()
 
 
-def test_hfa_create_compress_big_block():
-    src_ds = gdal.GetDriverByName("MEM").Create(
-        "/vsimem/big_block.img", 128, 128, 1, gdal.GDT_UInt32
-    )
+def test_hfa_create_compress_big_block(tmp_vsimem):
+    filename = tmp_vsimem / "test.img"
+    src_ds = gdal.GetDriverByName("MEM").Create("", 128, 128, 1, gdal.GDT_UInt32)
     src_ds.GetRasterBand(1).Fill(4 * 1000 * 1000 * 1000)
     src_ds.GetRasterBand(1).WriteRaster(0, 0, 1, 1, struct.pack("I", 0))
     gdal.GetDriverByName("HFA").CreateCopy(
-        "/vsimem/big_block.img", src_ds, options=["COMPRESS=YES", "BLOCKSIZE=128"]
+        filename, src_ds, options=["COMPRESS=YES", "BLOCKSIZE=128"]
     )
-    ds = gdal.Open("/vsimem/big_block.img")
+    ds = gdal.Open(filename)
     got_data = ds.GetRasterBand(1).ReadRaster()
-    ds = None
-    gdal.Unlink("/vsimem/big_block.img")
     assert got_data == src_ds.GetRasterBand(1).ReadRaster()
 
 
 # GCPs go to PAM currently
-def test_hfa_create_gcp():
-    filename = "/vsimem/test.img"
+def test_hfa_create_gcp(tmp_vsimem):
+    filename = tmp_vsimem / "test.img"
     ds = gdal.GetDriverByName("HFA").Create(filename, 1, 1)
     gcp1 = gdal.GCP()
     gcp1.GCPPixel = 0
@@ -473,9 +436,15 @@ def test_hfa_create_gcp():
     sr.ImportFromEPSG(4326)
     assert ds.SetGCPs((gcp1,), sr.ExportToWkt()) == gdal.CE_None
     ds = None
-    ds = gdal.Open(filename)
-    assert ds.GetGCPCount() == 1
-    assert ds.GetGCPSpatialRef() is not None
-    assert len(ds.GetGCPs()) == 1
-    ds = None
-    gdal.GetDriverByName("HFA").Delete(filename)
+
+    with gdal.Open(filename) as ds:
+        assert ds.GetGCPCount() == 1
+        assert ds.GetGCPSpatialRef() is not None
+        assert len(ds.GetGCPs()) == 1
+
+
+@pytest.mark.require_driver("L1B")
+def test_hfa_create_copy_from_ysize_0(tmp_vsimem):
+    src_ds = gdal.Open("../gdrivers/data/l1b/n12gac8bit_truncated_ysize_0_1band.l1b")
+    with pytest.raises(Exception, match="nXSize == 0 || nYSize == 0 not supported"):
+        gdal.GetDriverByName("HFA").CreateCopy(tmp_vsimem / "out.img", src_ds)

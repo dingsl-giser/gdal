@@ -8,23 +8,7 @@
 ###############################################################################
 # Copyright (c) 2024, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -53,6 +37,11 @@ def test_avif_heif():
     )
 
 
+def _has_geoheif_support():
+    drv = gdal.GetDriverByName("HEIF")
+    return drv and drv.GetMetadataItem("SUPPORTS_GEOHEIF", "HEIF")
+
+
 if __name__ == "__main__":
 
     os.environ["GDAL_SKIP"] = "AVIF"
@@ -61,3 +50,26 @@ if __name__ == "__main__":
     gdal.UseExceptions()
     ds = gdal.Open("data/avif/byte.avif")
     assert ds.GetRasterBand(1).Checksum() == 4672
+
+    if _has_geoheif_support():
+        ds = gdal.Open("data/heif/geo_small.avif")
+        assert ds
+        assert ds.RasterCount == 3
+        assert ds.RasterXSize == 128
+        assert ds.RasterYSize == 76
+        assert ds.GetGeoTransform() is not None
+        assert ds.GetGeoTransform() == pytest.approx(
+            [691000.0, 0.1, 0.0, 6090000.0, 0.0, -0.1]
+        )
+        assert ds.GetSpatialRef() is not None
+        assert ds.GetSpatialRef().GetAuthorityName(None) == "EPSG"
+        assert ds.GetSpatialRef().GetAuthorityCode(None) == "28355"
+        assert ds.GetGCPCount() == 1
+        gcp = ds.GetGCPs()[0]
+        assert (
+            gcp.GCPPixel == pytest.approx(0, abs=1e-5)
+            and gcp.GCPLine == pytest.approx(0, abs=1e-5)
+            and gcp.GCPX == pytest.approx(691000.0, abs=1e-5)
+            and gcp.GCPY == pytest.approx(6090000.0, abs=1e-5)
+            and gcp.GCPZ == pytest.approx(0, abs=1e-5)
+        )

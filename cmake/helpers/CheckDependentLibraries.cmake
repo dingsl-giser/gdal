@@ -147,7 +147,7 @@ set_package_properties(
   URL "https://libtiff.gitlab.io/libtiff/"
   DESCRIPTION "Support for the Tag Image File Format (TIFF)."
   TYPE RECOMMENDED)
-gdal_internal_library(TIFF REQUIRED)
+gdal_internal_library(TIFF)
 
 if (DEFINED ENV{CONDA_PREFIX} AND UNIX)
     # Currently on Unix, the Zstd cmake config file is buggy. It declares a
@@ -409,8 +409,6 @@ gdal_check_package(NetCDF "Enable netCDF driver" CAN_DISABLE
   NAMES netCDF
   TARGETS netCDF::netcdf NETCDF::netCDF
   VERSION "4.7")
-gdal_check_package(OGDI "Enable ogr_OGDI driver" CAN_DISABLE)
-gdal_check_package(OpenCL "Enable OpenCL (may be used for warping)" CAN_DISABLE)
 
 set(PostgreSQL_ADDITIONAL_VERSIONS "14" CACHE STRING "Additional PostgreSQL versions to check")
 gdal_check_package(PostgreSQL "" CAN_DISABLE)
@@ -440,14 +438,37 @@ gdal_check_package(JXL_THREADS "JPEG-XL threading" CAN_DISABLE)
 gdal_check_package(Crnlib "enable gdal_DDS driver" CAN_DISABLE)
 gdal_check_package(basisu "Enable BASISU driver" CONFIG CAN_DISABLE)
 gdal_check_package(IDB "enable ogr_IDB driver" CAN_DISABLE)
-gdal_check_package(rdb "enable RIEGL RDB library" CONFIG CAN_DISABLE)
 include(CheckDependentLibrariesTileDB)
+
+gdal_check_package(ExprTk "Enable C++ Mathematical Expression Tooklit Library (ExprTk) for VRT expressions" CAN_DISABLE)
+gdal_check_package(muparser "Enable muparser library for VRT expressions" RECOMMENDED CAN_DISABLE)
 
 gdal_check_package(OpenEXR "OpenEXR >=2.2" CAN_DISABLE)
 gdal_check_package(MONGOCXX "Enable MongoDBV3 driver" CAN_DISABLE)
 
 define_find_package2(HEIF libheif/heif.h heif PKGCONFIG_NAME libheif)
 gdal_check_package(HEIF "HEIF >= 1.1" CAN_DISABLE)
+if (HEIF_FOUND)
+  include(CMakePushCheckState)
+  include(CheckCXXSourceCompiles)
+  cmake_push_check_state(RESET)
+  set(CMAKE_REQUIRED_INCLUDES ${HEIF_INCLUDE_DIRS})
+  check_cxx_source_compiles(
+    "
+    #include <libheif/heif.h>
+    int main()
+    {
+        struct heif_image_tiling tiling;
+        return 0;
+    }
+    "
+    LIBHEIF_SUPPORTS_TILES
+  )
+  if (LIBHEIF_SUPPORTS_TILES)
+    set_property(TARGET HEIF::HEIF APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS "LIBHEIF_SUPPORTS_TILES")
+  endif ()
+  cmake_pop_check_state()
+endif()
 
 include(CheckDependentLibrariesAVIF)
 
@@ -473,11 +494,12 @@ option(GDAL_USE_PUBLICDECOMPWT
 
 # proprietary libraries KAKADU
 include(CheckDependentLibrariesKakadu)
-gdal_check_package(LURATECH "Enable JP2Lura driver" CAN_DISABLE)
 
 include(CheckDependentLibrariesArrowParquet)
 
 gdal_check_package(OpenDrive "Enable libOpenDRIVE" CONFIG CAN_DISABLE)
+
+gdal_check_package(AdbcDriverManager "Enable ADBC" CONFIG CAN_DISABLE)
 
 # bindings
 

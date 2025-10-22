@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -45,22 +29,11 @@
 //! @cond Doxygen_Suppress
 
 /************************************************************************/
-/*                         OGRCurveCollection()                         */
-/************************************************************************/
-
-OGRCurveCollection::OGRCurveCollection() = default;
-
-/************************************************************************/
 /*             OGRCurveCollection( const OGRCurveCollection& )          */
 /************************************************************************/
 
 /**
  * \brief Copy constructor.
- *
- * Note: before GDAL 2.1, only the default implementation of the constructor
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRCurveCollection::OGRCurveCollection(const OGRCurveCollection &other)
@@ -82,6 +55,23 @@ OGRCurveCollection::OGRCurveCollection(const OGRCurveCollection &other)
 }
 
 /************************************************************************/
+/*             OGRCurveCollection( OGRCurveCollection&& )               */
+/************************************************************************/
+
+/**
+ * \brief Move constructor.
+ *
+ * @since GDAL 3.11
+ */
+
+OGRCurveCollection::OGRCurveCollection(OGRCurveCollection &&other)
+    : nCurveCount(other.nCurveCount), papoCurves(other.papoCurves)
+{
+    other.nCurveCount = 0;
+    other.papoCurves = nullptr;
+}
+
+/************************************************************************/
 /*                         ~OGRCurveCollection()                        */
 /************************************************************************/
 
@@ -97,11 +87,6 @@ OGRCurveCollection::~OGRCurveCollection()
 
 /**
  * \brief Assignment operator.
- *
- * Note: before GDAL 2.1, only the default implementation of the operator
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRCurveCollection &
@@ -125,6 +110,27 @@ OGRCurveCollection::operator=(const OGRCurveCollection &other)
                 }
             }
         }
+    }
+    return *this;
+}
+
+/************************************************************************/
+/*                    operator=( OGRCurveCollection&& )                 */
+/************************************************************************/
+
+/**
+ * \brief Move assignment operator.
+ *
+ * @since GDAL 3.11
+ */
+
+OGRCurveCollection &OGRCurveCollection::operator=(OGRCurveCollection &&other)
+{
+    if (this != &other)
+    {
+        empty(nullptr);
+        std::swap(nCurveCount, other.nCurveCount);
+        std::swap(papoCurves, other.papoCurves);
     }
     return *this;
 }

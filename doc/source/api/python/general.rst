@@ -5,8 +5,14 @@
 
 .. _python_general:
 
-Python General API
-==================
+General API
+===========
+
+- `Configuration Management`_
+- `Data Type Information`_
+- `Error Handling`_
+- `File Management`_
+
 
 Configuration Management
 ------------------------
@@ -53,6 +59,24 @@ Configuration Management
 
 .. autofunction:: osgeo.gdal.VersionInfo
 
+Data Type Information
+---------------------
+
+.. autofunction:: osgeo.gdal.DataTypeIsComplex
+
+.. autofunction:: osgeo.gdal.DataTypeUnion
+
+.. autofunction:: osgeo.gdal.DataTypeUnionWithValue
+
+.. autofunction:: osgeo.gdal.GetDataTypeByName
+
+.. autofunction:: osgeo.gdal.GetDataTypeName
+
+.. autofunction:: osgeo.gdal.GetDataTypeSize
+
+.. autofunction:: osgeo.gdal.GetDataTypeSizeBits
+
+.. autofunction:: osgeo.gdal.GetDataTypeSizeBytes
 
 Error Handling
 --------------
@@ -85,6 +109,8 @@ Error Handling
 
 .. autofunction:: osgeo.gdal.quiet_errors
 
+.. autofunction:: osgeo.gdal.quiet_warnings
+
 .. autofunction:: osgeo.gdal.SetCurrentErrorHandlerCatchDebug
 
 .. autofunction:: osgeo.gdal.SetErrorHandler
@@ -95,9 +121,31 @@ Error Handling
 File Management
 ---------------
 
+osgeo.gdal_fsspec module
+++++++++++++++++++++++++
+
+.. automodule:: osgeo.gdal_fsspec
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+osgeo.gdal.VSIFile class
+++++++++++++++++++++++++
+
+.. autoclass:: osgeo.gdal.VSIFile
+   :members:
+   :undoc-members:
+   :noindex:
+
+Low level functions
++++++++++++++++++++
+
 .. autofunction:: osgeo.gdal.CloseDir
 
 .. autofunction:: osgeo.gdal.CopyFile
+
+.. autofunction:: osgeo.gdal.CopyFileRestartable
 
 .. autoclass:: osgeo.gdal.DirEntry
    :members:
@@ -117,6 +165,10 @@ File Management
 
 .. autofunction:: osgeo.gdal.MkdirRecursive
 
+.. autofunction:: osgeo.gdal.Move
+
+.. autofunction:: osgeo.gdal.MoveFile
+
 .. autofunction:: osgeo.gdal.OpenDir
 
 .. autofunction:: osgeo.gdal.ReadDir
@@ -130,6 +182,8 @@ File Management
 .. autofunction:: osgeo.gdal.RmdirRecursive
 
 .. autofunction:: osgeo.gdal.SetFileMetadata
+
+.. autofunction:: osgeo.gdal.Sync
 
 .. autofunction:: osgeo.gdal.Unlink
 

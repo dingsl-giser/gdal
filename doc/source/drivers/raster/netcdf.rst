@@ -277,6 +277,14 @@ Open options
 |about-open-options|
 The following open options are available:
 
+-  .. oo:: LIST_ALL_ARRAYS
+      :choices: YES, NO
+      :default: NO
+      :since: 3.11
+
+      In classic 2D mode, whereas the subdataset list should include all arrays,
+      including those with 1 dimension.
+
 -  .. oo:: HONOUR_VALID_RANGE
       :choices: YES, NO
       :since: 2.2
@@ -287,7 +295,7 @@ The following open options are available:
       valid_min, valid_max or valid_range attributes.
 
 -  .. oo:: IGNORE_XY_AXIS_NAME_CHECKS
-      :choices: YES, NOA
+      :choices: YES, NO
       :default: NO
       :since: 3.4.2
 
@@ -617,10 +625,21 @@ Configuration Options
       geotransform has been found, and that geotransform is within the bounds
       -180,360 -90,90, if YES assume OGC:CRS84.
 
+-  .. config:: GDAL_NETCDF_REPORT_EXTRA_DIM_VALUES
+      :choices: YES, NO
+      :default: NO
+      :since: 3.10.1
+
+      For a netCDF dataset stored on a remote file system (``/vsicurl/``, ``/vsis3/``),
+      getting the content of the ``NETCDF_DIM_{dim_name}_VALUES`` metadata item
+      can be a slow operation when the dimension is unlimited. It is thus disabled
+      by default for such remote files. By setting this configuration option to YES,
+      you force GDAL to get the content of such metadata items.
+
 VSI Virtual File System API support
 -----------------------------------
 
-Since GDAL 2.4, and with Linux kernel >=4.3 and libnetcdf >=4.5, read
+With Linux kernel >=4.3 and libnetcdf >=4.5, read
 operations on /vsi file systems are supported using the userfaultfd Linux system
 call. If running from a container, that system call may be unavailable by default.
 For example with Docker, ``--security-opt seccomp=unconfined`` might be needed.
@@ -682,9 +701,9 @@ The :cpp:func:`GDALGroup::GetMDArrayNames` method supports the following options
 - SHOW_ALL=YES/NO. Defaults to NO. If set to YES, all variables will be listed.
 - SHOW_ZERO_DIM=YES/NO. Defaults to NO. If set to NO, variables with 0-dimension
   will not be listed.
-- SHOW_COORDINATES=YES/NO. Defaults to YES. If set to NO, variables refererenced
+- SHOW_COORDINATES=YES/NO. Defaults to YES. If set to NO, variables referenced
   in the ``coordinates`` attribute of another variable will not be listed.
-- SHOW_BOUNDS=YES/NO. Defaults to YES. If set to NO, variables refererenced
+- SHOW_BOUNDS=YES/NO. Defaults to YES. If set to NO, variables referenced
   in the ``bounds`` attribute of another variable will not be listed.
 - SHOW_INDEXING=YES/NO. Defaults to YES. If set to NO,
   single-dimensional variables whose name is equal to the name of their indexing
@@ -750,15 +769,12 @@ This driver is compiled with the UNIDATA NetCDF library.
 You need to download or compile the NetCDF library before configuring
 GDAL with NetCDF support.
 
-See `NetCDF GDAL wiki <http://trac.osgeo.org/gdal/wiki/NetCDF>`__ for
-build instructions and information regarding HDF4, NetCDF-4 and HDF5.
-
 See Also:
 ---------
 
 -  :ref:`Vector side of the netCDF driver. <vector.netcdf>`
 -  `NetCDF CF-1.5
-   convention <http://cf-pcmdi.llnl.gov/documents/cf-conventions/1.5/cf-conventions.html>`__
+   convention <https://cfconventions.org/Data/cf-conventions/cf-conventions-1.5/build/cf-conventions.html>`__
 -  `NetCDF compiled
    libraries <http://www.unidata.ucar.edu/downloads/netcdf/index.jsp>`__
 -  `NetCDF

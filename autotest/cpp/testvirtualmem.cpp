@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GDAL algorithms
  * Purpose:  Test Delaunay triangulation
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_multiproc.h"
@@ -152,77 +135,81 @@ static void test_raw_auto(const char *pszFormat, int bFileMapping)
     if (GDALGetDriverByName(pszFormat) == nullptr)
     {
         GTEST_SKIP() << pszFormat << " driver missing";
-        return;
     }
-
-    CPLString osTmpFile;
-
-    if (bFileMapping)
-        osTmpFile =
-            CPLResetExtension(CPLGenerateTempFilename(pszFormat), "img");
     else
-        osTmpFile = "/vsimem/tmp.img";
-    GDALDatasetH hDS =
-        GDALCreate(GDALGetDriverByName(pszFormat), osTmpFile.c_str(), 400, 300,
-                   2, GDT_Byte, nullptr);
-    ASSERT_TRUE(hDS != nullptr);
-
-    int nPixelSpace1;
-    GIntBig nLineSpace1;
-    int nPixelSpace2;
-    GIntBig nLineSpace2;
-    if (!bFileMapping)
     {
-        char **papszOptions =
-            CSLSetNameValue(nullptr, "USE_DEFAULT_IMPLEMENTATION", "NO");
-        ASSERT_EQ(GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 1), GF_Write,
-                                        &nPixelSpace1, &nLineSpace1,
-                                        papszOptions),
-                  nullptr);
-        CSLDestroy(papszOptions);
-    }
-    CPLVirtualMem *pVMem1 =
-        GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 1), GF_Write,
-                              &nPixelSpace1, &nLineSpace1, nullptr);
-    char **papszOptions = CSLSetNameValue(nullptr, "USE_DEFAULT_IMPLEMENTATION",
-                                          (bFileMapping) ? "NO" : "YES");
-    CPLVirtualMem *pVMem2 =
-        GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 2), GF_Write,
-                              &nPixelSpace2, &nLineSpace2, papszOptions);
-    CSLDestroy(papszOptions);
-    ASSERT_TRUE(pVMem1 != nullptr);
-    ASSERT_TRUE(pVMem2 != nullptr);
-    ASSERT_EQ(CPLVirtualMemIsFileMapping(pVMem1), bFileMapping);
-    ASSERT_EQ(nPixelSpace1,
-              ((EQUAL(pszFormat, "GTIFF") && bFileMapping) ? 2 : 1));
-    if (bFileMapping)
-        ASSERT_EQ(nLineSpace1, 400 * 2);
-    else
-        ASSERT_EQ(nLineSpace1, 400 * nPixelSpace1);
+        CPLString osTmpFile;
 
-    GByte *pBase1 = (GByte *)CPLVirtualMemGetAddr(pVMem1);
-    GByte *pBase2 = (GByte *)CPLVirtualMemGetAddr(pVMem2);
-    for (int j = 0; j < 300; j++)
-    {
-        for (int i = 0; i < 400; i++)
+        if (bFileMapping)
+            osTmpFile = CPLResetExtensionSafe(
+                CPLGenerateTempFilenameSafe(pszFormat).c_str(), "img");
+        else
+            osTmpFile = "/vsimem/tmp.img";
+        GDALDatasetH hDS =
+            GDALCreate(GDALGetDriverByName(pszFormat), osTmpFile.c_str(), 400,
+                       300, 2, GDT_Byte, nullptr);
+        ASSERT_TRUE(hDS != nullptr);
+
+        int nPixelSpace1;
+        GIntBig nLineSpace1;
+        int nPixelSpace2;
+        GIntBig nLineSpace2;
+        if (!bFileMapping)
         {
-            pBase1[j * static_cast<int>(nLineSpace1) + i * nPixelSpace1] = 127;
-            pBase2[j * static_cast<int>(nLineSpace2) + i * nPixelSpace2] = 255;
+            char **papszOptions =
+                CSLSetNameValue(nullptr, "USE_DEFAULT_IMPLEMENTATION", "NO");
+            ASSERT_EQ(GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 1), GF_Write,
+                                            &nPixelSpace1, &nLineSpace1,
+                                            papszOptions),
+                      nullptr);
+            CSLDestroy(papszOptions);
         }
+        CPLVirtualMem *pVMem1 =
+            GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 1), GF_Write,
+                                  &nPixelSpace1, &nLineSpace1, nullptr);
+        char **papszOptions =
+            CSLSetNameValue(nullptr, "USE_DEFAULT_IMPLEMENTATION",
+                            (bFileMapping) ? "NO" : "YES");
+        CPLVirtualMem *pVMem2 =
+            GDALGetVirtualMemAuto(GDALGetRasterBand(hDS, 2), GF_Write,
+                                  &nPixelSpace2, &nLineSpace2, papszOptions);
+        CSLDestroy(papszOptions);
+        ASSERT_TRUE(pVMem1 != nullptr);
+        ASSERT_TRUE(pVMem2 != nullptr);
+        ASSERT_EQ(CPLVirtualMemIsFileMapping(pVMem1), bFileMapping);
+        ASSERT_EQ(nPixelSpace1,
+                  ((EQUAL(pszFormat, "GTIFF") && bFileMapping) ? 2 : 1));
+        if (bFileMapping)
+            ASSERT_EQ(nLineSpace1, 400 * 2);
+        else
+            ASSERT_EQ(nLineSpace1, 400 * nPixelSpace1);
+
+        GByte *pBase1 = (GByte *)CPLVirtualMemGetAddr(pVMem1);
+        GByte *pBase2 = (GByte *)CPLVirtualMemGetAddr(pVMem2);
+        for (int j = 0; j < 300; j++)
+        {
+            for (int i = 0; i < 400; i++)
+            {
+                pBase1[j * static_cast<int>(nLineSpace1) + i * nPixelSpace1] =
+                    127;
+                pBase2[j * static_cast<int>(nLineSpace2) + i * nPixelSpace2] =
+                    255;
+            }
+        }
+
+        CPLVirtualMemFree(pVMem1);
+        CPLVirtualMemFree(pVMem2);
+        GDALClose(hDS);
+
+        hDS = GDALOpen(osTmpFile.c_str(), GA_ReadOnly);
+        ASSERT_EQ(GDALChecksumImage(GDALGetRasterBand(hDS, 1), 0, 0, 400, 300),
+                  52906);
+        ASSERT_EQ(GDALChecksumImage(GDALGetRasterBand(hDS, 2), 0, 0, 400, 300),
+                  30926);
+        GDALClose(hDS);
+
+        GDALDeleteDataset(nullptr, osTmpFile.c_str());
     }
-
-    CPLVirtualMemFree(pVMem1);
-    CPLVirtualMemFree(pVMem2);
-    GDALClose(hDS);
-
-    hDS = GDALOpen(osTmpFile.c_str(), GA_ReadOnly);
-    ASSERT_EQ(GDALChecksumImage(GDALGetRasterBand(hDS, 1), 0, 0, 400, 300),
-              52906);
-    ASSERT_EQ(GDALChecksumImage(GDALGetRasterBand(hDS, 2), 0, 0, 400, 300),
-              30926);
-    GDALClose(hDS);
-
-    GDALDeleteDataset(nullptr, osTmpFile.c_str());
 }
 
 TEST(testvitualmem, test)

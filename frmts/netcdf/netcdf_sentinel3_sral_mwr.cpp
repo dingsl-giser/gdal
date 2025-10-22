@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // Example product:
@@ -69,9 +53,9 @@ class Sentinel3_SRAL_MWR_Layer final : public OGRLayer
 
   public:
     Sentinel3_SRAL_MWR_Layer(const std::string &name, int cdfid, int dimid);
-    ~Sentinel3_SRAL_MWR_Layer();
+    ~Sentinel3_SRAL_MWR_Layer() override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFDefn;
     }
@@ -80,7 +64,7 @@ class Sentinel3_SRAL_MWR_Layer final : public OGRLayer
     OGRFeature *GetNextFeature() override;
     OGRFeature *GetFeature(GIntBig nFID) override;
     GIntBig GetFeatureCount(int bForce) override;
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     char **GetMetadata(const char *pszDomain) override;
     const char *GetMetadataItem(const char *pszKey,
                                 const char *pszDomain) override;
@@ -270,7 +254,7 @@ GIntBig Sentinel3_SRAL_MWR_Layer::GetFeatureCount(int bForce)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int Sentinel3_SRAL_MWR_Layer::TestCapability(const char *pszCap)
+int Sentinel3_SRAL_MWR_Layer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCFastFeatureCount))
         return m_poFilterGeom == nullptr && m_poAttrQuery == nullptr;
@@ -477,7 +461,7 @@ void netCDFDataset::ProcessSentinel3_SRAL_MWR()
         NCDF_ERR(status);
         if (status != NC_NOERR)
             break;
-        std::string name(CPLGetBasename(GetDescription()));
+        std::string name(CPLGetBasenameSafe(GetDescription()));
         name += '_';
         name += szDimName;
         std::shared_ptr<OGRLayer> poLayer(

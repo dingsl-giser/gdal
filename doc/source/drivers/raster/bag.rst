@@ -8,8 +8,8 @@ BAG -- Bathymetry Attributed Grid
 
 .. build_dependencies:: libhdf5
 
-This driver provides read-only support, and starting with GDAL 2.4 for
-creation, for bathymetry data in the BAG format. BAG files are actually
+This driver provides read-only and creation support for bathymetry data in the
+BAG format. BAG files are actually
 a specific product profile in an HDF5 file, but a custom driver exists
 to present the data in a more convenient manner than is available
 through the generic HDF5 driver.
@@ -64,8 +64,7 @@ Other open options are:
 Variable resolution (VR) grid support
 -------------------------------------
 
-Starting with GDAL 2.4, GDAL can handle BAG files with `variable
-resolution
+GDAL can handle BAG files with `variable resolution
 grids <https://bitbucket.org/ccomjhc/openns/raw/master/docs/VariableResolution/2017-08-10_VariableResolution.docx>`__.
 Such datasets are made of a low-resolution grid, which is the one
 presented by default by the driver, and for each of those low-resolution
@@ -246,7 +245,7 @@ dataset will be reported as a OGR vector layer
 Creation support
 ----------------
 
-Starting with GDAL 2.4, the driver can create a BAG dataset (without
+The driver can create a BAG dataset (without
 variable resolution extension) with the elevation and uncertainty bands
 from a source dataset. The source dataset must be georeferenced, and
 have one or two bands. The first band is assumed to be the elevation
@@ -345,7 +344,7 @@ The other following creation options are available:
 
       Path to a XML file that can serve as a template.
       This will typically be a customized version of the base
-      bag_template.xml file. The file can contain other substituable
+      bag_template.xml file. The file can contain other substitutable
       variables than the ones mentioned above by using a similar syntax.
 
 -  .. co:: VAR_xxxx
@@ -448,7 +447,7 @@ Usage examples
       $ gdal_translate data/test_vr.bag -oo MODE=RESAMPLED_GRID -oo RES_FILTER_MIN=4 -oo RES_FILTER_MAX=8 out.tif
 
 -  Converting a GeoTIFF file to a BAG dataset, and provide a custom
-   value for the ABSTRACT substituable variable.
+   value for the ABSTRACT substitutable variable.
 
    ::
 

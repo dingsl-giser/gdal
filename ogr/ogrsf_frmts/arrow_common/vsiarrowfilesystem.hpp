@@ -7,31 +7,28 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef VSIARROWFILESYSTEM_HPP_INCLUDED
 #define VSIARROWFILESYSTEM_HPP_INCLUDED
 
+#include "cpl_multiproc.h"
+
 #include "arrow/util/config.h"
 
 #include "ograrrowrandomaccessfile.h"
+
+#include <atomic>
+#include <memory>
+#include <mutex>
+#include <vector>
+#include <utility>
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wweak-vtables"
+#endif
 
 /************************************************************************/
 /*                         VSIArrowFileSystem                           */
@@ -42,12 +39,52 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
     const std::string m_osEnvVarPrefix;
     const std::string m_osQueryParameters;
 
+    std::atomic<bool> m_bAskedToClosed = false;
+    std::mutex m_oMutex{};
+    std::vector<std::pair<std::string, std::weak_ptr<OGRArrowRandomAccessFile>>>
+        m_oSetFiles{};
+
   public:
-    explicit VSIArrowFileSystem(const std::string &osEnvVarPrefix,
-                                const std::string &osQueryParameters)
+    VSIArrowFileSystem(const std::string &osEnvVarPrefix,
+                       const std::string &osQueryParameters)
         : m_osEnvVarPrefix(osEnvVarPrefix),
           m_osQueryParameters(osQueryParameters)
     {
+    }
+
+    // Cf comment in OGRParquetDataset::~OGRParquetDataset() for rationale
+    // for this method
+    void AskToClose()
+    {
+        m_bAskedToClosed = true;
+        std::vector<
+            std::pair<std::string, std::weak_ptr<OGRArrowRandomAccessFile>>>
+            oSetFiles;
+        {
+            std::lock_guard oLock(m_oMutex);
+            oSetFiles = m_oSetFiles;
+        }
+        for (auto &[osName, poFile] : oSetFiles)
+        {
+            bool bWarned = false;
+            while (!poFile.expired())
+            {
+                if (!bWarned)
+                {
+                    bWarned = true;
+                    auto poFileLocked = poFile.lock();
+                    if (poFileLocked)
+                    {
+                        CPLDebug("PARQUET",
+                                 "Still on-going reads on %s. Waiting for it "
+                                 "to be closed.",
+                                 osName.c_str());
+                        poFileLocked->AskToClose();
+                    }
+                }
+                CPLSleep(0.01);
+            }
+        }
     }
 
     std::string type_name() const override
@@ -106,11 +143,10 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
         while (const auto psEntry = VSIGetNextDirEntry(psDir))
         {
             if (!bParquetFound)
-                bParquetFound =
-                    EQUAL(CPLGetExtension(psEntry->pszName), "parquet");
+                bParquetFound = EQUAL(
+                    CPLGetExtensionSafe(psEntry->pszName).c_str(), "parquet");
 
-            const std::string osFilename =
-                select.base_dir + '/' + psEntry->pszName;
+            std::string osFilename = select.base_dir + '/' + psEntry->pszName;
             int nMode = psEntry->nMode;
             if (!psEntry->bModeKnown)
             {
@@ -125,12 +161,12 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
             else if (VSI_ISDIR(nMode))
                 fileType = arrow::fs::FileType::Directory;
 
-            arrow::fs::FileInfo info(osFilename, fileType);
+            arrow::fs::FileInfo info(std::move(osFilename), fileType);
             if (fileType == arrow::fs::FileType::File && psEntry->bSizeKnown)
             {
                 info.set_size(psEntry->nSize);
             }
-            res.push_back(info);
+            res.push_back(std::move(info));
 
             if (m_osEnvVarPrefix == "PARQUET")
             {
@@ -203,6 +239,10 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
     arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFile(const std::string &path) override
     {
+        if (m_bAskedToClosed)
+            return arrow::Status::IOError(
+                "OpenInputFile(): file system in shutdown");
+
         std::string osPath(path);
         osPath += m_osQueryParameters;
         CPLDebugOnly(m_osEnvVarPrefix.c_str(), "Opening %s", osPath.c_str());
@@ -210,7 +250,13 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
         if (fp == nullptr)
             return arrow::Status::IOError("OpenInputFile() failed for " +
                                           osPath);
-        return std::make_shared<OGRArrowRandomAccessFile>(std::move(fp));
+        auto poFile =
+            std::make_shared<OGRArrowRandomAccessFile>(osPath, std::move(fp));
+        {
+            std::lock_guard oLock(m_oMutex);
+            m_oSetFiles.emplace_back(path, poFile);
+        }
+        return poFile;
     }
 
     using arrow::fs::FileSystem::OpenOutputStream;
@@ -231,5 +277,9 @@ class VSIArrowFileSystem final : public arrow::fs::FileSystem
         return arrow::Status::IOError("OpenAppendStream() unimplemented");
     }
 };
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 #endif  // VSIARROWFILESYSTEM_HPP_INCLUDED

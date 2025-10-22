@@ -8,23 +8,7 @@
  * Copyright (c) 1999, Frank Warmerdam
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -45,26 +29,11 @@
 #include "ogr_spatialref.h"
 
 /************************************************************************/
-/*                       OGRGeometryCollection()                        */
-/************************************************************************/
-
-/**
- * \brief Create an empty geometry collection.
- */
-
-OGRGeometryCollection::OGRGeometryCollection() = default;
-
-/************************************************************************/
 /*         OGRGeometryCollection( const OGRGeometryCollection& )        */
 /************************************************************************/
 
 /**
  * \brief Copy constructor.
- *
- * Note: before GDAL 2.1, only the default implementation of the constructor
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRGeometryCollection::OGRGeometryCollection(const OGRGeometryCollection &other)
@@ -84,6 +53,27 @@ OGRGeometryCollection::OGRGeometryCollection(const OGRGeometryCollection &other)
 }
 
 /************************************************************************/
+/*            OGRGeometryCollection( OGRGeometryCollection&& )          */
+/************************************************************************/
+
+/**
+ * \brief Move constructor.
+ *
+ * @since GDAL 3.11
+ */
+
+// cppcheck-suppress-begin accessMoved
+OGRGeometryCollection::OGRGeometryCollection(OGRGeometryCollection &&other)
+    : OGRGeometry(std::move(other)), nGeomCount(other.nGeomCount),
+      papoGeoms(other.papoGeoms)
+{
+    other.nGeomCount = 0;
+    other.papoGeoms = nullptr;
+}
+
+// cppcheck-suppress-end accessMoved
+
+/************************************************************************/
 /*                       ~OGRGeometryCollection()                       */
 /************************************************************************/
 
@@ -99,11 +89,6 @@ OGRGeometryCollection::~OGRGeometryCollection()
 
 /**
  * \brief Assignment operator.
- *
- * Note: before GDAL 2.1, only the default implementation of the operator
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRGeometryCollection &
@@ -111,14 +96,53 @@ OGRGeometryCollection::operator=(const OGRGeometryCollection &other)
 {
     if (this != &other)
     {
-        empty();
-
         OGRGeometry::operator=(other);
 
-        for (const auto &poSubGeom : other)
+        for (const auto *poOtherSubGeom : other)
         {
-            addGeometry(poSubGeom);
+            if (!isCompatibleSubType(poOtherSubGeom->getGeometryType()))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Illegal use of OGRGeometryCollection::operator=(): "
+                         "trying to assign an incompatible sub-geometry");
+                return *this;
+            }
         }
+
+        papoGeoms = static_cast<OGRGeometry **>(
+            VSI_CALLOC_VERBOSE(sizeof(OGRGeometry *), other.nGeomCount));
+        if (papoGeoms)
+        {
+            nGeomCount = other.nGeomCount;
+            for (int i = 0; i < other.nGeomCount; i++)
+            {
+                papoGeoms[i] = other.papoGeoms[i]->clone();
+            }
+        }
+    }
+    return *this;
+}
+
+/************************************************************************/
+/*                  operator=( OGRGeometryCollection&&)                 */
+/************************************************************************/
+
+/**
+ * \brief Move assignment operator.
+ *
+ * @since GDAL 3.11
+ */
+
+OGRGeometryCollection &
+OGRGeometryCollection::operator=(OGRGeometryCollection &&other)
+{
+    if (this != &other)
+    {
+        empty();
+
+        OGRGeometry::operator=(std::move(other));
+        std::swap(nGeomCount, other.nGeomCount);
+        std::swap(papoGeoms, other.papoGeoms);
     }
     return *this;
 }
@@ -150,7 +174,16 @@ void OGRGeometryCollection::empty()
 OGRGeometryCollection *OGRGeometryCollection::clone() const
 
 {
-    return new (std::nothrow) OGRGeometryCollection(*this);
+    auto ret = new (std::nothrow) OGRGeometryCollection(*this);
+    if (ret)
+    {
+        if (ret->WkbSize() != WkbSize())
+        {
+            delete ret;
+            ret = nullptr;
+        }
+    }
+    return ret;
 }
 
 /************************************************************************/
@@ -1573,7 +1606,6 @@ OGRGeometryCollection::TransferMembersAndDestroy(OGRGeometryCollection *poSrc,
  *
  * @param poSrc the input geometry - ownership is passed to the method.
  * @return new geometry.
- * @since GDAL 2.2
  */
 
 OGRGeometryCollection *

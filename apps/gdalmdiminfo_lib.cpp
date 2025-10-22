@@ -7,23 +7,7 @@
  * ****************************************************************************
  * Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -33,6 +17,7 @@
 #include "cpl_json.h"
 #include "cpl_json_streaming_writer.h"
 #include "gdal_priv.h"
+#include "gdal_rat.h"
 #include "gdalargumentparser.h"
 #include <limits>
 #include <set>
@@ -91,8 +76,77 @@ static void DumpDataType(const GDALExtendedDataType &dt,
             break;
 
         case GEDTC_NUMERIC:
-            serializer.Add(GDALGetDataTypeName(dt.GetNumericDataType()));
+        {
+            auto poRAT = dt.GetRAT();
+            if (poRAT)
+            {
+                auto objContext(serializer.MakeObjectContext());
+                serializer.AddObjKey("name");
+                serializer.Add(dt.GetName());
+                serializer.AddObjKey("type");
+                serializer.Add(GDALGetDataTypeName(dt.GetNumericDataType()));
+                serializer.AddObjKey("attribute_table");
+                auto arrayContext(serializer.MakeArrayContext());
+                const int nRows = poRAT->GetRowCount();
+                const int nCols = poRAT->GetColumnCount();
+                for (int iRow = 0; iRow < nRows; ++iRow)
+                {
+                    auto obj2Context(serializer.MakeObjectContext());
+                    for (int iCol = 0; iCol < nCols; ++iCol)
+                    {
+                        serializer.AddObjKey(poRAT->GetNameOfCol(iCol));
+                        switch (poRAT->GetTypeOfCol(iCol))
+                        {
+                            case GFT_Integer:
+                                serializer.Add(
+                                    poRAT->GetValueAsInt(iRow, iCol));
+                                break;
+                            case GFT_Real:
+                                serializer.Add(
+                                    poRAT->GetValueAsDouble(iRow, iCol));
+                                break;
+                            case GFT_String:
+                                serializer.Add(
+                                    poRAT->GetValueAsString(iRow, iCol));
+                                break;
+                            case GFT_Boolean:
+                                serializer.Add(
+                                    poRAT->GetValueAsBoolean(iRow, iCol));
+                                break;
+                            case GFT_DateTime:
+                            {
+                                const auto sDateTime =
+                                    poRAT->GetValueAsDateTime(iRow, iCol);
+                                serializer.Add(
+                                    GDALRasterAttributeTable::DateTimeToString(
+                                        sDateTime));
+                                break;
+                            }
+                            case GFT_WKBGeometry:
+                            {
+                                size_t nWKBSize = 0;
+                                const GByte *pabyWKB =
+                                    poRAT->GetValueAsWKBGeometry(iRow, iCol,
+                                                                 nWKBSize);
+                                std::string osWKT =
+                                    GDALRasterAttributeTable::WKBGeometryToWKT(
+                                        pabyWKB, nWKBSize);
+                                if (osWKT.empty())
+                                    serializer.AddNull();
+                                else
+                                    serializer.Add(osWKT);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                serializer.Add(GDALGetDataTypeName(dt.GetNumericDataType()));
+            }
             break;
+        }
 
         case GEDTC_COMPOUND:
         {
@@ -179,6 +233,9 @@ static void DumpValue(CPLJSonStreamingWriter &serializer, const GByte *bytes,
         case GDT_UInt64:
             DumpValue<std::uint64_t>(serializer, bytes);
             break;
+        case GDT_Float16:
+            DumpValue<GFloat16>(serializer, bytes);
+            break;
         case GDT_Float32:
             DumpValue<float>(serializer, bytes);
             break;
@@ -190,6 +247,9 @@ static void DumpValue(CPLJSonStreamingWriter &serializer, const GByte *bytes,
             break;
         case GDT_CInt32:
             DumpComplexValue<GInt32>(serializer, bytes);
+            break;
+        case GDT_CFloat16:
+            DumpComplexValue<GFloat16>(serializer, bytes);
             break;
         case GDT_CFloat32:
             DumpComplexValue<float>(serializer, bytes);
@@ -362,6 +422,10 @@ static void DumpAttrValue(const std::shared_ptr<GDALAttribute> &attr,
                     {
                         serializer.Add(pszStr);
                     }
+                }
+                else
+                {
+                    serializer.AddNull();
                 }
             }
             else
@@ -648,7 +712,7 @@ DumpDimensions(const std::shared_ptr<GDALGroup> &rootGroup,
     auto arrayContext(serializer.MakeArrayContext());
     for (const auto &dim : dims)
     {
-        const std::string osFullname(dim->GetFullName());
+        std::string osFullname(dim->GetFullName());
         if (alreadyDumpedDimensions.find(osFullname) !=
             alreadyDumpedDimensions.end())
         {
@@ -695,7 +759,7 @@ DumpDimensions(const std::shared_ptr<GDALGroup> &rootGroup,
             {
                 std::set<std::string> alreadyDumpedDimensionsLocal(
                     alreadyDumpedDimensions);
-                alreadyDumpedDimensionsLocal.insert(osFullname);
+                alreadyDumpedDimensionsLocal.insert(std::move(osFullname));
 
                 auto indexingVariableContext(serializer.MakeObjectContext());
                 serializer.AddObjKey(poIndexingVariable->GetName());
@@ -1000,6 +1064,17 @@ static void DumpGroup(const std::shared_ptr<GDALGroup> &rootGroup,
                        alreadyDumpedDimensions);
     }
 
+    const auto &types = group->GetDataTypes();
+    if (!types.empty())
+    {
+        serializer.AddObjKey("datatypes");
+        auto arrayContext(serializer.MakeArrayContext());
+        for (const auto &dt : types)
+        {
+            DumpDataType(*(dt.get()), serializer);
+        }
+    }
+
     CPLStringList aosOptionsGetArray(psOptions->aosArrayOptions);
     if (psOptions->bDetailed)
         aosOptionsGetArray.SetNameValue("SHOW_ALL", "YES");
@@ -1243,12 +1318,12 @@ char *GDALMultiDimInfo(GDALDatasetH hDataset,
     if (psOptions->bStdoutOutput)
     {
         printf("\n");
+        return VSIStrdup("ok");
     }
     else
     {
         return VSIStrdup(serializer.GetString().c_str());
     }
-    return nullptr;
 }
 
 /************************************************************************/

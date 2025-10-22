@@ -6,23 +6,7 @@
  * Copyright (c) 2009
  * PCI Geomatics, 90 Allstate Parkway, Markham, Ontario, Canada.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #ifndef INCLUDE_CHANNEL_CPCIDSKCHANNEL_H
 #define INCLUDE_CHANNEL_CPCIDSKCHANNEL_H
@@ -48,7 +32,7 @@ namespace PCIDSK
 /* inheritance to attempt to avoid the fragile base class problem and   */
 /* then implement the Imagery I/O functions.                            */
 /************************************************************************/
-    class PCIDSK_DLL CPCIDSKChannel : public PCIDSKChannel
+    class PCIDSK_DLL CPCIDSKChannel /* non final */: public PCIDSKChannel
     {
         friend class PCIDSKFile;
 
@@ -56,15 +40,15 @@ namespace PCIDSK
         CPCIDSKChannel( PCIDSKBuffer &image_header, uint64 ih_offset,
             CPCIDSKFile *file, eChanType pixel_type,
             int channel_number );
-        virtual   ~CPCIDSKChannel();
+        ~CPCIDSKChannel() override;
 
-        virtual int GetBlockWidth() const override { return block_width; }
-        virtual int GetBlockHeight() const override { return block_height; }
-        virtual int GetBlockCount() const override;
+        int GetBlockWidth() const override { return block_width; }
+        int GetBlockHeight() const override { return block_height; }
+        int GetBlockCount() const override;
 
-        virtual int GetWidth() const override { return width; }
-        virtual int GetHeight() const override { return height; }
-        virtual eChanType GetType() const override { return pixel_type; }
+        int GetWidth() const override { return width; }
+        int GetHeight() const override { return height; }
+        eChanType GetType() const override { return pixel_type; }
 
         int       GetOverviewCount() override;
         PCIDSKChannel  *GetOverview( int i ) override;
@@ -86,13 +70,13 @@ namespace PCIDSK
         std::vector<std::string> GetMetadataKeys() const override
             { return metadata.GetMetadataKeys(); }
 
-        virtual void Synchronize() override {}
+        void Synchronize() override {}
 
         std::string GetDescription() override;
         void SetDescription( const std::string &description ) override;
 
-        virtual std::vector<std::string> GetHistoryEntries() const override;
-        virtual void SetHistoryEntries( const std::vector<std::string> &entries ) override;
+        std::vector<std::string> GetHistoryEntries() const override;
+        void SetHistoryEntries( const std::vector<std::string> &entries ) override;
         virtual void PushHistory(const std::string &app,
                                  const std::string &message) override;
 

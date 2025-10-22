@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2020, SAP SE
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_HANA_H_INCLUDED
@@ -232,7 +216,7 @@ class OGRHanaLayer : public OGRLayer
                                  const CPLString &query,
                                  const CPLString &featureDefName);
     void ReadGeometryExtent(int geomField, OGREnvelope *extent, int force);
-    bool IsFastExtentAvailable();
+    bool IsFastExtentAvailable() const;
 
   public:
     explicit OGRHanaLayer(OGRHanaDataSource *datasource);
@@ -245,26 +229,18 @@ class OGRHanaLayer : public OGRLayer
 
     void ResetReading() override;
 
-    OGRErr GetExtent(OGREnvelope *extent, int force = TRUE) override
-    {
-        return GetExtent(0, extent, force);
-    }
-
-    OGRErr GetExtent(int geomField, OGREnvelope *extent, int force) override;
+    OGRErr IGetExtent(int geomField, OGREnvelope *extent, bool force) override;
     GIntBig GetFeatureCount(int force) override;
     OGRFeature *GetNextFeature() override;
-    const char *GetFIDColumn() override;
-    OGRFeatureDefn *GetLayerDefn() override;
-    const char *GetName() override;
+    const char *GetFIDColumn() const override;
+    using OGRLayer::GetLayerDefn;
+    const OGRFeatureDefn *GetLayerDefn() const override;
+    const char *GetName() const override;
 
     OGRErr SetAttributeFilter(const char *pszQuery) override;
 
-    void SetSpatialFilter(OGRGeometry *poGeom) override
-    {
-        SetSpatialFilter(0, poGeom);
-    }
-
-    void SetSpatialFilter(int iGeomField, OGRGeometry *poGeom) override;
+    OGRErr ISetSpatialFilter(int iGeomField,
+                             const OGRGeometry *poGeom) override;
 };
 
 /************************************************************************/
@@ -325,20 +301,16 @@ class OGRHanaTableLayer final : public OGRHanaLayer
 
     void ResetReading() override;
 
-    OGRErr GetExtent(OGREnvelope *extent, int force = TRUE) override
-    {
-        return GetExtent(0, extent, force);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *extent, bool force) override;
 
-    OGRErr GetExtent(int geomField, OGREnvelope *extent, int force) override;
     GIntBig GetFeatureCount(int force) override;
 
-    const char *GetName() override
+    const char *GetName() const override
     {
         return tableName_.c_str();
     }
 
-    int TestCapability(const char *capabilities) override;
+    int TestCapability(const char *capabilities) const override;
 
     OGRErr ICreateFeature(OGRFeature *feature) override;
     OGRErr DeleteFeature(GIntBig nFID) override;
@@ -392,7 +364,7 @@ class OGRHanaResultLayer final : public OGRHanaLayer
     explicit OGRHanaResultLayer(OGRHanaDataSource *datasource,
                                 const char *query);
 
-    int TestCapability(const char *capabilities) override;
+    int TestCapability(const char *capabilities) const override;
 };
 
 }  // namespace OGRHANA
@@ -485,17 +457,18 @@ class OGRHanaDataSource final : public GDALDataset
 
     OGRErr DeleteLayer(int index) override;
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(layers_.size());
     }
 
-    OGRLayer *GetLayer(int index) override;
+    using GDALDataset::GetLayer;
+    const OGRLayer *GetLayer(int index) const override;
     OGRLayer *GetLayerByName(const char *) override;
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
-    int TestCapability(const char *capabilities) override;
+    int TestCapability(const char *capabilities) const override;
 
     OGRLayer *ExecuteSQL(const char *sqlCommand, OGRGeometry *spatialFilter,
                          const char *dialect) override;

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  WFS driver testing.
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -63,8 +46,12 @@ def ogr_wfs_init():
     if gml_ds is None:
         pytest.skip("cannot read GML files")
 
+    vsimem_hidden_before = gdal.ReadDirRecursive("/vsimem/.#!HIDDEN!#.")
+
     with gdal.config_option("CPL_CURL_ENABLE_VSIMEM", "YES"):
         yield
+
+    assert gdal.ReadDirRecursive("/vsimem/.#!HIDDEN!#.") == vsimem_hidden_before
 
 
 @pytest.fixture(
@@ -2246,7 +2233,7 @@ def test_ogr_wfs_vsimem_wfs110_one_layer_filter(
     lyr = ds.GetLayer(0)
 
     with gdaltest.tempfile(
-        "/vsimem/wfs_endpoint?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=my_layer&FILTER=%3CFilter%20xmlns%3D%22http:%2F%2Fwww.opengis.net%2Fogc%22%20xmlns:gml%3D%22http:%2F%2Fwww.opengis.net%2Fgml%22%3E%3COr%3E%3COr%3E%3COr%3E%3CAnd%3E%3CAnd%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Estr%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Eshort%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3C%2FAnd%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Efloat%3C%2FPropertyName%3E%3CLiteral%3E1.2%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3C%2FAnd%3E%3CPropertyIsLike%20wildCard%3D%22%2A%22%20singleChar%3D%22_%22%20escapeChar%3D%22%21%22%20matchCase%3D%22true%22%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Est%2A%3C%2FLiteral%3E%3C%2FPropertyIsLike%3E%3C%2FOr%3E%3COr%3E%3CNot%3E%3CPropertyIsNull%3E%3CPropertyName%3Eboolean%3C%2FPropertyName%3E%3C%2FPropertyIsNull%3E%3C%2FNot%3E%3CPropertyIsGreaterThan%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsGreaterThan%3E%3C%2FOr%3E%3C%2FOr%3E%3COr%3E%3COr%3E%3CPropertyIsGreaterThanOrEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsGreaterThanOrEqualTo%3E%3CPropertyIsNotEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2%3C%2FLiteral%3E%3C%2FPropertyIsNotEqualTo%3E%3C%2FOr%3E%3COr%3E%3CPropertyIsLessThan%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2000000000%3C%2FLiteral%3E%3C%2FPropertyIsLessThan%3E%3CPropertyIsLessThanOrEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2000000000%3C%2FLiteral%3E%3C%2FPropertyIsLessThanOrEqualTo%3E%3C%2FOr%3E%3C%2FOr%3E%3C%2FOr%3E%3C%2FFilter%3E",
+        "/vsimem/wfs_endpoint?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=my_layer&FILTER=%3CFilter%20xmlns%3D%22http:%2F%2Fwww.opengis.net%2Fogc%22%20xmlns:gml%3D%22http:%2F%2Fwww.opengis.net%2Fgml%22%3E%3COr%3E%3COr%3E%3COr%3E%3COr%3E%3CAnd%3E%3CAnd%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Estr%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Eshort%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3C%2FAnd%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Efloat%3C%2FPropertyName%3E%3CLiteral%3E1.2%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3C%2FAnd%3E%3CPropertyIsLike%20wildCard%3D%22%2A%22%20singleChar%3D%22_%22%20escapeChar%3D%22%21%22%20matchCase%3D%22true%22%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Est%2A%3C%2FLiteral%3E%3C%2FPropertyIsLike%3E%3C%2FOr%3E%3COr%3E%3CNot%3E%3CPropertyIsNull%3E%3CPropertyName%3Eboolean%3C%2FPropertyName%3E%3C%2FPropertyIsNull%3E%3C%2FNot%3E%3CPropertyIsGreaterThan%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsGreaterThan%3E%3C%2FOr%3E%3C%2FOr%3E%3COr%3E%3COr%3E%3CPropertyIsGreaterThanOrEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E1%3C%2FLiteral%3E%3C%2FPropertyIsGreaterThanOrEqualTo%3E%3CPropertyIsNotEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2%3C%2FLiteral%3E%3C%2FPropertyIsNotEqualTo%3E%3C%2FOr%3E%3COr%3E%3CPropertyIsLessThan%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2000000000%3C%2FLiteral%3E%3C%2FPropertyIsLessThan%3E%3CPropertyIsLessThanOrEqualTo%3E%3CPropertyName%3Eint%3C%2FPropertyName%3E%3CLiteral%3E2000000000%3C%2FLiteral%3E%3C%2FPropertyIsLessThanOrEqualTo%3E%3C%2FOr%3E%3C%2FOr%3E%3C%2FOr%3E%3COr%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Efoo%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3CPropertyIsEqualTo%3E%3CPropertyName%3Estr%3C%2FPropertyName%3E%3CLiteral%3Ebar%3C%2FLiteral%3E%3C%2FPropertyIsEqualTo%3E%3C%2FOr%3E%3C%2FOr%3E%3C%2FFilter%3E",
         """<wfs:FeatureCollection xmlns:xs="http://www.w3.org/2001/XMLSchema"
 xmlns:ogc="http://www.opengis.net/ogc"
 xmlns:foo="http://foo"
@@ -2279,7 +2266,7 @@ xsi:schemaLocation="http://foo /vsimem/wfs_endpoint?SERVICE=WFS&amp;VERSION=1.1.
 """,
     ):
         lyr.SetAttributeFilter(
-            "(str = 'str' AND short = 1 AND float = 1.2) OR str LIKE 'st%' OR boolean IS NOT NULL OR int > 1 OR int >= 1 or int != 2 or int < 2000000000 or int <= 2000000000"
+            "(str = 'str' AND short = 1 AND float = 1.2) OR str LIKE 'st%' OR boolean IS NOT NULL OR int > 1 OR int >= 1 or int != 2 or int < 2000000000 or int <= 2000000000 OR str IN ('foo', 'bar')"
         )
 
         f = lyr.GetNextFeature()
@@ -3468,7 +3455,7 @@ def test_ogr_wfs_vsimem_wfs110_schema_not_understood(with_and_without_streaming)
             or f.int != 123456789
             or f.float != 1.2
             or f.double != 1.23
-            or f.dt != "2015-04-17T12:34:56Z"
+            or f.dt != "2015/04/17 12:34:56+00"
             or f.GetGeometryRef().ExportToWkt() != "POINT (2 49)"
         )
 
@@ -5217,3 +5204,226 @@ def test_ogr_wfs_vsimem_wfs200_supported_crs():
             f = lyr.GetNextFeature()
             assert f is not None
             assert f.GetGeometryRef().ExportToWkt() == "POINT (2 49)"
+
+
+###############################################################################
+# Test GetFeatureCount() with client-side only filter
+
+
+def test_ogr_wfs_get_feature_count_issue_11920():
+
+    getfeatures_response = """<wfs:FeatureCollection xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:foo="http://foo"
+    xmlns:wfs="http://www.opengis.net/wfs/2.0"
+    xmlns:gml="http://www.opengis.net/gml/3.2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    numberMatched="unknown" numberReturned="1" timeStamp="2015-01-01T00:00:00.000Z"
+    xsi:schemaLocation="http://www.opengis.net/gml/3.2 http://schemas.opengis.net/gml/3.2.1/gml.xsd
+                        http://www.opengis.net/wfs/2.0 http://schemas.opengis.net/wfs/2.0/wfs.xsd
+                        http://foo /vsimem/test_ogr_wfs_get_feature_count_issue_11920?SERVICE=WFS&amp;VERSION=2.0.0&amp;REQUEST=DescribeFeatureType&amp;TYPENAME=foo:lyr">
+      <wfs:member>
+        <foo:lyr gml:id="lyr-101">
+          <foo:str>foo</foo:str>
+          <foo:shape><gml:Point srsName="urn:ogc:def:crs:EPSG::4326" gml:id="bla"><gml:pos>49 2</gml:pos></gml:Point></foo:shape>
+        </foo:lyr>
+      </wfs:member>
+</wfs:FeatureCollection>"""
+
+    with gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_get_feature_count_issue_11920?SERVICE=WFS&REQUEST=GetCapabilities",
+        """<WFS_Capabilities version="2.0.0">
+    <OperationsMetadata>
+        <ows:Operation name="GetFeature">
+            <ows:Parameter name="resultType">
+                <ows:Value>results</ows:Value>
+                <ows:Value>hits</ows:Value>
+            </ows:Parameter>
+        </ows:Operation>
+    </OperationsMetadata>
+    <FeatureTypeList>
+        <FeatureType>
+            <Name>foo:lyr</Name>
+            <DefaultSRS>urn:ogc:def:crs:EPSG::4326</DefaultSRS>
+            <ows:WGS84BoundingBox>
+                <ows:LowerCorner>-10 40</ows:LowerCorner>
+                <ows:UpperCorner>15 50</ows:UpperCorner>
+            </ows:WGS84BoundingBox>
+        </FeatureType>
+    </FeatureTypeList>
+</WFS_Capabilities>
+""",
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_get_feature_count_issue_11920?SERVICE=WFS&VERSION=2.0.0&REQUEST=DescribeFeatureType&TYPENAME=foo:lyr",
+        """<xsd:schema xmlns:foo="http://foo" xmlns:gml="http://www.opengis.net/gml" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="http://foo">
+  <xsd:import namespace="http://www.opengis.net/gml" schemaLocation="http://foo/schemas/gml/3.2.1/base/gml.xsd"/>
+  <xsd:complexType name="lyrType">
+    <xsd:complexContent>
+      <xsd:extension base="gml:AbstractFeatureType">
+        <xsd:sequence>
+          <xsd:element maxOccurs="1" minOccurs="0" name="str" nillable="true" type="xsd:string"/>
+          <xsd:element maxOccurs="1" minOccurs="0" name="shape" nillable="true" type="gml:PointPropertyType"/>
+        </xsd:sequence>
+      </xsd:extension>
+    </xsd:complexContent>
+  </xsd:complexType>
+  <xsd:element name="lyr" substitutionGroup="gml:_Feature" type="foo:lyr1Type"/>
+</xsd:schema>
+""",
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_get_feature_count_issue_11920?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=foo:lyr&COUNT=1",
+        getfeatures_response,
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_get_feature_count_issue_11920?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=foo:lyr",
+        getfeatures_response,
+    ):
+        ds = ogr.Open("WFS:/vsimem/test_ogr_wfs_get_feature_count_issue_11920")
+        lyr = ds.GetLayer(0)
+
+        # Use client-side filters
+        lyr.SetAttributeFilter("FID >= 0")
+        assert lyr.GetFeatureCount() == 1
+
+        lyr.SetAttributeFilter("FID < 0")
+        assert lyr.GetFeatureCount() == 0
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+@pytest.mark.require_driver("GML")
+def test_ogr_wfs_no_gml_driver(
+    wfs110_onelayer_get_caps_with_bbox_no_hits,
+    wfs110_onelayer_describefeaturetype,
+):
+
+    ds = ogr.Open("WFS:/vsimem/wfs_endpoint")
+    lyr = ds.GetLayer(0)
+
+    with gdaltest.tempfile(
+        "/vsimem/wfs_endpoint?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=my_layer",
+        """<wfs:FeatureCollection xmlns:xs="http://www.w3.org/2001/XMLSchema"
+xmlns:ogc="http://www.opengis.net/ogc"
+xmlns:foo="http://foo"
+xmlns:wfs="http://www.opengis.net/wfs"
+xmlns:ows="http://www.opengis.net/ows"
+xmlns:xlink="http://www.w3.org/1999/xlink"
+xmlns:gml="http://www.opengis.net/gml"
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+numberOfFeatures="1"
+timeStamp="2015-04-17T14:14:24.859Z"
+xsi:schemaLocation="http://foo /vsimem/wfs_endpoint?SERVICE=WFS&amp;VERSION=1.1.0&amp;REQUEST=DescribeFeatureType&amp;TYPENAME=my_layer
+                    http://www.opengis.net/wfs http://schemas.opengis.net/wfs/1.1.0/wfs.xsd">
+    <gml:featureMembers>
+        <foo:my_layer gml:id="my_layer.1">
+            <foo:str>str</foo:str>
+            <foo:boolean>true</foo:boolean>
+            <foo:short>1</foo:short>
+            <foo:int>123456789</foo:int>
+            <foo:float>1.2</foo:float>
+            <foo:double>1.23</foo:double>
+            <foo:dt>2015-04-17T12:34:56Z</foo:dt>
+            <foo:shape>
+                <gml:Point srsDimension="2" srsName="urn:ogc:def:crs:EPSG::4326">
+                    <gml:pos>49 2</gml:pos>
+                </gml:Point>
+            </foo:shape>
+        </foo:my_layer>
+    </gml:featureMembers>
+</wfs:FeatureCollection>
+""",
+    ):
+        gml_drv = gdal.GetDriverByName("GML")
+        gml_drv.Deregister()
+        try:
+            with pytest.raises(
+                Exception, match="Cannot read features as GML driver is missing"
+            ):
+                lyr.GetNextFeature()
+        finally:
+            gml_drv.Register()
+
+
+###############################################################################
+# Test fix for https://github.com/OSGeo/gdal/issues/13120
+
+
+def test_ogr_wfs_does_not_understand_schema():
+
+    getfeatures_response = """<wfs:FeatureCollection xmlns:xs="http://www.w3.org/2001/XMLSchema"
+    xmlns:foo="http://foo"
+    xmlns:wfs="http://www.opengis.net/wfs/2.0"
+    xmlns:gml="http://www.opengis.net/gml/3.2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    numberMatched="unknown" numberReturned="1" timeStamp="2015-01-01T00:00:00.000Z"
+    xsi:schemaLocation="http://www.opengis.net/gml/3.2 http://schemas.opengis.net/gml/3.2.1/gml.xsd
+                        http://www.opengis.net/wfs/2.0 http://schemas.opengis.net/wfs/2.0/wfs.xsd
+                        http://foo /vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&amp;VERSION=2.0.0&amp;REQUEST=DescribeFeatureType&amp;TYPENAME=foo:lyr">
+      <wfs:member>
+        <foo:lyr gml:id="lyr-101">
+          <foo:str>foo</foo:str>
+          <foo:shape>
+                <gml:Point srsDimension="2" srsName="urn:ogc:def:crs:EPSG::4326">
+                    <gml:pos>41.5 0.5</gml:pos>
+                </gml:Point>
+          </foo:shape>
+        </foo:lyr>
+      </wfs:member>
+</wfs:FeatureCollection>"""
+
+    schema = """<xsd:schema xmlns:foo="http://foo" xmlns:gml="http://www.opengis.net/gml" xmlns:xsd="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" targetNamespace="http://foo">
+  <xsd:import namespace="http://www.opengis.net/gml" schemaLocation="http://foo/schemas/gml/3.2.1/base/gml.xsd"/>
+  <xsd:complexType name="lyrType">
+    <xsd:complexContent>
+      <xsd:extension base="gml:AbstractFeatureType">
+        <xsd:sequence>
+          <xsd:element maxOccurs="1" minOccurs="0" name="str" nillable="true" type="i_do_not_know_this_type"/>
+          <xsd:element maxOccurs="1" minOccurs="0" name="shape" nillable="true" type="gml:PointPropertyType"/>
+        </xsd:sequence>
+      </xsd:extension>
+    </xsd:complexContent>
+  </xsd:complexType>
+  <xsd:element name="lyr" substitutionGroup="gml:_Feature" type="foo:lyr1Type"/>
+</xsd:schema>
+"""
+
+    with gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&REQUEST=GetCapabilities",
+        """<WFS_Capabilities version="2.0.0">
+    <FeatureTypeList>
+        <FeatureType>
+            <Name>foo:lyr</Name>
+            <DefaultSRS>urn:ogc:def:crs:EPSG::4326</DefaultSRS>
+            <ows:WGS84BoundingBox>
+                <ows:LowerCorner>-10 40</ows:LowerCorner>
+                <ows:UpperCorner>15 50</ows:UpperCorner>
+            </ows:WGS84BoundingBox>
+        </FeatureType>
+    </FeatureTypeList>
+</WFS_Capabilities>
+""",
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&VERSION=2.0.0&REQUEST=DescribeFeatureType&TYPENAME=foo:lyr",
+        schema,
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=foo:lyr&COUNT=1",
+        getfeatures_response,
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=foo:lyr",
+        getfeatures_response,
+    ):
+        ds = ogr.Open("WFS:/vsimem/test_ogr_wfs_does_not_understand_schema")
+        lyr = ds.GetLayer(0)
+        assert lyr.GetGeometryColumn() == "shape"
+
+    lyr.SetSpatialFilterRect(0, 41, 1, 42)
+
+    with gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&VERSION=2.0.0&REQUEST=DescribeFeatureType&TYPENAME=foo:lyr",
+        schema,
+    ), gdaltest.tempfile(
+        "/vsimem/test_ogr_wfs_does_not_understand_schema?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=foo:lyr&FILTER=%3CFilter%20xmlns%3D%22http:%2F%2Fwww.opengis.net%2Ffes%2F2.0%22%20xmlns:gml%3D%22http:%2F%2Fwww.opengis.net%2Fgml%2F3.2%22%3E%3CBBOX%3E%3CValueReference%3Eshape%3C%2FValueReference%3E%3Cgml:Envelope%3E%3Cgml:lowerCorner%3E41.0000000000000000%200.0000000000000000%3C%2Fgml:lowerCorner%3E%3Cgml:upperCorner%3E42.0000000000000000%201.0000000000000000%3C%2Fgml:upperCorner%3E%3C%2Fgml:Envelope%3E%3C%2FBBOX%3E%3C%2FFilter%3E",
+        getfeatures_response,
+    ):
+        f = lyr.GetNextFeature()
+        assert f

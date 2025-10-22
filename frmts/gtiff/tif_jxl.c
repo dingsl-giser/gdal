@@ -98,8 +98,16 @@ static int GetJXLDataType(TIFF *tif)
         return JXL_TYPE_FLOAT;
     }
 
-    TIFFErrorExtR(tif, module,
-                  "Unsupported combination of SampleFormat and BitsPerSample");
+    if (td->td_sampleformat == SAMPLEFORMAT_IEEEFP &&
+        td->td_bitspersample == 16)
+    {
+        return JXL_TYPE_FLOAT16;
+    }
+
+    TIFFErrorExtR(
+        tif, module,
+        "Unsupported combination of SampleFormat(=%d) and BitsPerSample(=%d)",
+        td->td_sampleformat, td->td_bitspersample);
     return -1;
 }
 
@@ -113,6 +121,8 @@ static int GetJXLDataTypeSize(JxlDataType dtype)
             return 2;
         case JXL_TYPE_FLOAT:
             return 4;
+        case JXL_TYPE_FLOAT16:
+            return 2;
         default:
             return 0;
     }
@@ -403,8 +413,8 @@ static int JXLPreDecode(TIFF *tif, uint16_t s)
             if (buffer_size != channel_size)
             {
                 TIFFErrorExtR(tif, module,
-                              "JxlDecoderExtraChannelBufferSize returned %ld, "
-                              "expecting %u",
+                              "JxlDecoderExtraChannelBufferSize returned "
+                              "%" TIFF_SIZE_FORMAT ", expecting %u",
                               buffer_size, channel_size);
                 _TIFFfreeExt(tif, extra_channel_buffer);
                 return 0;
@@ -811,7 +821,10 @@ static int JXLPostEncode(TIFF *tif)
     basic_info.orientation = JXL_ORIENT_IDENTITY;
     if (td->td_sampleformat == SAMPLEFORMAT_IEEEFP)
     {
-        basic_info.exponent_bits_per_sample = 8;
+        if (td->td_bitspersample == 32)
+            basic_info.exponent_bits_per_sample = 8;
+        else
+            basic_info.exponent_bits_per_sample = 5;
     }
     else
     {
@@ -877,7 +890,7 @@ static int JXLPostEncode(TIFF *tif)
                    td->td_extrasamples == td->td_samplesperpixel - 3 &&
                    (td->td_sampleinfo[0] != EXTRASAMPLE_UNASSALPHA ||
                     !bAlphaDistanceSameAsMainChannel))))
-        {  // rgb without alpha, or differente distance for alpha vs non-alpha
+        {  // rgb without alpha, or different distance for alpha vs non-alpha
             // channels
             format.num_channels = 3;
             basic_info.num_color_channels = 3;
@@ -984,7 +997,7 @@ static int JXLPostEncode(TIFF *tif)
         int inStep = nBytesPerSample * td->td_samplesperpixel;
         uint8_t *cur_outbuffer = main_buffer;
         uint8_t *cur_inbuffer = sp->uncompressed_buffer;
-        for (; cur_outbuffer - main_buffer < main_size;
+        for (; (size_t)(cur_outbuffer - main_buffer) < main_size;
              cur_outbuffer += outChunkSize, cur_inbuffer += inStep)
         {
             memcpy(cur_outbuffer, cur_inbuffer, outChunkSize);
@@ -1027,6 +1040,21 @@ static int JXLPostEncode(TIFF *tif)
                 if (JXL_ENC_SUCCESS !=
                     JxlEncoderSetExtraChannelDistance(opts, iExtraChannel,
                                                       sp->alpha_distance))
+                {
+                    TIFFErrorExtR(
+                        tif, module,
+                        "JxlEncoderSetExtraChannelDistance(%d) failed",
+                        iChannel);
+                    JxlEncoderDestroy(enc);
+                    _TIFFfreeExt(tif, main_buffer);
+                    return 0;
+                }
+            }
+            else if (!(sp->lossless))
+            {
+                // By default libjxl applies lossless encoding for extra channels
+                if (JXL_ENC_SUCCESS != JxlEncoderSetExtraChannelDistance(
+                                           opts, iExtraChannel, sp->distance))
                 {
                     TIFFErrorExtR(
                         tif, module,
@@ -1148,14 +1176,14 @@ static void JXLCleanup(TIFF *tif)
 }
 
 static const TIFFField JXLFields[] = {
-    {TIFFTAG_JXL_LOSSYNESS, 0, 0, TIFF_ANY, 0, TIFF_SETGET_UINT32,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "Lossyness", NULL},
-    {TIFFTAG_JXL_EFFORT, 0, 0, TIFF_ANY, 0, TIFF_SETGET_UINT32,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "Effort", NULL},
-    {TIFFTAG_JXL_DISTANCE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_FLOAT,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "Distance", NULL},
+    {TIFFTAG_JXL_LOSSYNESS, 0, 0, TIFF_ANY, 0, TIFF_SETGET_UINT32, FIELD_PSEUDO,
+     FALSE, FALSE, "Lossyness", NULL},
+    {TIFFTAG_JXL_EFFORT, 0, 0, TIFF_ANY, 0, TIFF_SETGET_UINT32, FIELD_PSEUDO,
+     FALSE, FALSE, "Effort", NULL},
+    {TIFFTAG_JXL_DISTANCE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_FLOAT, FIELD_PSEUDO,
+     FALSE, FALSE, "Distance", NULL},
     {TIFFTAG_JXL_ALPHA_DISTANCE, 0, 0, TIFF_ANY, 0, TIFF_SETGET_FLOAT,
-     TIFF_SETGET_UNDEFINED, FIELD_PSEUDO, FALSE, FALSE, "AlphaDistance", NULL},
+     FIELD_PSEUDO, FALSE, FALSE, "AlphaDistance", NULL},
 };
 
 static int JXLVSetField(TIFF *tif, uint32_t tag, va_list ap)
@@ -1196,11 +1224,12 @@ static int JXLVSetField(TIFF *tif, uint32_t tag, va_list ap)
 
         case TIFFTAG_JXL_DISTANCE:
         {
-            float distance = (float)va_arg(ap, double);
+            const double dfDistance = va_arg(ap, double);
+            const float distance = (float)dfDistance;
             if (distance < 0 || distance > 15)
             {
                 TIFFErrorExtR(tif, module, "Invalid value for Distance: %f",
-                              distance);
+                              dfDistance);
                 return 0;
             }
             sp->distance = distance;
@@ -1209,13 +1238,14 @@ static int JXLVSetField(TIFF *tif, uint32_t tag, va_list ap)
 
         case TIFFTAG_JXL_ALPHA_DISTANCE:
         {
-            float alpha_distance = (float)va_arg(ap, double);
+            const double dfAlphaDistance = va_arg(ap, double);
+            const float alpha_distance = (float)dfAlphaDistance;
             if (alpha_distance != -1 &&
                 (alpha_distance < 0 || alpha_distance > 15))
             {
                 TIFFErrorExtR(tif, module,
                               "Invalid value for AlphaDistance: %f",
-                              alpha_distance);
+                              dfAlphaDistance);
                 return 0;
             }
             sp->alpha_distance = alpha_distance;
@@ -1260,7 +1290,7 @@ int TIFFInitJXL(TIFF *tif, int scheme)
     JXLState *sp;
 
     (void)scheme;
-    assert(scheme == COMPRESSION_JXL);
+    assert(scheme == COMPRESSION_JXL || scheme == COMPRESSION_JXL_DNG_1_7);
 
     /*
      * Merge codec-specific tag information.

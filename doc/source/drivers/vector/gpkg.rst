@@ -44,12 +44,9 @@ Driver capabilities
 Specification version
 ---------------------
 
-Starting with GDAL 2.2, the driver is able to create GeoPackage
-databases following the 1.0/1.0.1, 1.1 or 1.2 versions. For GDAL 2.2, it
-will automatically adjust to the minimum version required for the
-features of GeoPackage used. For GDAL 2.3 or later, it will default to
-1.2. Explicit version choice can be done by specifying the VERSION
-dataset creation option.
+GeoPackage version 1.0, 1.1, 1.2, 1.3 or 1.4 can be specified through the
+VERSION dataset creation option. Starting with GDAL 3.11, it defaults to 1.4.
+For earlier versions, it defaults to 1.2.
 
 Limitations
 -----------
@@ -73,12 +70,11 @@ any Spatialite version, but in a slower way, by specifying the
 "INDIRECT_SQLITE" dialect. In which case, GeoPackage geometries
 automatically appear as Spatialite geometries after translation by OGR.
 
-Starting with GDAL 2.2, the "DROP TABLE layer_name" and "ALTER TABLE
+The "DROP TABLE layer_name" and "ALTER TABLE
 layer_name RENAME TO new_layer" statements can be used. They will update
 GeoPackage system tables.
 
-Starting with GDAL 2.2, the
-"HasSpatialIndex('table_name','geom_col_name')" statement can be used
+The "HasSpatialIndex('table_name','geom_col_name')" statement can be used
 for checking if the table has spatial index on the named geometry
 column.
 
@@ -218,7 +214,7 @@ The following open options are available:
       SQL statement(s) to
       send on the SQLite3 connection before any other ones. In
       case of several statements, they must be separated with the
-      semi-column (;) sign. This option may be useful to
+      semicolon (;) sign. This option may be useful to
       `attach another database <https://www.sqlite.org/lang_attach.html>`__
       to the current one and issue cross-database requests.
 
@@ -281,11 +277,11 @@ raster) are available:
 
 -  .. dsco:: VERSION
       :choices: AUTO, 1.0, 1.1, 1.2, 1.3, 1.4
-      :Since: 2.2
+      :since: 2.2
 
       Set GeoPackage version
       (for application_id and user_version fields). In AUTO mode, this will
-      be equivalent to 1.2 starting with GDAL 2.3.
+      be equivalent to 1.4 starting with GDAL 3.11 (1.2 in prior versions)
       1.3 is available starting with GDAL 3.3
       1.4 is available starting with GDAL 3.7.1
 
@@ -367,9 +363,7 @@ The following layer creation options are available:
 -  .. lco:: GEOMETRY_NAME
       :default: geom
 
-      Column to use for the geometry column. Default to
-      "geom". Note: This option was called GEOMETRY_COLUMN in releases before
-      GDAL 2
+      Column to use for the geometry column. Default to "geom".
 
 -  .. lco:: GEOMETRY_NULLABLE
       :choices: YES, NO
@@ -458,19 +452,12 @@ The following layer creation options are available:
       :since: 2.2
 
       How to register non spatial tables. Defaults to
-      GPKG_ATTRIBUTES in GDAL 2.2 or later (behavior in previous version
-      was equivalent to OGR_ASPATIAL). Starting with GeoPackage 1.2, non
+      GPKG_ATTRIBUTES. Starting with GeoPackage 1.2, non
       spatial tables are part of the specification. They are recorded with
-      data_type="attributes" in the gpkg_contents table. This is only
-      compatible of GDAL 2.2 or later.
+      data_type="attributes" in the gpkg_contents table.
       It is also possible to use the NOT_REGISTERED
       option, in which case the non spatial table is not registered at all
       in any GeoPackage system tables.
-      Priorly, in OGR 2.0 and 2.1, the "aspatial" extension had been developed for
-      similar purposes, so if selecting OGR_ASPATIAL, non spatial tables will be
-      recorded with data_type="aspatial" and the "aspatial" extension was declared in the
-      gpkg_extensions table. Starting with GDAL 3.3, OGR_ASPATIAL is no longer
-      available on creation.
 
 -  .. lco:: DATETIME_PRECISION
       :choices: AUTO, MILLISECOND, SECOND, MINUTE
@@ -563,10 +550,10 @@ support non-spatial tables. This was added in GeoPackage 1.2 as the
 
 The driver allows creating and reading non-spatial tables with the :ref:`vector.geopackage_aspatial`.
 
-Starting with GDAL 2.2, the driver will also, by default, list non
+The driver will also, by default, list non
 spatial tables that are not registered through the gdal_aspatial
 extension, and support the GeoPackage 1.2 "attributes" data type as
-well. Starting with GDAL 2.2, non spatial tables are by default created
+well. Non spatial tables are by default created
 following the GeoPackage 1.2 "attributes" data type (can be controlled
 with the :lco:`ASPATIAL_VARIANT` layer creation option).
 
@@ -577,7 +564,7 @@ Views can be created and recognized as valid spatial layers if a
 corresponding record is inserted into the gpkg_contents and
 gpkg_geometry_columns table.
 
-Starting with GDAL 2.2, in the case of the columns in the SELECT clause
+In the case of the columns in the SELECT clause
 of the view acts a integer primary key, then it can be recognized by OGR
 as the FID column of the view, provided it is renamed as OGC_FID.
 Selecting a feature id from a source table without renaming will not be
@@ -595,7 +582,7 @@ For example:
 
 This requires GDAL to be compiled with the SQLITE_HAS_COLUMN_METADATA
 option and SQLite3 with the SQLITE_ENABLE_COLUMN_METADATA option.
-Starting with GDAL 2.3, this can be easily verified if the
+This can be easily verified if the
 SQLITE_HAS_COLUMN_METADATA=YES driver metadata item is declared (for
 example with "ogrinfo --format GPKG").
 
@@ -661,7 +648,7 @@ Level of support of GeoPackage Extensions
      - Supported by GDAL?
    * - `Non-Linear Geometry Types <http://www.geopackage.org/guidance/extensions/nonlinear_geometry_types.html>`__
      - Yes
-     - Yes, since GDAL 2.1
+     - Yes
    * - `RTree Spatial Indexes <http://www.geopackage.org/guidance/extensions/rtree_spatial_indexes.html>`__
      - Yes
      - Yes
@@ -673,10 +660,10 @@ Level of support of GeoPackage Extensions
      - Yes, since GDAL 3.3 (Geopackage constraints exposed as field domains)
    * - `WKT for Coordinate Reference Systems <http://www.geopackage.org/guidance/extensions/wkt_for_crs.md>`__ (WKT v2)
      - Yes
-     -  Partially, since GDAL 2.2. GDAL can read databases using this extension, but cannot interpret a SRS entry that has only a WKT v2 entry.
+     - Yes
    * - :ref:`vector.geopackage_aspatial`
      - No
-     - Yes. Deprecated in GDAL 2.2 for the *attributes* official data_type
+     - Yes. Deprecated, in favor of the *attributes* official data_type
    * - :ref:`vector.gpkg_spatialite_computed_geom_column`
      - No
      - Yes, starting with GDAL 3.7.1
@@ -808,6 +795,18 @@ Examples
       ogrinfo my_spatial.gpkg \
         -sql "SELECT poly.id, other.foo FROM poly JOIN other_schema.other USING (id)" \
         -oo PRELUDE_STATEMENTS="ATTACH DATABASE 'other.gpkg' AS other_schema"
+
+Secure deletion
+---------------
+
+Depending on how SQLite3 is built, `secure deletion <https://www.sqlite.org/pragma.html#pragma_secure_delete>`__
+might or might not be enabled.
+Starting with GDAL 3.10, secure deletion is always enabled, unless
+``SECURE_DELETE`` is specified through the :config:`OGR_SQLITE_PRAGMA`
+configuration option.
+Note that secure deletion does not recover potential lost space, so running
+a `VACUUM <https://sqlite.org/lang_vacuum.html>`__ query is recommended to fully
+optimized a database that has been subject to updates or deletions.
 
 See Also
 --------

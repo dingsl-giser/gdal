@@ -1,27 +1,13 @@
 /****************************************************************************
  * (c) 2024 info@hobu.co
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
-#pragma once
+#ifndef VIEWSHED_TYPES_H_INCLUDED
+#define VIEWSHED_TYPES_H_INCLUDED
 
 #include <algorithm>
+#include <limits>
 #include <string>
 
 #include "gdal_priv.h"
@@ -80,6 +66,14 @@ struct Options
     double targetHeight{0.0};  //!< target height above the DEM surface
     double maxDistance{
         0.0};  //!< maximum distance from observer to compute value
+    double minDistance{
+        0.0};  //!< minimum distance from observer to compute value.
+    double startAngle{0.0};  //!< start angle of observable range
+    double endAngle{0.0};    //!< end angle of observable range
+    double lowPitch{
+        -90.0};  //!< minimum pitch (vertical angle) of observable points
+    double highPitch{
+        90.0};  //!< maximum pitch (vertical angle) of observable points
     double curveCoeff{.85714};  //!< coefficient for atmospheric refraction
     OutputMode outputMode{OutputMode::Normal};  //!< Output information.
         //!< Normal, Height from DEM or Height from ground
@@ -89,6 +83,30 @@ struct Options
     CellMode cellMode{CellMode::Edge};  //!< Mode of cell height calculation.
     int observerSpacing{10};  //!< Observer spacing in cumulative mode.
     uint8_t numJobs{3};       //!< Relative number of jobs in cumulative mode.
+
+    /// True if angle masking will occur.
+    bool angleMasking() const
+    {
+        return startAngle != endAngle;
+    }
+
+    /// True if low pitch masking will occur.
+    bool lowPitchMasking() const
+    {
+        return lowPitch > -90.0;
+    }
+
+    /// True if high pitch masking will occur.
+    bool highPitchMasking() const
+    {
+        return highPitch < 90.0;
+    }
+
+    /// True if pitch masking will occur.
+    bool pitchMasking() const
+    {
+        return lowPitchMasking() || highPitchMasking();
+    }
 };
 
 /**
@@ -100,6 +118,13 @@ struct Window
     int xStop{};   //!< X end position
     int yStart{};  //!< Y start position
     int yStop{};   //!< Y end position
+
+    /// Returns true when one window is equal to the other.
+    bool operator==(const Window &w2) const
+    {
+        return xStart == w2.xStart && xStop == w2.xStop &&
+               yStart == w2.yStart && yStop == w2.yStop;
+    }
 
     /// \brief  Window size in the X direction.
     int xSize() const
@@ -169,5 +194,41 @@ struct Window
     }
 };
 
+inline std::ostream &operator<<(std::ostream &out, const Window &w)
+{
+    out << "Xstart/stop Ystart/stop = " << w.xStart << "/" << w.xStop << " "
+        << w.yStart << "/" << w.yStop;
+    return out;
+}
+
+/// Processing limits based on min/max distance restrictions.
+/// The left side processing range is [left, leftMin).
+/// The right side processing range is [rightMin, right).
+struct LineLimits
+{
+    /// Constructor that takes the members in order.
+    LineLimits(int leftArg, int leftMinArg, int rightMinArg, int rightArg)
+        : left(leftArg), leftMin(leftMinArg), rightMin(rightMinArg),
+          right(rightArg)
+    {
+    }
+
+    int left;      //!< Starting (leftmost) cell on the left side.
+    int leftMin;   //!< One past the rightmost cell on the left side.
+    int rightMin;  //!< Starting (leftmost) cell on the right side.
+    int right;     //!< One past the rightmost cell on the right side.
+};
+
+inline std::ostream &operator<<(std::ostream &out, const LineLimits &ll)
+{
+    out << "Left/LeftMin RightMin/Right = " << ll.left << "/" << ll.leftMin
+        << " " << ll.rightMin << "/" << ll.right;
+    return out;
+}
+
+constexpr int INVALID_ISECT = std::numeric_limits<int>::max();
+
 }  // namespace viewshed
 }  // namespace gdal
+
+#endif

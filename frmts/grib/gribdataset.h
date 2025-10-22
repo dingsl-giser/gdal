@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  GRIB Driver
  * Purpose:  GDALDataset driver for GRIB translator for read support
@@ -9,23 +8,7 @@
  * Copyright (c) 2007, ITC
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************
  *
  */
@@ -41,9 +24,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
 #include <time.h>
 
 #include <algorithm>
@@ -90,7 +70,7 @@ class GRIBDataset final : public GDALPamDataset
 
   public:
     GRIBDataset();
-    ~GRIBDataset();
+    ~GRIBDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
@@ -100,7 +80,7 @@ class GRIBDataset final : public GDALPamDataset
                                    GDALProgressFunc pfnProgress,
                                    void *pProgressData);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -119,7 +99,7 @@ class GRIBDataset final : public GDALPamDataset
 
     VSILFILE *fp;
     // Calculate and store once as GetGeoTransform may be called multiple times.
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     GIntBig nCachedBytes;
     GIntBig nCachedBytesThreshold;
@@ -158,12 +138,12 @@ class GRIBRasterBand final : public GDALPamRasterBand
 
   public:
     GRIBRasterBand(GRIBDataset *, int, inventoryType *);
-    virtual ~GRIBRasterBand();
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual const char *GetDescription() const override;
+    ~GRIBRasterBand() override;
+    CPLErr IReadBlock(int, int, void *) override;
+    const char *GetDescription() const override;
 
-    virtual double GetNoDataValue(int *pbSuccess = nullptr) override;
-    virtual char **GetMetadata(const char *pszDomain = "") override;
+    double GetNoDataValue(int *pbSuccess = nullptr) override;
+    char **GetMetadata(const char *pszDomain = "") override;
     virtual const char *GetMetadataItem(const char *pszName,
                                         const char *pszDomain = "") override;
 
@@ -218,16 +198,10 @@ namespace grib
 {
 
 // Thin layer to manage allocation and deallocation.
-class InventoryWrapper
+class InventoryWrapper /* non final */
 {
   public:
-    InventoryWrapper()
-    {
-    }
-
-    virtual ~InventoryWrapper()
-    {
-    }
+    virtual ~InventoryWrapper();
 
     // Modifying the contents pointed to by the return is allowed.
     inventoryType *get(int i) const
@@ -253,6 +227,8 @@ class InventoryWrapper
     }
 
   protected:
+    InventoryWrapper() = default;
+
     inventoryType *inv_ = nullptr;
     uInt4 inv_len_ = 0;
     int num_messages_ = 0;

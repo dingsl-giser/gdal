@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022-2024, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrsf_frmts.h"
@@ -157,7 +141,7 @@ void OGRParquetDatasetLayer::EstablishFeatureDefn()
             if (ParseGeometryColumnCovering(iter.second, osBBOXColumn, osXMin,
                                             osYMin, osXMax, osYMax))
             {
-                oSetBBOXColumns.insert(osBBOXColumn);
+                oSetBBOXColumns.insert(std::move(osBBOXColumn));
             }
         }
     }
@@ -252,8 +236,8 @@ void OGRParquetDatasetLayer::EstablishFeatureDefn()
             continue;
         }
 
-        const bool bGeometryField =
-            DealWithGeometryColumn(i, field, []() { return wkbUnknown; });
+        const bool bGeometryField = DealWithGeometryColumn(
+            i, field, []() { return wkbUnknown; }, nullptr, nullptr, -1);
         if (bGeometryField)
         {
             const auto oIter = m_oMapGeometryColumns.find(field->name());
@@ -778,36 +762,33 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
     if (poNode->eNodeType == SNT_OPERATION && poNode->nOperation == SWQ_AND &&
         poNode->nSubExprCount == 2)
     {
-        const auto sLeft =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
-        const auto sRight =
+        auto sLeft = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto sRight =
             BuildArrowFilter(poNode->papoSubExpr[1], bFullyTranslated);
         if (sLeft.is_valid() && sRight.is_valid())
-            return cp::and_(sLeft, sRight);
-        if (sLeft.is_valid())
+            return cp::and_(std::move(sLeft), std::move(sRight));
+        else if (sLeft.is_valid())
             return sLeft;
-        if (sRight.is_valid())
+        else if (sRight.is_valid())
             return sRight;
     }
 
     else if (poNode->eNodeType == SNT_OPERATION &&
              poNode->nOperation == SWQ_OR && poNode->nSubExprCount == 2)
     {
-        const auto sLeft =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
-        const auto sRight =
+        auto sLeft = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto sRight =
             BuildArrowFilter(poNode->papoSubExpr[1], bFullyTranslated);
         if (sLeft.is_valid() && sRight.is_valid())
-            return cp::or_(sLeft, sRight);
+            return cp::or_(std::move(sLeft), std::move(sRight));
     }
 
     else if (poNode->eNodeType == SNT_OPERATION &&
              poNode->nOperation == SWQ_NOT && poNode->nSubExprCount == 1)
     {
-        const auto expr =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto expr = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
         if (expr.is_valid())
-            return cp::not_(expr);
+            return cp::not_(std::move(expr));
     }
 
     else if (poNode->eNodeType == SNT_COLUMN)
@@ -908,6 +889,7 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
                             nVal, arrow::TimeUnit::MILLI));
                     }
                 }
+                break;
             }
 
             default:
@@ -918,24 +900,23 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
     else if (poNode->eNodeType == SNT_OPERATION && poNode->nSubExprCount == 2 &&
              IsComparisonOp(poNode->nOperation))
     {
-        const auto sLeft =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
-        const auto sRight =
+        auto sLeft = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto sRight =
             BuildArrowFilter(poNode->papoSubExpr[1], bFullyTranslated);
         if (sLeft.is_valid() && sRight.is_valid())
         {
             if (poNode->nOperation == SWQ_EQ)
-                return cp::equal(sLeft, sRight);
+                return cp::equal(std::move(sLeft), std::move(sRight));
             if (poNode->nOperation == SWQ_LT)
-                return cp::less(sLeft, sRight);
+                return cp::less(std::move(sLeft), std::move(sRight));
             if (poNode->nOperation == SWQ_LE)
-                return cp::less_equal(sLeft, sRight);
+                return cp::less_equal(std::move(sLeft), std::move(sRight));
             if (poNode->nOperation == SWQ_GT)
-                return cp::greater(sLeft, sRight);
+                return cp::greater(std::move(sLeft), std::move(sRight));
             if (poNode->nOperation == SWQ_GE)
-                return cp::greater_equal(sLeft, sRight);
+                return cp::greater_equal(std::move(sLeft), std::move(sRight));
             if (poNode->nOperation == SWQ_NE)
-                return cp::not_equal(sLeft, sRight);
+                return cp::not_equal(std::move(sLeft), std::move(sRight));
         }
     }
 
@@ -945,8 +926,7 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
              poNode->papoSubExpr[1]->eNodeType == SNT_CONSTANT &&
              poNode->papoSubExpr[1]->field_type == SWQ_STRING)
     {
-        const auto sLeft =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto sLeft = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
         if (sLeft.is_valid())
         {
             if (cp::GetFunctionRegistry()
@@ -955,7 +935,7 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
             {
                 // match_like is only available is Arrow built against RE2.
                 return cp::call(
-                    "match_like", {sLeft},
+                    "match_like", {std::move(sLeft)},
                     cp::MatchSubstringOptions(
                         poNode->papoSubExpr[1]->string_value,
                         /* ignore_case=*/poNode->nOperation == SWQ_ILIKE));
@@ -966,10 +946,9 @@ OGRParquetDatasetLayer::BuildArrowFilter(const swq_expr_node *poNode,
     else if (poNode->eNodeType == SNT_OPERATION &&
              poNode->nOperation == SWQ_ISNULL && poNode->nSubExprCount == 1)
     {
-        const auto expr =
-            BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
+        auto expr = BuildArrowFilter(poNode->papoSubExpr[0], bFullyTranslated);
         if (expr.is_valid())
-            return cp::is_null(expr);
+            return cp::is_null(std::move(expr));
     }
 
     bFullyTranslated = false;
@@ -1075,15 +1054,6 @@ GIntBig OGRParquetDatasetLayer::GetFeatureCount(int bForce)
 }
 
 /************************************************************************/
-/*                            GetExtent()                               */
-/************************************************************************/
-
-OGRErr OGRParquetDatasetLayer::GetExtent(OGREnvelope *psExtent, int bForce)
-{
-    return GetExtent(0, psExtent, bForce);
-}
-
-/************************************************************************/
 /*                         FastGetExtent()                              */
 /************************************************************************/
 
@@ -1101,22 +1071,12 @@ bool OGRParquetDatasetLayer::FastGetExtent(int iGeomField,
 }
 
 /************************************************************************/
-/*                            GetExtent()                               */
+/*                           IGetExtent()                               */
 /************************************************************************/
 
-OGRErr OGRParquetDatasetLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
-                                         int bForce)
+OGRErr OGRParquetDatasetLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                          bool bForce)
 {
-    if (iGeomField < 0 || iGeomField >= m_poFeatureDefn->GetGeomFieldCount())
-    {
-        if (iGeomField != 0)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined,
-                     "Invalid geometry field index : %d", iGeomField);
-        }
-        return OGRERR_FAILURE;
-    }
-
     if (FastGetExtent(iGeomField, psExtent))
     {
         return OGRERR_NONE;
@@ -1177,22 +1137,24 @@ OGRErr OGRParquetDatasetLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
         }
     }
 
-    return OGRParquetLayerBase::GetExtent(iGeomField, psExtent, bForce);
+    return OGRParquetLayerBase::IGetExtent(iGeomField, psExtent, bForce);
 }
 
 /************************************************************************/
-/*                        SetSpatialFilter()                            */
+/*                        ISetSpatialFilter()                           */
 /************************************************************************/
 
-void OGRParquetDatasetLayer::SetSpatialFilter(int iGeomField,
-                                              OGRGeometry *poGeomIn)
+OGRErr OGRParquetDatasetLayer::ISetSpatialFilter(int iGeomField,
+                                                 const OGRGeometry *poGeomIn)
 
 {
-    OGRParquetLayerBase::SetSpatialFilter(iGeomField, poGeomIn);
+    const OGRErr eErr =
+        OGRParquetLayerBase::ISetSpatialFilter(iGeomField, poGeomIn);
     m_bRebuildScanner = true;
 
     // Full invalidation
     InvalidateCachedBatches();
+    return eErr;
 }
 
 /************************************************************************/
@@ -1323,7 +1285,7 @@ OGRErr OGRParquetDatasetLayer::SetIgnoredFields(CSLConstList papszFields)
 /*                         TestCapability()                             */
 /************************************************************************/
 
-int OGRParquetDatasetLayer::TestCapability(const char *pszCap)
+int OGRParquetDatasetLayer::TestCapability(const char *pszCap) const
 {
     if (EQUAL(pszCap, OLCIgnoreFields))
         return true;

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  VSI Virtual File System
  * Purpose:  Declarations for classes related to the virtual filesystem.
@@ -12,35 +11,21 @@
  * Copyright (c) 2005, Frank Warmerdam <warmerdam@pobox.com>
  * Copyright (c) 2010-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_VSI_VIRTUAL_H_INCLUDED
 #define CPL_VSI_VIRTUAL_H_INCLUDED
 
+#include "cpl_progress.h"
 #include "cpl_vsi.h"
 #include "cpl_vsi_error.h"
 #include "cpl_string.h"
-#include "cpl_multiproc.h"
 
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 #include <string>
 
@@ -139,8 +124,23 @@ struct CPL_DLL VSIVirtualHandle
     virtual size_t PRead(void *pBuffer, size_t nSize,
                          vsi_l_offset nOffset) const;
 
+    /** Ask current operations to be interrupted.
+     * Implementations must be thread-safe, as this will typically be called
+     * from another thread than the active one for this file.
+     */
+    virtual void Interrupt()
+    {
+    }
+
+    /** For a file created with CreateOnlyVisibleAtCloseTime(), ask for the
+     * file to not be created at all (if possible)
+     */
+    virtual void CancelCreation()
+    {
+    }
+
     // NOTE: when adding new methods, besides the "actual" implementations,
-    // also consider the VSICachedFile one.
+    // also consider the VSICachedFile and VSIVirtualHandleOnlyVisibleAtCloseTime one.
 
     virtual ~VSIVirtualHandle()
     {
@@ -154,6 +154,7 @@ struct CPL_DLL VSIVirtualHandle
 /** Helper close to use with a std:unique_ptr<VSIVirtualHandle>,
  *  such as VSIVirtualHandleUniquePtr. */
 struct VSIVirtualHandleCloser
+
 {
     /** Operator () that closes and deletes the file handle. */
     void operator()(VSIVirtualHandle *poHandle)
@@ -171,6 +172,122 @@ typedef std::unique_ptr<VSIVirtualHandle, VSIVirtualHandleCloser>
     VSIVirtualHandleUniquePtr;
 
 /************************************************************************/
+/*                        VSIProxyFileHandle                            */
+/************************************************************************/
+
+#ifndef DOXYGEN_SKIP
+class VSIProxyFileHandle /* non final */ : public VSIVirtualHandle
+{
+  protected:
+    VSIVirtualHandleUniquePtr m_nativeHandle{};
+
+  public:
+    explicit VSIProxyFileHandle(VSIVirtualHandleUniquePtr &&nativeHandle)
+        : m_nativeHandle(std::move(nativeHandle))
+    {
+    }
+
+    int Seek(vsi_l_offset nOffset, int nWhence) override
+    {
+        return m_nativeHandle->Seek(nOffset, nWhence);
+    }
+
+    vsi_l_offset Tell() override
+    {
+        return m_nativeHandle->Tell();
+    }
+
+    size_t Read(void *pBuffer, size_t nSize, size_t nCount) override
+    {
+        return m_nativeHandle->Read(pBuffer, nSize, nCount);
+    }
+
+    int ReadMultiRange(int nRanges, void **ppData,
+                       const vsi_l_offset *panOffsets,
+                       const size_t *panSizes) override
+    {
+        return m_nativeHandle->ReadMultiRange(nRanges, ppData, panOffsets,
+                                              panSizes);
+    }
+
+    void AdviseRead(int nRanges, const vsi_l_offset *panOffsets,
+                    const size_t *panSizes) override
+    {
+        return m_nativeHandle->AdviseRead(nRanges, panOffsets, panSizes);
+    }
+
+    size_t GetAdviseReadTotalBytesLimit() const override
+    {
+        return m_nativeHandle->GetAdviseReadTotalBytesLimit();
+    }
+
+    size_t Write(const void *pBuffer, size_t nSize, size_t nCount) override
+    {
+        return m_nativeHandle->Write(pBuffer, nSize, nCount);
+    }
+
+    void ClearErr() override
+    {
+        return m_nativeHandle->ClearErr();
+    }
+
+    int Eof() override
+    {
+        return m_nativeHandle->Eof();
+    }
+
+    int Error() override
+    {
+        return m_nativeHandle->Error();
+    }
+
+    int Flush() override
+    {
+        return m_nativeHandle->Flush();
+    }
+
+    int Close() override
+    {
+        return m_nativeHandle->Close();
+    }
+
+    int Truncate(vsi_l_offset nNewSize) override
+    {
+        return m_nativeHandle->Truncate(nNewSize);
+    }
+
+    void *GetNativeFileDescriptor() override
+    {
+        return m_nativeHandle->GetNativeFileDescriptor();
+    }
+
+    VSIRangeStatus GetRangeStatus(vsi_l_offset nOffset,
+                                  vsi_l_offset nLength) override
+    {
+        return m_nativeHandle->GetRangeStatus(nOffset, nLength);
+    }
+
+    bool HasPRead() const override
+    {
+        return m_nativeHandle->HasPRead();
+    }
+
+    size_t PRead(void *pBuffer, size_t nSize,
+                 vsi_l_offset nOffset) const override
+    {
+        return m_nativeHandle->PRead(pBuffer, nSize, nOffset);
+    }
+
+    void Interrupt() override
+    {
+        m_nativeHandle->Interrupt();
+    }
+
+    void CancelCreation() override;
+};
+#endif
+
+/************************************************************************/
 /*                         VSIFilesystemHandler                         */
 /************************************************************************/
 
@@ -179,15 +296,21 @@ class CPL_DLL VSIFilesystemHandler
 {
 
   public:
-    virtual ~VSIFilesystemHandler()
-    {
-    }
+    virtual ~VSIFilesystemHandler() = default;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess);
+    static VSIVirtualHandleUniquePtr
+    OpenStatic(const char *pszFilename, const char *pszAccess,
+               bool bSetError = false, CSLConstList papszOptions = nullptr);
 
-    virtual VSIVirtualHandle *Open(const char *pszFilename,
-                                   const char *pszAccess, bool bSetError,
-                                   CSLConstList papszOptions) = 0;
+    virtual VSIVirtualHandleUniquePtr
+    Open(const char *pszFilename, const char *pszAccess, bool bSetError = false,
+         CSLConstList papszOptions = nullptr) = 0;
+
+    virtual VSIVirtualHandleUniquePtr
+    CreateOnlyVisibleAtCloseTime(const char *pszFilename,
+                                 bool bEmulationAllowed,
+                                 CSLConstList papszOptions);
+
     virtual int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
                      int nFlags) = 0;
 
@@ -232,10 +355,13 @@ class CPL_DLL VSIFilesystemHandler
         return nullptr;
     }
 
-    virtual int Rename(const char *oldpath, const char *newpath)
+    virtual int Rename(const char *oldpath, const char *newpath,
+                       GDALProgressFunc pProgressFunc, void *pProgressData)
     {
         (void)oldpath;
         (void)newpath;
+        (void)pProgressFunc;
+        (void)pProgressData;
         errno = ENOENT;
         return -1;
     }
@@ -360,9 +486,14 @@ class CPL_DLL VSIFilesystemHandler
         return osFilename;
     }
 
-    virtual bool IsLocal(const char * /* pszPath */)
+    virtual bool IsLocal(const char * /* pszPath */) const
     {
         return true;
+    }
+
+    virtual bool IsArchive(const char * /* pszPath */) const
+    {
+        return false;
     }
 
     virtual bool SupportsSequentialWrite(const char * /* pszPath */,
@@ -385,7 +516,8 @@ class CPL_DLL VSIFilesystemHandler
     virtual VSIFilesystemHandler *Duplicate(const char * /* pszPrefix */)
     {
         CPLError(CE_Failure, CPLE_NotSupported,
-                 "Duplicate() not supported on this file system");
+                 "Duplicate() not supported on this file "
+                 "system");
         return nullptr;
     }
 
@@ -445,24 +577,34 @@ class VSIArchiveEntryFileOffset
     virtual ~VSIArchiveEntryFileOffset();
 };
 
-typedef struct
+class VSIArchiveEntry
 {
-    char *fileName;
-    vsi_l_offset uncompressed_size;
-    VSIArchiveEntryFileOffset *file_pos;
-    int bIsDir;
-    GIntBig nModifiedTime;
-} VSIArchiveEntry;
+  public:
+    std::string fileName{};
+    vsi_l_offset uncompressed_size = 0;
+    std::unique_ptr<VSIArchiveEntryFileOffset> file_pos{};
+    bool bIsDir = false;
+    GIntBig nModifiedTime = 0;
+};
 
 class VSIArchiveContent
 {
   public:
     time_t mTime = 0;
     vsi_l_offset nFileSize = 0;
-    int nEntries = 0;
-    VSIArchiveEntry *entries = nullptr;
+    std::vector<VSIArchiveEntry> entries{};
+
+    // Store list of child indices for each directory
+    using DirectoryChildren = std::vector<int>;
+
+    std::map<std::string, DirectoryChildren> dirIndex{};
+
+    VSIArchiveContent() = default;
 
     ~VSIArchiveContent();
+
+  private:
+    CPL_DISALLOW_COPY_ASSIGN(VSIArchiveContent)
 };
 
 class VSIArchiveReader
@@ -479,33 +621,35 @@ class VSIArchiveReader
     virtual int GotoFileOffset(VSIArchiveEntryFileOffset *pOffset) = 0;
 };
 
-class VSIArchiveFilesystemHandler : public VSIFilesystemHandler
+class VSIArchiveFilesystemHandler /* non final */ : public VSIFilesystemHandler
 {
     CPL_DISALLOW_COPY_ASSIGN(VSIArchiveFilesystemHandler)
 
+    bool FindFileInArchive(const char *archiveFilename,
+                           const char *fileInArchiveName,
+                           const VSIArchiveEntry **archiveEntry);
+
   protected:
-    CPLMutex *hMutex = nullptr;
+    mutable std::recursive_mutex oMutex{};
+
     /* We use a cache that contains the list of files contained in a VSIArchive
      * file as */
     /* unarchive.c is quite inefficient in listing them. This speeds up access
      * to VSIArchive files */
     /* containing ~1000 files like a CADRG product */
-    std::map<CPLString, VSIArchiveContent *> oFileList{};
+    std::map<CPLString, std::unique_ptr<VSIArchiveContent>> oFileList{};
 
-    virtual const char *GetPrefix() = 0;
-    virtual std::vector<CPLString> GetExtensions() = 0;
-    virtual VSIArchiveReader *CreateReader(const char *pszArchiveFileName) = 0;
+    virtual const char *GetPrefix() const = 0;
+    virtual std::vector<CPLString> GetExtensions() const = 0;
+    virtual std::unique_ptr<VSIArchiveReader>
+    CreateReader(const char *pszArchiveFileName) = 0;
 
   public:
     VSIArchiveFilesystemHandler();
-    virtual ~VSIArchiveFilesystemHandler();
+    ~VSIArchiveFilesystemHandler() override;
 
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
-    int Unlink(const char *pszFilename) override;
-    int Rename(const char *oldpath, const char *newpath) override;
-    int Mkdir(const char *pszDirname, long nMode) override;
-    int Rmdir(const char *pszDirname) override;
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
 
     virtual const VSIArchiveContent *
@@ -513,24 +657,23 @@ class VSIArchiveFilesystemHandler : public VSIFilesystemHandler
                         VSIArchiveReader *poReader = nullptr);
     virtual char *SplitFilename(const char *pszFilename,
                                 CPLString &osFileInArchive,
-                                int bCheckMainFileExists);
-    virtual VSIArchiveReader *OpenArchiveFile(const char *archiveFilename,
-                                              const char *fileInArchiveName);
-    virtual int FindFileInArchive(const char *archiveFilename,
-                                  const char *fileInArchiveName,
-                                  const VSIArchiveEntry **archiveEntry);
+                                bool bCheckMainFileExists,
+                                bool bSetError) const;
+    virtual std::unique_ptr<VSIArchiveReader>
+    OpenArchiveFile(const char *archiveFilename, const char *fileInArchiveName);
 
-    virtual bool IsLocal(const char *pszPath) override;
+    bool IsLocal(const char *pszPath) const override;
 
-    virtual bool
-    SupportsSequentialWrite(const char * /* pszPath */,
-                            bool /* bAllowLocalTempFile */) override
+    bool IsArchive(const char *pszPath) const override;
+
+    bool SupportsSequentialWrite(const char * /* pszPath */,
+                                 bool /* bAllowLocalTempFile */) override
     {
         return false;
     }
 
-    virtual bool SupportsRandomWrite(const char * /* pszPath */,
-                                     bool /* bAllowLocalTempFile */) override
+    bool SupportsRandomWrite(const char * /* pszPath */,
+                             bool /* bAllowLocalTempFile */) override
     {
         return false;
     }

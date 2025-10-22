@@ -7,30 +7,19 @@
  ******************************************************************************
  * Copyright (c) 2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdalgrid.h"
 #include "gdalgrid_priv.h"
 
 #ifdef HAVE_SSE_AT_COMPILE_TIME
+
+#ifdef USE_NEON_OPTIMIZATIONS
+#include "include_sse2neon.h"
+#else
 #include <xmmintrin.h>
+#endif
 
 /************************************************************************/
 /*         GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE()     */
@@ -60,7 +49,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE(
     __m128 xmm_denominator = _mm_setzero_ps();
     int mask = 0;
 
-#if defined(__x86_64) || defined(_M_X64)
+#if defined(__x86_64) || defined(_M_X64) || defined(USE_NEON_OPTIMIZATIONS)
     // This would also work in 32bit mode, but there are only 8 XMM registers
     // whereas we have 16 for 64bit.
     const size_t LOOP_SIZE = 8;
@@ -127,7 +116,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE(
         {
             if (mask & (1 << j))
             {
-                (*pdfValue) = (pafZ)[i + j];
+                (*pdfValue) = double(pafZ[i + j]);
                 return CE_None;
             }
         }
@@ -153,7 +142,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE(
 
         // If the test point is close to the grid node, use the point
         // value directly as a node value to avoid singularity.
-        if (fR2 < 0.0000000000001)
+        if (fR2 < 1e-13f)
         {
             break;
         }
@@ -167,9 +156,9 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE(
 
     if (i != nPoints)
     {
-        (*pdfValue) = pafZ[i];
+        (*pdfValue) = double(pafZ[i]);
     }
-    else if (fDenominator == 0.0)
+    else if (fDenominator == 0.0f)
     {
         (*pdfValue) =
             static_cast<const GDALGridInverseDistanceToAPowerOptions *>(
@@ -178,7 +167,7 @@ CPLErr GDALGridInverseDistanceToAPower2NoSmoothingNoSearchSSE(
     }
     else
     {
-        (*pdfValue) = fNominator / fDenominator;
+        (*pdfValue) = double(fNominator / fDenominator);
     }
 
     return CE_None;

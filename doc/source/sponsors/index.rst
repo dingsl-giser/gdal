@@ -25,13 +25,6 @@ the health of the project:
 
     .. container:: horizontal-logo
 
-        .. image:: ../../images/sponsors/logo-microsoft.png
-           :class: img-logos
-           :width: 250 px
-           :target: https://www.microsoft.com
-
-    .. container:: horizontal-logo
-
         .. image:: ../../images/sponsors/logo-planet.png
            :class: img-logos
            :width: 250 px
@@ -53,17 +46,17 @@ the health of the project:
 
     .. container:: horizontal-logo
 
-        .. image:: ../../images/sponsors/logo-google.png
-           :class: img-logos
-           :width: 200 px
-           :target: https://www.google.com
-
-    .. container:: horizontal-logo
-
         .. image:: ../../images/sponsors/logo-safe.png
            :class: img-logos
            :width: 240 px
            :target: https://www.safe.com
+
+    .. container:: horizontal-logo
+
+        .. image:: ../../images/sponsors/logo-google.png
+           :class: img-logos
+           :width: 240 px
+           :target: https://google.com
 
 
 
@@ -83,17 +76,10 @@ the health of the project:
 
     .. container:: horizontal-logo
 
-        .. image:: ../../images/sponsors/logo-koordinates.png
+        .. image:: ../../images/sponsors/logo-linz.png
            :class: img-logos
            :width: 150 px
-           :target: https://www.koordinates.com
-
-    .. container:: horizontal-logo
-
-        .. image:: ../../images/sponsors/logo-mapgears.png
-           :class: img-logos
-           :width: 150 px
-           :target: https://www.mapgears.com
+           :target: https://www.linz.govt.nz
 
     .. container:: horizontal-logo
 
@@ -104,10 +90,10 @@ the health of the project:
 
     .. container:: horizontal-logo
 
-        .. image:: ../../images/sponsors/logo-maxar.png
+        .. image:: ../../images/sponsors/logo-vantor.png
            :class: img-logos
            :width: 150 px
-           :target: https://www.maxar.com
+           :target: https://www.vantor.com
 
 
 - Supporter level:
@@ -126,6 +112,10 @@ the health of the project:
     .. container:: horizontal-logo
 
         `Kaplan Open Source Consulting <https://kaplanopensource.co.il/>`__
+
+    .. container:: horizontal-logo
+
+        `Phoenix LiDAR Systems, LLC <https://phoenixlidar.com/>`__
 
     .. container:: horizontal-logo
 
@@ -149,7 +139,7 @@ the health of the project:
 
     .. container:: horizontal-logo
 
-        `T-Kartor USA <https://www.t-kartorusa.com/>`__
+        `T-Kartor <https://www.t-kartor.com/>`__
 
     .. container:: horizontal-logo
 
@@ -225,6 +215,8 @@ consult with your personal tax adviser or the IRS about your particular tax situ
            :width: 150 px
            :target: https://numfocus.org
 
+We would like to also thank our :ref:`past_sponsors`.
+
 Sponsoring
 ----------
 
@@ -240,6 +232,8 @@ Related resources
 
 - `Sustainable GDAL Sponsorship Prospectus`_.
 - :ref:`Sponsoring frequently asked questions (FAQ) <sponsoring-faq>`.
+- :ref:`rfc-80`
+- :ref:`rfc-83`
 
 .. Source of the PDF is at https://docs.google.com/document/d/1yhMWeI_LgEXPUkngqOitqcKfp7ov6WsS41v5ulz-kd0/edit#
 

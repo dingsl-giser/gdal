@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  VFK Reader
  * Purpose:  Public Declarations for OGR free VFK Reader code.
@@ -8,25 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2009-2014, Martin Landa <landa.martin gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software and associated documentation
- * files (the "Software"), to deal in the Software without
- * restriction, including without limitation the rights to use, copy,
- * modify, merge, publish, distribute, sublicense, and/or sell copies
- * of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef GDAL_OGR_VFK_VFKREADER_H_INCLUDED
@@ -70,7 +51,7 @@ enum RecordType
 /************************************************************************/
 /*                              VFKProperty                             */
 /************************************************************************/
-class VFKProperty
+class VFKProperty final
 {
   private:
     bool m_bIsNull;
@@ -86,7 +67,7 @@ class VFKProperty
     explicit VFKProperty(double);
     explicit VFKProperty(const char *);
     explicit VFKProperty(CPLString const &);
-    virtual ~VFKProperty();
+    ~VFKProperty();
 
     VFKProperty(VFKProperty const &other) = default;
     VFKProperty &operator=(VFKProperty const &) = default;
@@ -118,7 +99,7 @@ class VFKProperty
 /************************************************************************/
 /*                              IVFKFeature                              */
 /************************************************************************/
-class IVFKFeature
+class IVFKFeature /* non final */
 {
   private:
     static double GetDeterminatOfMatrixDim3(double[3], double[3], double[3]);
@@ -176,7 +157,7 @@ class IVFKFeature
 /************************************************************************/
 /*                              VFKFeature                              */
 /************************************************************************/
-class VFKFeature : public IVFKFeature
+class VFKFeature final : public IVFKFeature
 {
   private:
     typedef std::vector<VFKProperty> VFKPropertyList;
@@ -207,7 +188,7 @@ class VFKFeature : public IVFKFeature
 /************************************************************************/
 /*                              VFKFeatureSQLite                        */
 /************************************************************************/
-class VFKFeatureSQLite : public IVFKFeature
+class VFKFeatureSQLite final : public IVFKFeature
 {
   private:
     int m_iRowId; /* rowid in DB */
@@ -234,7 +215,7 @@ class VFKFeatureSQLite : public IVFKFeature
 /************************************************************************/
 /*                              VFKPropertyDefn                         */
 /************************************************************************/
-class VFKPropertyDefn
+class VFKPropertyDefn final
 {
   private:
     char *m_pszName;
@@ -248,7 +229,7 @@ class VFKPropertyDefn
 
   public:
     VFKPropertyDefn(const char *, const char *, const char *);
-    virtual ~VFKPropertyDefn();
+    ~VFKPropertyDefn();
 
     const char *GetName() const
     {
@@ -281,7 +262,7 @@ class VFKPropertyDefn
 /************************************************************************/
 /*                              IVFKDataBlock                           */
 /************************************************************************/
-class IVFKDataBlock
+class IVFKDataBlock /* non final */
 {
   private:
     IVFKFeature **m_papoFeature;
@@ -290,6 +271,11 @@ class IVFKDataBlock
     VFKPropertyDefn **m_papoProperty;
 
     int AddProperty(const char *, const char *);
+
+    IVFKDataBlock(IVFKDataBlock &) = delete;
+    IVFKDataBlock &operator=(const IVFKDataBlock &) = delete;
+    IVFKDataBlock(IVFKDataBlock &&) = delete;
+    IVFKDataBlock &operator=(IVFKDataBlock &&) = delete;
 
   protected:
     typedef std::vector<OGRPoint> PointList;
@@ -371,7 +357,7 @@ class IVFKDataBlock
 /************************************************************************/
 /*                              VFKDataBlock                            */
 /************************************************************************/
-class VFKDataBlock : public IVFKDataBlock
+class VFKDataBlock final : public IVFKDataBlock
 {
   private:
     int LoadGeometryPoint() override;
@@ -405,7 +391,7 @@ class VFKDataBlock : public IVFKDataBlock
 /************************************************************************/
 /*                              VFKDataBlockSQLite                      */
 /************************************************************************/
-class VFKDataBlockSQLite : public IVFKDataBlock
+class VFKDataBlockSQLite final : public IVFKDataBlock
 {
   private:
     sqlite3_stmt *m_hStmt;
@@ -447,7 +433,7 @@ class VFKDataBlockSQLite : public IVFKDataBlock
 /************************************************************************/
 /*                              IVFKReader                              */
 /************************************************************************/
-class IVFKReader
+class IVFKReader /* non final */
 {
   private:
     virtual void AddInfo(const char *) = 0;

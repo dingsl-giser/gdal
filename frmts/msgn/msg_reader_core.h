@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  MSG Native Reader
  * Purpose:  Base class for reading in the headers of MSG native images
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Frans van den Bergh <fvdbergh@csir.co.za>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef MSG_READER_CORE_H
@@ -62,27 +45,18 @@ typedef enum
     HRV = 4096
 } Msg_channel_names;
 
-class Msg_reader_core
+class Msg_reader_core final
 {
   public:
     explicit Msg_reader_core(const char *fname);
     explicit Msg_reader_core(VSILFILE *fp);
 
-    virtual ~Msg_reader_core()
-    {
-    }
+    ~Msg_reader_core();
 
     bool get_open_success() const
     {
         return _open_success;
     }
-
-#ifndef GDAL_SUPPORT
-    virtual void radiance_to_blackbody(
-        int using_chan_no =
-            0) = 0;  // can override which channel's parameters to use
-    virtual double *get_data(int chan_no = 0) = 0;
-#endif
 
     unsigned int get_lines() const
     {

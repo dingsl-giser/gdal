@@ -7,27 +7,13 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault, <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogrsf_frmts.h"
 #include "gdal_priv.h"
+#include "gdalplugindriverproxy.h"
+#include "gdalsubdatasetinfo.h"
 
 #include "netcdfdrivercore.h"
 
@@ -121,7 +107,7 @@ NetCDFFormatEnum netCDFIdentifyFormat(GDALOpenInfo *poOpenInfo, bool bCheckExt)
         if (bCheckExt)
         {
             // Check by default.
-            const char *pszExtension = CPLGetExtension(poOpenInfo->pszFilename);
+            const char *pszExtension = poOpenInfo->osExtension.c_str();
             if (!(EQUAL(pszExtension, "nc") || EQUAL(pszExtension, "cdf") ||
                   EQUAL(pszExtension, "nc2") || EQUAL(pszExtension, "nc4") ||
                   EQUAL(pszExtension, "nc3") || EQUAL(pszExtension, "grd") ||
@@ -170,7 +156,7 @@ NetCDFFormatEnum netCDFIdentifyFormat(GDALOpenInfo *poOpenInfo, bool bCheckExt)
 
     // The HDF5 signature of netCDF 4 files can be at offsets 512, 1024, 2048,
     // etc.
-    const char *pszExtension = CPLGetExtension(poOpenInfo->pszFilename);
+    const char *pszExtension = poOpenInfo->osExtension.c_str();
     if (poOpenInfo->fpL != nullptr &&
         (!bCheckExt || EQUAL(pszExtension, "nc") ||
          EQUAL(pszExtension, "cdf") || EQUAL(pszExtension, "nc4") ||
@@ -227,7 +213,7 @@ static int netCDFDatasetIdentify(GDALOpenInfo *poOpenInfo)
 /*                    NCDFDriverGetSubdatasetInfo()                     */
 /************************************************************************/
 
-struct NCDFDriverSubdatasetInfo : public GDALSubdatasetInfo
+struct NCDFDriverSubdatasetInfo final : public GDALSubdatasetInfo
 {
   public:
     explicit NCDFDriverSubdatasetInfo(const std::string &fileName)
@@ -237,78 +223,79 @@ struct NCDFDriverSubdatasetInfo : public GDALSubdatasetInfo
 
     // GDALSubdatasetInfo interface
   private:
-    void parseFileName() override
+    void parseFileName() override;
+};
+
+void NCDFDriverSubdatasetInfo::parseFileName()
+{
+
+    if (!STARTS_WITH_CI(m_fileName.c_str(), "NETCDF:"))
+    {
+        return;
+    }
+
+    CPLStringList aosParts{CSLTokenizeString2(m_fileName.c_str(), ":", 0)};
+    const int iPartsCount{CSLCount(aosParts)};
+
+    if (iPartsCount >= 3)
     {
 
-        if (!STARTS_WITH_CI(m_fileName.c_str(), "NETCDF:"))
+        m_driverPrefixComponent = aosParts[0];
+
+        int subdatasetIndex{2};
+
+        std::string part1{aosParts[1]};
+        if (!part1.empty() && part1[0] == '"')
         {
-            return;
+            part1 = part1.substr(1);
         }
 
-        CPLStringList aosParts{CSLTokenizeString2(m_fileName.c_str(), ":", 0)};
-        const int iPartsCount{CSLCount(aosParts)};
+        const bool hasDriveLetter{
+            (strlen(aosParts[2]) > 1 &&
+             (aosParts[2][0] == '\\' || aosParts[2][0] == '/')) &&
+            part1.length() == 1 &&
+            std::isalpha(static_cast<unsigned char>(part1.at(0)))};
 
-        if (iPartsCount >= 3)
+        const bool hasProtocol{part1 == "/vsicurl/http" ||
+                               part1 == "/vsicurl/https" ||
+                               part1 == "/vsicurl_streaming/http" ||
+                               part1 == "/vsicurl_streaming/https" ||
+                               part1 == "http" || part1 == "https"};
+
+        m_pathComponent = aosParts[1];
+        if (hasDriveLetter || hasProtocol)
         {
+            m_pathComponent.append(":");
+            m_pathComponent.append(aosParts[2]);
+            subdatasetIndex++;
+        }
 
-            m_driverPrefixComponent = aosParts[0];
+        // Check for bogus paths
+        if (subdatasetIndex < iPartsCount)
+        {
+            m_subdatasetComponent = aosParts[subdatasetIndex];
 
-            int subdatasetIndex{2};
-
-            std::string part1{aosParts[1]};
-            if (!part1.empty() && part1[0] == '"')
+            // Append any remaining part
+            for (int i = subdatasetIndex + 1; i < iPartsCount; ++i)
             {
-                part1 = part1.substr(1);
+                m_subdatasetComponent.append(":");
+                m_subdatasetComponent.append(aosParts[i]);
             }
+        }
 
-            const bool hasDriveLetter{
-                (strlen(aosParts[2]) > 1 &&
-                 (aosParts[2][0] == '\\' || aosParts[2][0] == '/')) &&
-                part1.length() == 1 &&
-                std::isalpha(static_cast<unsigned char>(part1.at(0)))};
-
-            const bool hasProtocol{part1 == "/vsicurl/http" ||
-                                   part1 == "/vsicurl/https" ||
-                                   part1 == "/vsicurl_streaming/http" ||
-                                   part1 == "/vsicurl_streaming/https" ||
-                                   part1 == "http" || part1 == "https"};
-
-            m_pathComponent = aosParts[1];
-            if (hasDriveLetter || hasProtocol)
-            {
-                m_pathComponent.append(":");
-                m_pathComponent.append(aosParts[2]);
-                subdatasetIndex++;
-            }
-
-            // Check for bogus paths
-            if (subdatasetIndex < iPartsCount)
-            {
-                m_subdatasetComponent = aosParts[subdatasetIndex];
-
-                // Append any remaining part
-                for (int i = subdatasetIndex + 1; i < iPartsCount; ++i)
-                {
-                    m_subdatasetComponent.append(":");
-                    m_subdatasetComponent.append(aosParts[i]);
-                }
-            }
-
-            // Remove quotes from subdataset component
-            if (!m_subdatasetComponent.empty() &&
-                m_subdatasetComponent[0] == '"')
-            {
-                m_subdatasetComponent = m_subdatasetComponent.substr(1);
-            }
-            if (!m_subdatasetComponent.empty() &&
-                m_subdatasetComponent.rfind('"') ==
-                    m_subdatasetComponent.length() - 1)
-            {
-                m_subdatasetComponent.pop_back();
-            }
+        // Remove quotes from subdataset component
+        if (!m_subdatasetComponent.empty() && m_subdatasetComponent[0] == '"')
+        {
+            m_subdatasetComponent = m_subdatasetComponent.substr(1);
+        }
+        if (!m_subdatasetComponent.empty() &&
+            m_subdatasetComponent.rfind('"') ==
+                m_subdatasetComponent.length() - 1)
+        {
+            m_subdatasetComponent.pop_back();
         }
     }
-};
+}
 
 static GDALSubdatasetInfo *NCDFDriverGetSubdatasetInfo(const char *pszFileName)
 {
@@ -345,6 +332,9 @@ void netCDFDriverSetCommonMetadata(GDALDriver *poDriver)
     poDriver->SetMetadataItem(
         GDAL_DMD_OPENOPTIONLIST,
         "<OpenOptionList>"
+        "   <Option name='LIST_ALL_ARRAYS' type='boolean' "
+        "description='Whether to list all arrays, and not only those whose "
+        "dimension count is 2 or more' default='NO'/>"
         "   <Option name='HONOUR_VALID_RANGE' type='boolean' scope='raster' "
         "description='Whether to set to nodata pixel values outside of the "
         "validity range' default='YES'/>"
@@ -584,6 +574,11 @@ void netCDFDriverSetCommonMetadata(GDALDriver *poDriver)
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_CREATECOPY, "YES");
     poDriver->SetMetadataItem(GDAL_DCAP_CREATE_MULTIDIMENSIONAL, "YES");
+
+    poDriver->SetMetadataItem(GDAL_DCAP_UPDATE, "YES");
+    poDriver->SetMetadataItem(GDAL_DMD_UPDATE_ITEMS,
+                              "GeoTransform SRS "  // if not already set...
+                              "DatasetMetadata BandMetadata RasterValues");
 }
 
 /************************************************************************/

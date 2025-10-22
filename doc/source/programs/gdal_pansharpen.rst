@@ -8,8 +8,6 @@ gdal_pansharpen
 
     Perform a pansharpen operation.
 
-    (Since GDAL 2.1)
-
 .. Index:: gdal_pansharpen
 
 Synopsis
@@ -44,9 +42,8 @@ More details can be found in the :ref:`gdal_vrttut_pansharpen` section.
 
 .. option:: -of <format>
 
-    Select the output format. Starting with GDAL 2.3, if not specified,
-    the format is guessed from the extension (previously was ``GTiff``). Use
-    the short format name. ``VRT`` can also be used.
+    Select the output format. If not specified, the format is guessed from the
+    extension. Use the short format name. ``VRT`` can also be used.
 
 .. option:: -b <band>
 
@@ -113,33 +110,37 @@ Bands should be in the same projection.
 Example
 -------
 
-With spectral bands in a single dataset :
+.. example::
+   :title: With spectral bands in a single dataset
 
-.. code-block::
+   .. code-block::
 
-    gdal_pansharpen panchro.tif multispectral.tif pansharpened_out.tif
+       gdal_pansharpen panchro.tif multispectral.tif pansharpened_out.tif
 
-With a few spectral bands from a single dataset, reordered :
+.. example::
+   :title: With a few spectral bands from a single dataset, reordered
 
-.. code-block::
+   .. code-block::
 
-    gdal_pansharpen panchro.tif multispectral.tif,band=3 multispectral.tif,band=2 multispectral.tif,band=1 pansharpened_out.tif
+       gdal_pansharpen panchro.tif multispectral.tif,band=3 multispectral.tif,band=2 multispectral.tif,band=1 pansharpened_out.tif
 
-With spectral bands in several datasets :
+.. example::
+   :title: With spectral bands in several datasets
 
-.. code-block::
+   .. code-block::
 
-    gdal_pansharpen panchro.tif band1.tif band2.tif band3.tif pansharpened_out.tif
+       gdal_pansharpen panchro.tif band1.tif band2.tif band3.tif pansharpened_out.tif
 
-Specify weights:
+.. example::
+   :title: Specifying weights
 
-.. code-block::
+   .. code-block::
 
-    gdal_pansharpen -w 0.7 -w 0.2 -w 0.1 panchro.tif multispectral.tif pansharpened_out.tif
+       gdal_pansharpen -w 0.7 -w 0.2 -w 0.1 panchro.tif multispectral.tif pansharpened_out.tif
 
-Specify RGB bands from a RGBNir multispectral dataset while computing
-the pseudo panchromatic intensity on the 4 RGBNir bands:
+.. example::
+   :title: Specify RGB bands from a RGBNir multispectral dataset while computing the pseudo panchromatic intensity on the 4 RGBNir bands
 
-.. code-block::
+   .. code-block::
 
-    gdal_pansharpen -b 1 -b 2 -b 3 panchro.tif rgbnir.tif pansharpened_out.tif
+       gdal_pansharpen -b 1 -b 2 -b 3 panchro.tif rgbnir.tif pansharpened_out.tif

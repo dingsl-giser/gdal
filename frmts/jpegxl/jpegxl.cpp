@@ -7,26 +7,12 @@
  ******************************************************************************
  * Copyright (c) 2022, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_error.h"
+#include "cpl_multiproc.h"
+#include "gdal_frmts.h"
 #include "gdalexif.h"
 #include "gdaljp2metadata.h"
 #include "gdaljp2abstractdataset.h"
@@ -52,6 +38,8 @@ struct VSILFileReleaser
     }
 };
 }  // namespace
+
+constexpr float MIN_DISTANCE = 0.01f;
 
 /************************************************************************/
 /*                        JPEGXLDataset                                 */
@@ -91,7 +79,9 @@ class JPEGXLDataset final : public GDALJP2AbstractDataset
                      GSpacing, GDALRasterIOExtraArg *psExtraArg) override;
 
   public:
-    ~JPEGXLDataset();
+    ~JPEGXLDataset() override;
+
+    CPLErr Close() override;
 
     char **GetMetadataDomainList() override;
     char **GetMetadata(const char *pszDomain) override;
@@ -144,8 +134,28 @@ class JPEGXLRasterBand final : public GDALPamRasterBand
 
 JPEGXLDataset::~JPEGXLDataset()
 {
-    if (m_fp)
-        VSIFCloseL(m_fp);
+    JPEGXLDataset::Close();
+}
+
+/************************************************************************/
+/*                                Close()                               */
+/************************************************************************/
+
+CPLErr JPEGXLDataset::Close()
+{
+    CPLErr eErr = CE_None;
+
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        eErr = JPEGXLDataset::FlushCache(true);
+
+        if (m_fp != nullptr && VSIFCloseL(m_fp) != 0)
+            eErr = CE_Failure;
+        m_fp = nullptr;
+
+        eErr = GDAL::Combine(eErr, GDALPamDataset::Close());
+    }
+    return eErr;
 }
 
 /************************************************************************/
@@ -219,7 +229,7 @@ int JPEGXLDataset::Identify(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->fpL == nullptr)
         return false;
 
-    if (EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "jxl"))
+    if (poOpenInfo->IsExtensionEqualToCI("jxl"))
         return true;
 
     // See
@@ -358,11 +368,9 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                 {
                     CPL_LSBPTR32(&nTiffDirStart);
                 }
-                const std::string osTmpFilename =
-                    CPLSPrintf("/vsimem/jxl/%p", this);
-                VSILFILE *fpEXIF = VSIFileFromMemBuffer(
-                    osTmpFilename.c_str(), abyBoxBuffer.data() + 4,
-                    abyBoxBuffer.size() - 4, false);
+                VSILFILE *fpEXIF =
+                    VSIFileFromMemBuffer(nullptr, abyBoxBuffer.data() + 4,
+                                         abyBoxBuffer.size() - 4, false);
                 int nExifOffset = 0;
                 int nInterOffset = 0;
                 int nGPSOffset = 0;
@@ -490,6 +498,12 @@ bool JPEGXLDataset::Open(GDALOpenInfo *poOpenInfo)
                     eDT = GDT_Byte;
                 else if (info.bits_per_sample <= 16)
                     eDT = GDT_UInt16;
+            }
+            else if (info.exponent_bits_per_sample == 5)
+            {
+                // Float16
+                CPLDebug("JXL", "16-bit floating point data");
+                eDT = GDT_Float32;
             }
             else if (info.exponent_bits_per_sample == 8)
             {
@@ -1496,7 +1510,7 @@ void JPEGXLDataset::GetDecodedImage(void *pabyOutputData,
     }
 
     // Rescale from 8-bits/16-bits
-    if (m_nBits < GDALGetDataTypeSize(eDT))
+    if (m_nBits < GDALGetDataTypeSizeBits(eDT))
     {
         const auto Rescale = [this, eDT](void *pBuffer, int nChannels)
         {
@@ -1768,9 +1782,8 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     char **papszXMP = poSrcDS->GetMetadata("xml:XMP");
 
     const bool bWriteGeoJP2 = CPLFetchBool(papszOptions, "WRITE_GEOJP2", true);
-    double adfGeoTransform[6];
-    const bool bHasGeoTransform =
-        poSrcDS->GetGeoTransform(adfGeoTransform) == CE_None;
+    GDALGeoTransform gt;
+    const bool bHasGeoTransform = poSrcDS->GetGeoTransform(gt) == CE_None;
     const OGRSpatialReference *poSRS = poSrcDS->GetSpatialRef();
     const int nGCPCount = poSrcDS->GetGCPCount();
     char **papszRPCMD = poSrcDS->GetMetadata("RPC");
@@ -1782,7 +1795,7 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         if (poSRS)
             oJP2Metadata.SetSpatialRef(poSRS);
         if (bHasGeoTransform)
-            oJP2Metadata.SetGeoTransform(adfGeoTransform);
+            oJP2Metadata.SetGeoTransform(gt);
         if (nGCPCount)
         {
             const OGRSpatialReference *poSRSGCP = poSrcDS->GetGCPSpatialRef();
@@ -1816,16 +1829,35 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         }
     }
 
+    constexpr int DEFAULT_EFFORT = 5;
+    const int nEffort = atoi(CSLFetchNameValueDef(
+        papszOptions, "EFFORT", CPLSPrintf("%d", DEFAULT_EFFORT)));
+    const char *pszDistance = CSLFetchNameValue(papszOptions, "DISTANCE");
+    const char *pszQuality = CSLFetchNameValue(papszOptions, "QUALITY");
+    const char *pszAlphaDistance =
+        CSLFetchNameValue(papszOptions, "ALPHA_DISTANCE");
     const char *pszLossLessCopy =
         CSLFetchNameValueDef(papszOptions, "LOSSLESS_COPY", "AUTO");
-    if (EQUAL(pszLossLessCopy, "AUTO") || CPLTestBool(pszLossLessCopy))
+    if ((EQUAL(pszLossLessCopy, "AUTO") && !pszDistance && !pszQuality &&
+         !pszAlphaDistance && nEffort == DEFAULT_EFFORT) ||
+        (!EQUAL(pszLossLessCopy, "AUTO") && CPLTestBool(pszLossLessCopy)))
     {
         void *pJPEGXLContent = nullptr;
         size_t nJPEGXLContent = 0;
-        if (poSrcDS->ReadCompressedData(
-                "JXL", 0, 0, poSrcDS->GetRasterXSize(),
-                poSrcDS->GetRasterYSize(), poSrcDS->GetRasterCount(), nullptr,
-                &pJPEGXLContent, &nJPEGXLContent, nullptr) == CE_None)
+        const bool bSrcIsJXL =
+            (poSrcDS->ReadCompressedData(
+                 "JXL", 0, 0, poSrcDS->GetRasterXSize(),
+                 poSrcDS->GetRasterYSize(), poSrcDS->GetRasterCount(), nullptr,
+                 &pJPEGXLContent, &nJPEGXLContent, nullptr) == CE_None);
+        if (bSrcIsJXL && (pszDistance || pszQuality || pszAlphaDistance ||
+                          nEffort != DEFAULT_EFFORT))
+        {
+            CPLError(CE_Failure, CPLE_NotSupported,
+                     "LOSSLESS_COPY=YES not supported when EFFORT, QUALITY, "
+                     "DISTANCE or ALPHA_DISTANCE are specified");
+            return nullptr;
+        }
+        else if (bSrcIsJXL)
         {
             CPLDebug("JPEGXL", "Lossless copy from source dataset");
             GByte abySizeAndBoxName[8];
@@ -2080,10 +2112,6 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     }
 
     const char *pszLossLess = CSLFetchNameValue(papszOptions, "LOSSLESS");
-    const char *pszDistance = CSLFetchNameValue(papszOptions, "DISTANCE");
-    const char *pszQuality = CSLFetchNameValue(papszOptions, "QUALITY");
-    const char *pszAlphaDistance =
-        CSLFetchNameValue(papszOptions, "ALPHA_DISTANCE");
 
     const bool bLossless = (pszLossLess == nullptr && pszDistance == nullptr &&
                             pszQuality == nullptr) ||
@@ -2139,18 +2167,19 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
             }
             else
             {
-                fDistance = static_cast<float>(
-                    6.4 + pow(2.5, (30 - quality) / 5.0f) / 6.25f);
+                fDistance =
+                    static_cast<float>(53.0 / 3000.0 * quality * quality -
+                                       23.0 / 20.0 * quality + 25.0);
             }
         }
-        if (fDistance >= 0.0f && fDistance < 0.1f)
-            fDistance = 0.1f;
+        if (fDistance >= 0.0f && fDistance < MIN_DISTANCE)
+            fDistance = MIN_DISTANCE;
 
         if (pszAlphaDistance)
         {
             fAlphaDistance = static_cast<float>(CPLAtof(pszAlphaDistance));
-            if (fAlphaDistance > 0.0f && fAlphaDistance < 0.1f)
-                fAlphaDistance = 0.1f;
+            if (fAlphaDistance > 0.0f && fAlphaDistance < MIN_DISTANCE)
+                fAlphaDistance = MIN_DISTANCE;
         }
     }
 
@@ -2182,7 +2211,7 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
     const int nBits =
         ((eDT == GDT_Byte || eDT == GDT_UInt16) && pszNBits != nullptr)
             ? atoi(pszNBits)
-            : GDALGetDataTypeSize(eDT);
+            : GDALGetDataTypeSizeBits(eDT);
 
     JxlBasicInfo basic_info;
     JxlEncoderInitBasicInfo(&basic_info);
@@ -2343,7 +2372,6 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
         }
     }
 
-    const int nEffort = atoi(CSLFetchNameValueDef(papszOptions, "EFFORT", "5"));
 #ifdef HAVE_JxlEncoderFrameSettingsSetOption
     if (JxlEncoderFrameSettingsSetOption(opts, JXL_ENC_FRAME_SETTING_EFFORT,
                                          nEffort) != JXL_ENC_SUCCESS)
@@ -2584,6 +2612,17 @@ GDALDataset *JPEGXLDataset::CreateCopy(const char *pszFilename,
             {
                 if (JXL_ENC_SUCCESS != JxlEncoderSetExtraChannelDistance(
                                            opts, nIndex, fAlphaDistance))
+                {
+                    CPLError(CE_Failure, CPLE_AppDefined,
+                             "JxlEncoderSetExtraChannelDistance failed");
+                    return nullptr;
+                }
+            }
+            else if (!bLossless)
+            {
+                // By default libjxl applies lossless encoding for extra channels
+                if (JXL_ENC_SUCCESS !=
+                    JxlEncoderSetExtraChannelDistance(opts, nIndex, fDistance))
                 {
                     CPLError(CE_Failure, CPLE_AppDefined,
                              "JxlEncoderSetExtraChannelDistance failed");

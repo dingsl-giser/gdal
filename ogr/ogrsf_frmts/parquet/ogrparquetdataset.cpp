@@ -7,40 +7,185 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_parquet.h"
-#include "ogr_mem.h"
+#include "memdataset.h"
 #include "ogr_swq.h"
 
 #include "../arrow_common/ograrrowdataset.hpp"
 #include "../arrow_common/ograrrowlayer.hpp"
+#include "../arrow_common/vsiarrowfilesystem.hpp"
 
 /************************************************************************/
 /*                         OGRParquetDataset()                          */
 /************************************************************************/
 
-OGRParquetDataset::OGRParquetDataset(
-    const std::shared_ptr<arrow::MemoryPool> &poMemoryPool)
-    : OGRArrowDataset(poMemoryPool)
+OGRParquetDataset::OGRParquetDataset()
+    : OGRArrowDataset(arrow::MemoryPool::CreateDefault())
 {
+}
+
+/************************************************************************/
+/*                        ~OGRParquetDataset()                          */
+/************************************************************************/
+
+OGRParquetDataset::~OGRParquetDataset()
+{
+    OGRParquetDataset::Close();
+}
+
+/************************************************************************/
+/*                                Close()                               */
+/************************************************************************/
+
+CPLErr OGRParquetDataset::Close()
+{
+    CPLErr eErr = CE_None;
+    if (nOpenFlags != OPEN_FLAGS_CLOSED)
+    {
+        // libarrow might continue to do I/O in auxiliary threads on the underlying
+        // files when using the arrow::dataset API even after we closed the dataset.
+        // This is annoying as it can cause crashes when closing GDAL, in particular
+        // the virtual file manager, as this could result in VSI files being
+        // accessed after their VSIVirtualFileSystem has been destroyed, resulting
+        // in crashes. The workaround is to make sure that VSIArrowFileSystem
+        // waits for all file handles it is aware of to have been destroyed.
+        eErr = OGRArrowDataset::Close();
+
+        auto poFS = std::dynamic_pointer_cast<VSIArrowFileSystem>(m_poFS);
+        if (poFS)
+            poFS->AskToClose();
+    }
+
+    return eErr;
+}
+
+/***********************************************************************/
+/*                          CreateReaderLayer()                        */
+/***********************************************************************/
+
+std::unique_ptr<OGRParquetLayer>
+OGRParquetDataset::CreateReaderLayer(const std::string &osFilename,
+                                     VSILFILE *&fpIn,
+                                     CSLConstList papszOpenOptionsIn)
+{
+    try
+    {
+        std::shared_ptr<arrow::io::RandomAccessFile> infile;
+        if (STARTS_WITH(osFilename.c_str(), "/vsi") ||
+            CPLTestBool(CPLGetConfigOption("OGR_PARQUET_USE_VSI", "NO")))
+        {
+            VSIVirtualHandleUniquePtr fp(fpIn);
+            fpIn = nullptr;
+            if (fp == nullptr)
+            {
+                fp.reset(VSIFOpenL(osFilename.c_str(), "rb"));
+                if (fp == nullptr)
+                    return nullptr;
+            }
+            infile = std::make_shared<OGRArrowRandomAccessFile>(osFilename,
+                                                                std::move(fp));
+        }
+        else
+        {
+            PARQUET_ASSIGN_OR_THROW(infile,
+                                    arrow::io::ReadableFile::Open(osFilename));
+        }
+
+        // Open Parquet file reader
+        std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+
+        const int nNumCPUs = OGRParquetLayerBase::GetNumCPUs();
+        const char *pszUseThreads =
+            CPLGetConfigOption("OGR_PARQUET_USE_THREADS", nullptr);
+        if (!pszUseThreads && nNumCPUs > 1)
+        {
+            pszUseThreads = "YES";
+        }
+        const bool bUseThreads = pszUseThreads && CPLTestBool(pszUseThreads);
+
+        const char *pszParquetBatchSize =
+            CPLGetConfigOption("OGR_PARQUET_BATCH_SIZE", nullptr);
+
+        auto poMemoryPool = GetMemoryPool();
+#if ARROW_VERSION_MAJOR >= 21
+        parquet::arrow::FileReaderBuilder fileReaderBuilder;
+        {
+            auto st = fileReaderBuilder.Open(std::move(infile));
+            if (!st.ok())
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "parquet::arrow::FileReaderBuilder::Open() failed: %s",
+                         st.message().c_str());
+                return nullptr;
+            }
+        }
+        fileReaderBuilder.memory_pool(poMemoryPool);
+        parquet::ArrowReaderProperties fileReaderProperties;
+        fileReaderProperties.set_arrow_extensions_enabled(CPLTestBool(
+            CPLGetConfigOption("OGR_PARQUET_ENABLE_ARROW_EXTENSIONS", "YES")));
+        if (pszParquetBatchSize)
+        {
+            fileReaderProperties.set_batch_size(
+                CPLAtoGIntBig(pszParquetBatchSize));
+        }
+        if (bUseThreads)
+        {
+            fileReaderProperties.set_use_threads(true);
+        }
+        fileReaderBuilder.properties(fileReaderProperties);
+        {
+            auto res = fileReaderBuilder.Build();
+            if (!res.ok())
+            {
+                CPLError(
+                    CE_Failure, CPLE_AppDefined,
+                    "parquet::arrow::FileReaderBuilder::Build() failed: %s",
+                    res.status().message().c_str());
+                return nullptr;
+            }
+            arrow_reader = std::move(*res);
+        }
+#elif ARROW_VERSION_MAJOR >= 19
+        PARQUET_ASSIGN_OR_THROW(
+            arrow_reader,
+            parquet::arrow::OpenFile(std::move(infile), poMemoryPool));
+#else
+        auto st = parquet::arrow::OpenFile(std::move(infile), poMemoryPool,
+                                           &arrow_reader);
+        if (!st.ok())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "parquet::arrow::OpenFile() failed: %s",
+                     st.message().c_str());
+            return nullptr;
+        }
+#endif
+
+#if ARROW_VERSION_MAJOR < 21
+        if (pszParquetBatchSize)
+        {
+            arrow_reader->set_batch_size(CPLAtoGIntBig(pszParquetBatchSize));
+        }
+
+        if (bUseThreads)
+        {
+            arrow_reader->set_use_threads(true);
+        }
+#endif
+
+        return std::make_unique<OGRParquetLayer>(
+            this, CPLGetBasenameSafe(osFilename.c_str()).c_str(),
+            std::move(arrow_reader), papszOpenOptionsIn);
+    }
+    catch (const std::exception &e)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Parquet exception: %s",
+                 e.what());
+        return nullptr;
+    }
 }
 
 /***********************************************************************/
@@ -246,11 +391,13 @@ OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
                     }
 
                     const char *pszMinMaxFieldName =
-                        CPLSPrintf("%s_%s",
-                                   (col_func == SWQCF_MIN)   ? "MIN"
-                                   : (col_func == SWQCF_MAX) ? "MAX"
-                                                             : "COUNT",
-                                   oSelect.column_defs[i].field_name);
+                        oSelect.column_defs[i].field_alias
+                            ? oSelect.column_defs[i].field_alias
+                            : CPLSPrintf("%s_%s",
+                                         (col_func == SWQCF_MIN)   ? "MIN"
+                                         : (col_func == SWQCF_MAX) ? "MAX"
+                                                                   : "COUNT",
+                                         oSelect.column_defs[i].field_name);
                     OGRFieldDefn oFieldDefn(pszMinMaxFieldName, eType);
                     oFieldDefn.SetSubType(eSubType);
                     poMemLayer->CreateField(&oFieldDefn);
@@ -290,7 +437,7 @@ void OGRParquetDataset::ReleaseResultSet(OGRLayer *poResultsSet)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRParquetDataset::TestCapability(const char *pszCap)
+int OGRParquetDataset::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, ODsCZGeometries))

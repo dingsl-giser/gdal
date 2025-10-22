@@ -6,31 +6,20 @@
  ******************************************************************************
  * Copyright (c) 2020, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_pam.h"
+#include "gdal_frmts.h"
+#include "gdal_colortable.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 
 #include <algorithm>
+#include <cassert>
 #include <vector>
-
-extern "C" void CPL_DLL GDALRegister_TGA();
 
 enum ImageType
 {
@@ -87,6 +76,8 @@ class GDALTGADataset final : public GDALPamDataset
     int m_nLastLineKnownOffset = 0;
     bool m_bFourthChannelIsAlpha = false;
 
+    CPL_DISALLOW_COPY_ASSIGN(GDALTGADataset)
+
   public:
     GDALTGADataset(const ImageHeader &sHeader, VSILFILE *fpImage);
     ~GDALTGADataset() override;
@@ -120,7 +111,7 @@ class GDALTGARasterBand final : public GDALPamRasterBand
     {
         if (m_poColorTable)
             return GCI_PaletteIndex;
-        GDALTGADataset *poGDS = reinterpret_cast<GDALTGADataset *>(poDS);
+        GDALTGADataset *poGDS = cpl::down_cast<GDALTGADataset *>(poDS);
         if (poGDS->GetRasterCount() == 1)
             return GCI_GrayIndex;
         if (nBand == 4)
@@ -174,7 +165,7 @@ int GDALTGADataset::Identify(GDALOpenInfo *poOpenInfo)
         return TRUE;
     }
 
-    if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "tga"))
+    if (!poOpenInfo->IsExtensionEqualToCI("tga"))
         return FALSE;
     return TRUE;
 }
@@ -292,7 +283,7 @@ GDALTGARasterBand::GDALTGARasterBand(GDALTGADataset *poDSIn, int nBandIn,
 CPLErr GDALTGARasterBand::IReadBlock(int /* nBlockXOff */, int nBlockYOff,
                                      void *pImage)
 {
-    GDALTGADataset *poGDS = reinterpret_cast<GDALTGADataset *>(poDS);
+    GDALTGADataset *poGDS = cpl::down_cast<GDALTGADataset *>(poDS);
 
     const int nBands = poGDS->GetRasterCount();
     const int nLine = (poGDS->m_sImageHeader.nImageDescriptor & (1 << 5))
@@ -693,8 +684,7 @@ GDALDataset *GDALTGADataset::Open(GDALOpenInfo *poOpenInfo)
         sHeader.eImageType == RLE_GRAYSCALE ||
         sHeader.eImageType == RLE_TRUE_COLOR)
     {
-        // nHeight is a GUInt16, so well bounded...
-        // coverity[tainted_data]
+        assert(nHeight <= 65535);
         poDS->m_aoScanlineState.resize(nHeight);
         poDS->m_aoScanlineState[0].nOffset = poDS->m_nImageDataOffset;
     }

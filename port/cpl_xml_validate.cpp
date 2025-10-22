@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2012-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -62,6 +46,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunknown-pragmas"
 #pragma clang diagnostic ignored "-Wdocumentation"
+#pragma clang diagnostic ignored "-Wdocumentation-unknown-command"
 #pragma clang diagnostic ignored "-Wzero-as-null-pointer-constant"
 #endif
 
@@ -96,19 +81,21 @@ static void CPLFixPath(char *pszPath)
             pszPath[i] = '/';
     }
 
+    std::string osRet(pszPath);
     while (true)
     {
-        char *pszSlashDotDot = strstr(pszPath, "/../");
-        if (pszSlashDotDot == nullptr || pszSlashDotDot == pszPath)
-            return;
-        char *pszSlashBefore = pszSlashDotDot - 1;
-        while (pszSlashBefore > pszPath && *pszSlashBefore != '/')
-            pszSlashBefore--;
-        if (pszSlashBefore == pszPath)
-            return;
-        memmove(pszSlashBefore + 1, pszSlashDotDot + 4,
-                strlen(pszSlashDotDot + 4) + 1);
+        size_t nSlashDotDot = osRet.find("/../");
+        if (nSlashDotDot == std::string::npos || nSlashDotDot == 0)
+            break;
+        size_t nPos = nSlashDotDot - 1;
+        while (nPos > 0 && osRet[nPos] != '/')
+            --nPos;
+        if (nPos == 0)
+            break;
+        osRet = osRet.substr(0, nPos + 1) +
+                osRet.substr(nSlashDotDot + strlen("/../"));
     }
+    memcpy(pszPath, osRet.data(), osRet.size() + 1);
 }
 
 #ifdef HAS_VALIDATION_BUG
@@ -439,8 +426,10 @@ static CPLXMLNode *CPLLoadSchemaStrInternal(CPLHashSet *hSetSchemas,
             strcmp(psIter->psChild->pszValue, "schemaLocation") == 0)
         {
             const char *pszIncludeSchema = psIter->psChild->psChild->pszValue;
-            char *pszFullFilename = CPLStrdup(CPLFormFilename(
-                CPLGetPath(pszFile), pszIncludeSchema, nullptr));
+            char *pszFullFilename =
+                CPLStrdup(CPLFormFilenameSafe(CPLGetPathSafe(pszFile).c_str(),
+                                              pszIncludeSchema, nullptr)
+                              .c_str());
 
             CPLFixPath(pszFullFilename);
 
@@ -517,8 +506,9 @@ static CPLXMLNode *CPLLoadSchemaStrInternal(CPLHashSet *hSetSchemas,
                     strstr(pszFile, "/vsimem/CPLValidateXML_") == nullptr)
                 {
                     char *pszFullFilename = CPLStrdup(
-                        CPLFormFilename(CPLGetPath(pszFile),
-                                        psIter2->psChild->pszValue, nullptr));
+                        CPLFormFilenameSafe(CPLGetPathSafe(pszFile).c_str(),
+                                            psIter2->psChild->pszValue, nullptr)
+                            .c_str());
                     CPLFixPath(pszFullFilename);
                     CPLFree(psIter2->psChild->pszValue);
                     psIter2->psChild->pszValue = pszFullFilename;
@@ -614,15 +604,6 @@ static char *CPLLoadSchemaStr(const char *pszXSDFilename)
     }
     CPLHashSetDestroy(hSetSchemas);
     return pszStr;
-}
-
-/************************************************************************/
-/*                     CPLLibXMLInputStreamCPLFree()                    */
-/************************************************************************/
-
-static void CPLLibXMLInputStreamCPLFree(xmlChar *pszBuffer)
-{
-    CPLFree(pszBuffer);
 }
 
 /************************************************************************/
@@ -889,16 +870,15 @@ static xmlParserInputPtr CPLExternalEntityLoader(const char *URL,
         osModURL = URL;
     }
 
-    xmlChar *pszBuffer =
-        reinterpret_cast<xmlChar *>(CPLLoadSchemaStr(osModURL));
-    if (pszBuffer == nullptr)
+    char *pszSchema = CPLLoadSchemaStr(osModURL);
+    if (!pszSchema)
         return nullptr;
 
-    xmlParserInputPtr poInputStream =
-        xmlNewStringInputStream(context, pszBuffer);
-    if (poInputStream != nullptr)
-        poInputStream->free = CPLLibXMLInputStreamCPLFree;
-    return poInputStream;
+    xmlParserInputPtr parser = xmlNewStringInputStream(
+        context, reinterpret_cast<const xmlChar *>(pszSchema));
+    CPLFree(pszSchema);
+
+    return parser;
 }
 
 /************************************************************************/
@@ -995,7 +975,6 @@ typedef void *CPLXMLSchemaPtr;
  * @param pszXSDFilename XSD schema to load.
  * @return a handle to the parsed XML schema, or NULL in case of failure.
  *
- * @since GDAL 1.10.0
  */
 
 static CPLXMLSchemaPtr CPLLoadXMLSchema(const char *pszXSDFilename)
@@ -1034,7 +1013,6 @@ static CPLXMLSchemaPtr CPLLoadXMLSchema(const char *pszXSDFilename)
  *
  * @param pSchema a handle to the parsed XML schema.
  *
- * @since GDAL 1.10.0
  */
 
 static void CPLFreeXMLSchema(CPLXMLSchemaPtr pSchema)
@@ -1055,7 +1033,6 @@ static void CPLFreeXMLSchema(CPLXMLSchemaPtr pSchema)
  * @param papszOptions unused for now. Set to NULL.
  * @return TRUE if the XML file validates against the XML schema.
  *
- * @since GDAL 1.10.0
  */
 
 int CPLValidateXML(const char *pszXMLFilename, const char *pszXSDFilename,

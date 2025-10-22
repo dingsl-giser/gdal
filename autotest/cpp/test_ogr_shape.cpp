@@ -8,23 +8,7 @@
 // Copyright (c) 2006, Mateusz Loskot <mateusz@loskot.net>
 // Copyright (c) 2010, Even Rouault <even dot rouault at spatialys.com>
 /*
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_unit_test.h"
@@ -63,6 +47,8 @@ struct test_ogr_shape : public ::testing::Test
 
     void TearDown() override
     {
+        if (!drv_)
+            return;
         OGRDataSourceH ds =
             OGR_Dr_CreateDataSource(drv_, data_tmp_.c_str(), nullptr);
         if (ds == nullptr)
@@ -89,86 +75,89 @@ struct test_ogr_shape : public ::testing::Test
         if (drv_ == nullptr)
         {
             GTEST_SKIP() << "ESRI Shapefile driver missing";
-            return;
         }
-
-        test_name_ =
-            ::testing::UnitTest::GetInstance()->current_test_info()->name();
-
-        OGRErr err = OGRERR_NONE;
-
-        OGRDataSourceH ds = nullptr;
-        ds = OGR_Dr_CreateDataSource(drv_, data_tmp_.c_str(), nullptr);
-        ASSERT_TRUE(nullptr != ds);
-
-        // Create memory Layer
-        OGRLayerH lyr = nullptr;
-        lyr = OGR_DS_CreateLayer(ds, test_name_, nullptr, wkbPolygon, nullptr);
-        EXPECT_TRUE(nullptr != lyr);
-        if (lyr == nullptr)
+        else
         {
-            OGR_DS_Destroy(ds);
-            return;
-        }
+            test_name_ =
+                ::testing::UnitTest::GetInstance()->current_test_info()->name();
 
-        // Create schema
-        OGRFieldDefnH fld = nullptr;
+            OGRErr err = OGRERR_NONE;
 
-        fld = OGR_Fld_Create("AREA", OFTReal);
-        err = OGR_L_CreateField(lyr, fld, true);
-        OGR_Fld_Destroy(fld);
-        EXPECT_EQ(OGRERR_NONE, err);
+            OGRDataSourceH ds = nullptr;
+            ds = OGR_Dr_CreateDataSource(drv_, data_tmp_.c_str(), nullptr);
+            ASSERT_TRUE(nullptr != ds);
 
-        fld = OGR_Fld_Create("EAS_ID", OFTInteger);
-        err = OGR_L_CreateField(lyr, fld, true);
-        OGR_Fld_Destroy(fld);
-        EXPECT_EQ(OGRERR_NONE, err);
-
-        fld = OGR_Fld_Create("PRFEDEA", OFTString);
-        err = OGR_L_CreateField(lyr, fld, true);
-        OGR_Fld_Destroy(fld);
-        EXPECT_EQ(OGRERR_NONE, err);
-
-        // Check schema
-        OGRFeatureDefnH featDefn = OGR_L_GetLayerDefn(lyr);
-        ASSERT_TRUE(nullptr != featDefn);
-        EXPECT_EQ(3, OGR_FD_GetFieldCount(featDefn));
-
-        // Copy ogr/poly.shp to temporary layer
-        OGRFeatureH featDst = OGR_F_Create(featDefn);
-        EXPECT_TRUE(nullptr != featDst);
-        if (featDst)
-        {
-            std::string source(data_);
-            source += SEP;
-            source += "poly.shp";
-            OGRDataSourceH dsSrc = OGR_Dr_Open(drv_, source.c_str(), false);
-            EXPECT_TRUE(nullptr != dsSrc);
-            if (dsSrc)
+            // Create memory Layer
+            OGRLayerH lyr = nullptr;
+            lyr = OGR_DS_CreateLayer(ds, test_name_, nullptr, wkbPolygon,
+                                     nullptr);
+            EXPECT_TRUE(nullptr != lyr);
+            if (lyr == nullptr)
             {
-                OGRLayerH lyrSrc = OGR_DS_GetLayer(dsSrc, 0);
-                EXPECT_TRUE(nullptr != lyrSrc);
-                if (lyrSrc)
-                {
-                    OGRFeatureH featSrc = nullptr;
-                    while (nullptr != (featSrc = OGR_L_GetNextFeature(lyrSrc)))
-                    {
-                        err = OGR_F_SetFrom(featDst, featSrc, true);
-                        EXPECT_EQ(OGRERR_NONE, err);
-
-                        err = OGR_L_CreateFeature(lyr, featDst);
-                        EXPECT_EQ(OGRERR_NONE, err);
-
-                        OGR_F_Destroy(featSrc);
-                    }
-                }
-                // Release and close resources
-
-                OGR_DS_Destroy(dsSrc);
+                OGR_DS_Destroy(ds);
+                return;
             }
-            OGR_F_Destroy(featDst);
+
+            // Create schema
+            OGRFieldDefnH fld = nullptr;
+
+            fld = OGR_Fld_Create("AREA", OFTReal);
+            err = OGR_L_CreateField(lyr, fld, true);
+            OGR_Fld_Destroy(fld);
+            EXPECT_EQ(OGRERR_NONE, err);
+
+            fld = OGR_Fld_Create("EAS_ID", OFTInteger);
+            err = OGR_L_CreateField(lyr, fld, true);
+            OGR_Fld_Destroy(fld);
+            EXPECT_EQ(OGRERR_NONE, err);
+
+            fld = OGR_Fld_Create("PRFEDEA", OFTString);
+            err = OGR_L_CreateField(lyr, fld, true);
+            OGR_Fld_Destroy(fld);
+            EXPECT_EQ(OGRERR_NONE, err);
+
+            // Check schema
+            OGRFeatureDefnH featDefn = OGR_L_GetLayerDefn(lyr);
+            ASSERT_TRUE(nullptr != featDefn);
+            EXPECT_EQ(3, OGR_FD_GetFieldCount(featDefn));
+
+            // Copy ogr/poly.shp to temporary layer
+            OGRFeatureH featDst = OGR_F_Create(featDefn);
+            EXPECT_TRUE(nullptr != featDst);
+            if (featDst)
+            {
+                std::string source(data_);
+                source += SEP;
+                source += "poly.shp";
+                OGRDataSourceH dsSrc = OGR_Dr_Open(drv_, source.c_str(), false);
+                EXPECT_TRUE(nullptr != dsSrc);
+                if (dsSrc)
+                {
+                    OGRLayerH lyrSrc = OGR_DS_GetLayer(dsSrc, 0);
+                    EXPECT_TRUE(nullptr != lyrSrc);
+                    if (lyrSrc)
+                    {
+                        OGRFeatureH featSrc = nullptr;
+                        while (nullptr !=
+                               (featSrc = OGR_L_GetNextFeature(lyrSrc)))
+                        {
+                            err = OGR_F_SetFrom(featDst, featSrc, true);
+                            EXPECT_EQ(OGRERR_NONE, err);
+
+                            err = OGR_L_CreateFeature(lyr, featDst);
+                            EXPECT_EQ(OGRERR_NONE, err);
+
+                            OGR_F_Destroy(featSrc);
+                        }
+                    }
+                    // Release and close resources
+
+                    OGR_DS_Destroy(dsSrc);
+                }
+                OGR_F_Destroy(featDst);
+            }
+            OGR_DS_Destroy(ds);
         }
-        OGR_DS_Destroy(ds);
     }
 };
 
@@ -545,7 +534,7 @@ TEST_F(test_ogr_shape, spatial_filtering)
     OGR_DS_Destroy(ds);
 }
 
-TEST(test_ogr_shape_gdal, create)
+TEST_F(test_ogr_shape, create_gdal)
 {
     GDALDriver *shpDriver =
         GetGDALDriverManager()->GetDriverByName("ESRI Shapefile");

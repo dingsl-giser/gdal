@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test Misc. OGRGeometry operations.
@@ -240,7 +239,7 @@ def test_ogr_geom_polyhedral_surface():
     #        print(wkt_geom)
     #        return 'fail'
 
-    if ogrtest.have_geos() or ogrtest.have_sfcgal():
+    if ogrtest.have_geos():
         geom = ogr.CreateGeometryFromWkb(wkb_string)
         assert ps.Contains(geom), "Failure in Contains() of PolyhedralSurface"
 
@@ -350,7 +349,7 @@ def test_ogr_geom_tin():
         tin.GetGeometryCount() == geom_count
     ), "Added wrong geometry in TIN, error has code " + str(x)
 
-    if ogrtest.have_geos() or ogrtest.have_sfcgal():
+    if ogrtest.have_geos():
         point = tin.PointOnSurface()
         point_wkt = point.ExportToWkt()
         point_correct_wkt = "POINT EMPTY"
@@ -745,6 +744,49 @@ def test_ogr_geom_transform_geogcrs_to_wgs84():
 
 
 ###############################################################################
+# Test Transform() from a polar projected CRS to geographic
+
+
+@pytest.mark.require_geos
+@pytest.mark.parametrize(
+    "input_wkt,output_wkt",
+    [
+        (
+            "POLYGON((0 100000,100000 0,0 -100000,-100000 0,0 100000),(0 50000,50000 0,0 -50000,-50000 0,0 50000))",
+            "POLYGON ((90.0 89.089200825091,0.0 89.089200825091,-90 89.089200825091,-180 89.0892008251069,-180 89.5445935108883,-90 89.5445935108803,0.0 89.5445935108803,90.0 89.5445935108803,180.0 89.5445935108883,180.0 89.0892008251069,90.0 89.089200825091))",
+        ),
+        (
+            "POLYGON((50000 -100000,100000 -100000,100000 100000,-100000 100000,-100000 50000,50000 50000,50000 -100000))",
+            "MULTIPOLYGON (((135.0 88.7119614804959,45.0 88.7119614804959,26.565051177078 88.9817007095479,135.0 89.3559612202261,180.0 89.5445935108803,180.0 89.089200825091,135.0 88.7119614804959)),((-116.565051177078 88.9817007095479,-135 88.7119614804959,-180 89.089200825091,-180 89.5445935108803,-116.565051177078 88.9817007095479)))",
+        ),
+    ],
+)
+def test_ogr_geom_transform_polar_projected_to_geographic(input_wkt, output_wkt):
+
+    srs_3996 = osr.SpatialReference()
+    srs_3996.ImportFromEPSG(3996)
+    srs_3996.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    srs_4326 = osr.SpatialReference()
+    srs_4326.ImportFromEPSG(4326)
+    srs_4326.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    ct = osr.CoordinateTransformation(srs_3996, srs_4326)
+    tr = ogr.GeomTransformer(ct)
+
+    g = ogr.CreateGeometryFromWkt(input_wkt)
+    g = tr.Transform(g)
+    # print(g.ExportToWkt())
+    ogrtest.check_feature_geometry(g, output_wkt)
+
+    tr = ogr.GeomTransformer(ct, ["WRAPDATELINE=YES"])
+    g = ogr.CreateGeometryFromWkt(input_wkt)
+    g = tr.Transform(g)
+    # print(g.ExportToWkt())
+    ogrtest.check_feature_geometry(g, output_wkt)
+
+
+###############################################################################
 # Test ogr.GeomTransformer()
 
 
@@ -931,21 +973,21 @@ def test_ogr_geom_segmentize_issue_1341():
 
     geom = ogr.CreateGeometryFromWkt("LINESTRING(0 0,10 0)")
     geom.Segmentize(0.399999999999)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
     geom.Segmentize(0.399999999999)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
 
     geom = ogr.CreateGeometryFromWkt("LINESTRING(0 0,10 0)")
     geom.Segmentize(0.4)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
     geom.Segmentize(0.4)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
 
     geom = ogr.CreateGeometryFromWkt("LINESTRING(0 0,10 0)")
     geom.Segmentize(0.400000000001)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
     geom.Segmentize(0.400000000001)
-    assert geom.ExportToWkt() == expected_geom
+    ogrtest.check_feature_geometry(geom, expected_geom)
 
 
 ###############################################################################
@@ -1175,6 +1217,28 @@ def test_ogr_geom_getpoints():
     assert points == [(0.0, 1.0)], "did not get expected points (8)"
 
 
+@pytest.mark.parametrize(
+    "wkt",
+    [
+        pytest.param(
+            "COMPOUNDCURVE(CIRCULARSTRING (0 0, 1 1, 2 0))", id="2d CompoundCurve"
+        ),
+        pytest.param(
+            "COMPOUNDCURVE(CIRCULARSTRINGZ (0 0 0, 1 1 0, 2 0 0))",
+            id="3d CompoundCurve",
+        ),
+    ],
+)
+def test_ogr_geom_getpoints_failure(wkt):
+
+    geom = ogr.CreateGeometryFromWkt(wkt)
+
+    with gdaltest.error_raised(gdal.CE_Failure, "Incompatible geometry"):
+        points = geom.GetPoints()
+
+        assert points is None
+
+
 ###############################################################################
 # Test OGRGeometry::empty()
 
@@ -1353,7 +1417,7 @@ def test_ogr_geom_getlineargeometry():
 
 
 def test_ogr_geom_getdimension():
-    for (geom, dim) in [
+    for geom, dim in [
         ("POINT EMPTY", 0),
         ("LINESTRING EMPTY", 1),
         ("POLYGON EMPTY", 2),
@@ -2912,7 +2976,7 @@ def test_ogr_geom_getcurvegeometry():
     assert g3.Equals(g1)
 
     # Test various configurations
-    for (wkt, eps) in [
+    for wkt, eps in [
         ("CIRCULARSTRING (0 0,0.5 0.5,0 1,-0.5 0.5,0 0)", 0),
         ("CIRCULARSTRING (0 0,-0.5 0.5,0 1,0.5 0.5,0 0)", 0),
         ("CIRCULARSTRING (0 0,0.5 -0.5,0 -1,-0.5 -0.5,0 0)", 0),
@@ -3058,13 +3122,11 @@ def test_ogr_geom_getcurvegeometry_issue9382():
 
 
 ###############################################################################
-# Test OGR_GT_ functions
 
 
-def test_ogr_geom_gt_functions():
-
-    # GT_HasZ
-    tuples = [
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, 0),
         (ogr.wkbPoint25D, 1),
         (ogr.wkbPointM, 0),
@@ -3073,12 +3135,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCircularStringZ, 1),
         (ogr.wkbCircularStringM, 0),
         (ogr.wkbCircularStringZM, 1),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_HasZ(gt) == res
+    ],
+)
+def test_ogr_geom_GT_HasZ(gt, res):
+    assert ogr.GT_HasZ(gt) == res
 
-    # GT_SetZ
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, ogr.wkbPoint25D),
         (ogr.wkbPoint25D, ogr.wkbPoint25D),
         (ogr.wkbPointM, ogr.wkbPointZM),
@@ -3087,12 +3155,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCircularStringZ, ogr.wkbCircularStringZ),
         (ogr.wkbCircularStringM, ogr.wkbCircularStringZM),
         (ogr.wkbCircularStringZM, ogr.wkbCircularStringZM),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_SetZ(gt) == res
+    ],
+)
+def test_ogr_geom_GT_SetZ(gt, res):
+    assert ogr.GT_SetZ(gt) == res
 
-    # GT_HasM
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, 0),
         (ogr.wkbPoint25D, 0),
         (ogr.wkbPointM, 1),
@@ -3101,12 +3175,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCircularStringZ, 0),
         (ogr.wkbCircularStringM, 1),
         (ogr.wkbCircularStringZM, 1),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_HasM(gt) == res
+    ],
+)
+def test_ogr_geom_GT_HasM(gt, res):
+    assert ogr.GT_HasM(gt) == res
 
-    # GT_SetM
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, ogr.wkbPointM),
         (ogr.wkbPoint25D, ogr.wkbPointZM),
         (ogr.wkbPointM, ogr.wkbPointM),
@@ -3115,12 +3195,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCircularStringZ, ogr.wkbCircularStringZM),
         (ogr.wkbCircularStringM, ogr.wkbCircularStringM),
         (ogr.wkbCircularStringZM, ogr.wkbCircularStringZM),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_SetM(gt) == res
+    ],
+)
+def test_ogr_geom_GT_SetM(gt, res):
+    assert ogr.GT_SetM(gt) == res
 
-    # OGR_GT_SetModifier
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,modZ,modM,res",
+    [
         (ogr.wkbPoint, 0, 0, ogr.wkbPoint),
         (ogr.wkbPoint, 1, 0, ogr.wkbPoint25D),
         (ogr.wkbPoint, 0, 1, ogr.wkbPointM),
@@ -3139,12 +3225,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbPoint25D, 0, 0, ogr.wkbPoint),
         (ogr.wkbCircularString, 0, 0, ogr.wkbCircularString),
         (ogr.wkbCircularStringZ, 0, 0, ogr.wkbCircularString),
-    ]
-    for (gt, modZ, modM, res) in tuples:
-        assert ogr.GT_SetModifier(gt, modZ, modM) == res
+    ],
+)
+def test_ogr_geom_GT_SetModifier(gt, modZ, modM, res):
+    assert ogr.GT_SetModifier(gt, modZ, modM) == res
 
-    # GT_Flatten
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, ogr.wkbPoint),
         (ogr.wkbPoint25D, ogr.wkbPoint),
         (ogr.wkbPointM, ogr.wkbPoint),
@@ -3154,12 +3246,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCircularStringZ, ogr.wkbCircularString),
         (ogr.wkbCircularStringM, ogr.wkbCircularString),
         (ogr.wkbCircularStringZM, ogr.wkbCircularString),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_Flatten(gt) == res
+    ],
+)
+def test_ogr_geom_GT_Flatten(gt, res):
+    assert ogr.GT_Flatten(gt) == res
 
-    # GT_IsSubClassOf
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,gt2,res",
+    [
         (ogr.wkbPoint, ogr.wkbPoint, 1),
         (ogr.wkbPoint25D, ogr.wkbPoint, 1),
         (ogr.wkbPoint, ogr.wkbUnknown, 1),
@@ -3174,12 +3272,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbUnknown, ogr.wkbPoint, 0),
         (ogr.wkbTIN, ogr.wkbPolyhedralSurface, 1),
         (ogr.wkbPolyhedralSurface, ogr.wkbTIN, 0),
-    ]
-    for (gt, gt2, res) in tuples:
-        assert ogr.GT_IsSubClassOf(gt, gt2) == res
+    ],
+)
+def test_ogr_geom_GT_IsSubClassOf(gt, gt2, res):
+    assert ogr.GT_IsSubClassOf(gt, gt2) == res
 
-    # GT_IsCurve
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, 0),
         (ogr.wkbPoint25D, 0),
         (ogr.wkbPointM, 0),
@@ -3195,12 +3299,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbTriangle, 0),
         (ogr.wkbPolyhedralSurface, 0),
         (ogr.wkbTIN, 0),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_IsCurve(gt) == res
+    ],
+)
+def test_ogr_geom_GT_IsCurve(gt, res):
+    assert ogr.GT_IsCurve(gt) == res
 
-    # GT_IsSurface
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, 0),
         (ogr.wkbPoint25D, 0),
         (ogr.wkbPointM, 0),
@@ -3214,12 +3324,19 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbTriangle, 1),
         (ogr.wkbPolyhedralSurface, 1),
         (ogr.wkbTIN, 1),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_IsSurface(gt) == res
+    ],
+)
+def test_ogr_geom_GT_IsSurface(gt, res):
+    assert ogr.GT_IsSurface(gt) == res
 
-    # GT_GetCollection
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
+        (ogr.wkbNone, ogr.wkbNone),
         (ogr.wkbPoint, ogr.wkbMultiPoint),
         (ogr.wkbPoint25D, ogr.wkbMultiPoint25D),
         (ogr.wkbPointM, ogr.wkbMultiPointM),
@@ -3229,12 +3346,42 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbCurvePolygon, ogr.wkbMultiSurface),
         (ogr.wkbLineString, ogr.wkbMultiLineString),
         (ogr.wkbPolygon, ogr.wkbMultiPolygon),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_GetCollection(gt) == res
+    ],
+)
+def test_ogr_geom_GT_GetCollection(gt, res):
+    assert ogr.GT_GetCollection(gt) == res
 
-    # GT_IsNonLinear
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
+        (ogr.wkbNone, ogr.wkbNone),
+        (ogr.wkbMultiPoint, ogr.wkbPoint),
+        (ogr.wkbMultiPoint25D, ogr.wkbPoint25D),
+        (ogr.wkbMultiPointM, ogr.wkbPointM),
+        (ogr.wkbMultiPointZM, ogr.wkbPointZM),
+        (ogr.wkbMultiLineString, ogr.wkbLineString),
+        (ogr.wkbMultiPolygon, ogr.wkbPolygon),
+        (ogr.wkbMultiCurve, ogr.wkbCompoundCurve),
+        (ogr.wkbMultiSurface, ogr.wkbCurvePolygon),
+        (ogr.wkbPoint, ogr.wkbPoint),
+        (ogr.wkbGeometryCollection, ogr.wkbUnknown),
+        (ogr.wkbUnknown, ogr.wkbUnknown),
+    ],
+)
+def test_ogr_geom_GT_GetSingle(gt, res):
+    assert ogr.GT_GetSingle(gt) == res
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, 0),
         (ogr.wkbPoint25D, 0),
         (ogr.wkbPointM, 0),
@@ -3250,12 +3397,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbLineString, 0),
         (ogr.wkbPolygon, 0),
         (ogr.wkbTriangle, 0),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_IsNonLinear(gt) == res
+    ],
+)
+def test_ogr_geom_GT_IsNonLinear(gt, res):
+    assert ogr.GT_IsNonLinear(gt) == res
 
-    # GT_GetCurve
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, ogr.wkbPoint),
         (ogr.wkbPoint25D, ogr.wkbPoint25D),
         (ogr.wkbPointM, ogr.wkbPointM),
@@ -3272,12 +3425,18 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbMultiPolygon, ogr.wkbMultiSurface),
         (ogr.wkbMultiCurve, ogr.wkbMultiCurve),
         (ogr.wkbMultiSurface, ogr.wkbMultiSurface),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_GetCurve(gt) == res
+    ],
+)
+def test_ogr_geom_GT_GetCurve(gt, res):
+    assert ogr.GT_GetCurve(gt) == res
 
-    # GT_GetLinear
-    tuples = [
+
+###############################################################################
+
+
+@pytest.mark.parametrize(
+    "gt,res",
+    [
         (ogr.wkbPoint, ogr.wkbPoint),
         (ogr.wkbPoint25D, ogr.wkbPoint25D),
         (ogr.wkbPointM, ogr.wkbPointM),
@@ -3294,9 +3453,10 @@ def test_ogr_geom_gt_functions():
         (ogr.wkbMultiPolygon, ogr.wkbMultiPolygon),
         (ogr.wkbMultiCurve, ogr.wkbMultiLineString),
         (ogr.wkbMultiSurface, ogr.wkbMultiPolygon),
-    ]
-    for (gt, res) in tuples:
-        assert ogr.GT_GetLinear(gt) == res
+    ],
+)
+def test_ogr_geom_GT_GetLinear(gt, res):
+    assert ogr.GT_GetLinear(gt) == res
 
 
 ###############################################################################
@@ -3491,7 +3651,7 @@ def test_ogr_geom_measured_geometries_to_2D_or_3D():
             "TIN Z (((0 0 3,0 1 3,1 1 3,0 0 3)))",
         ],
     ]
-    for (before, after_2D, after_3D) in list_wkt:
+    for before, after_2D, after_3D in list_wkt:
 
         geom = ogr.CreateGeometryFromWkt(before)
         wkb = geom.ExportToIsoWkb()
@@ -3544,7 +3704,7 @@ def test_ogr_geom_postgis_ewkt_xym():
             "GEOMETRYCOLLECTION M (POINT M (1 2 3))",
         ],
     ]
-    for (before, after) in list_wkt:
+    for before, after in list_wkt:
         geom = ogr.CreateGeometryFromWkt(before)
         assert geom.ExportToIsoWkt() == after, before
 
@@ -3566,7 +3726,7 @@ def test_ogr_geom_curve_surface():
         [ogr.wkbSurfaceZM, "3D Measured Surface"],
     ]
 
-    for (wkb_type, name) in tests:
+    for wkb_type, name in tests:
         assert ogr.GeometryTypeToName(wkb_type) == name
 
 
@@ -3904,6 +4064,38 @@ def test_ogr_geom_sfcgal():
     g1.Distance(g2)
 
 
+def test_ogr_geom_sfcgal_distance3D():
+
+    if not ogrtest.have_sfcgal():
+        pytest.skip("SFCGAL is not available")
+
+    point1 = ogr.CreateGeometryFromWkt("POINT (1.0 1.0 1.0)")
+    point2 = ogr.CreateGeometryFromWkt("POINT (4.0 1.0 5.0)")
+
+    assert point1.Distance3D(point2) == 5.0
+
+
+def test_ogr_geom_sfcgal_intersection3D():
+
+    if not ogrtest.have_sfcgal():
+        pytest.skip("SFCGAL is not available")
+
+    phsurface = ogr.CreateGeometryFromWkt(
+        "POLYHEDRALSURFACE Z (((0 0 0,0 0 2,0 2 2,0 2 0,0 0 0)),\
+((0 0 0,0 2 0,2 2 0,2 0 0,0 0 0)),\
+((0 0 0,2 0 0,2 0 2,0 0 2,0 0 0)),\
+((2 2 0,2 2 2,2 0 2,2 0 0,2 2 0)),\
+((0 2 0,0 2 2,2 2 2,2 2 0,0 2 0)),\
+((0 0 2,2 0 2,2 2 2,0 2 2,0 0 2)))"
+    )
+
+    line = ogr.CreateGeometryFromWkt("LINESTRING Z (-1 1 1, 3 1 1)")
+
+    result = phsurface.Intersection(line)
+
+    assert result.ExportToWkt() == "MULTIPOINT (0 1 1,2 1 1)"
+
+
 ###############################################################################
 
 
@@ -3986,21 +4178,57 @@ def test_ogr_geom_makevalid():
             g, "MULTIPOLYGON (((0 0,5 5,10 0,0 0)),((5 5,0 10,10 10,5 5)))"
         )
 
-    if (
-        ogr.GetGEOSVersionMajor() * 10000
-        + ogr.GetGEOSVersionMinor() * 100
-        + ogr.GetGEOSVersionMicro()
-        >= 31000
-    ):
-        g = ogr.CreateGeometryFromWkt(
-            "POLYGON ((0 0,0 10,10 10,10 0,0 0),(5 5,15 10,15 0,5 5))"
-        )
-        # Only since GEOS 3.10
-        g = g.MakeValid(["METHOD=STRUCTURE"])
-        if g is not None:
-            ogrtest.check_feature_geometry(
-                g, "POLYGON ((0 10,10 10,10.0 7.5,5 5,10.0 2.5,10 0,0 0,0 10))"
-            )
+
+###############################################################################
+
+
+@pytest.mark.require_geos(3, 10, 0)
+def test_ogr_geom_makevalid_structure():
+
+    g = ogr.CreateGeometryFromWkt(
+        "POLYGON ((0 0,0 10,10 10,10 0,0 0),(5 5,15 10,15 0,5 5))"
+    )
+    g = g.MakeValid(["METHOD=STRUCTURE"])
+    ogrtest.check_feature_geometry(
+        g, "POLYGON ((0 10,10 10,10.0 7.5,5 5,10.0 2.5,10 0,0 0,0 10))"
+    )
+
+    # Already valid multi-polygon made of a single-part
+    g = ogr.CreateGeometryFromWkt("MULTIPOLYGON (((0 0,1 0,1 1,0 1,0 0)))")
+    g = g.MakeValid(["METHOD=STRUCTURE"])
+    assert (
+        g.ExportToIsoWkt() == "MULTIPOLYGON (((0 0,1 0,1 1,0 1,0 0)))"
+        or g.ExportToIsoWkt() == "MULTIPOLYGON (((0 0,0 1,1 1,1 0,0 0)))"
+    )
+
+    # Already valid multi-polygon made of a single-part, with duplicated point
+    g = ogr.CreateGeometryFromWkt("MULTIPOLYGON (((0 0,1 0,1 0,1 1,0 1,0 0)))")
+    g = g.MakeValid(["METHOD=STRUCTURE"])
+    assert (
+        g.ExportToIsoWkt() == "MULTIPOLYGON (((0 0,1 0,1 1,0 1,0 0)))"
+        or g.ExportToIsoWkt() == "MULTIPOLYGON (((0 0,0 1,1 1,1 0,0 0)))"
+    )
+
+    # Already valid multi-polygon made of a single-part
+    g = ogr.CreateGeometryFromWkt(
+        "MULTIPOLYGON Z (((0 0 10,1 0 10,1 1 10,0 1 10,0 0 10)))"
+    )
+    g = g.MakeValid(["METHOD=STRUCTURE"])
+    assert (
+        g.ExportToIsoWkt() == "MULTIPOLYGON Z (((0 0 10,1 0 10,1 1 10,0 1 10,0 0 10)))"
+        or g.ExportToIsoWkt()
+        == "MULTIPOLYGON Z (((0 0 10,0 1 10,1 1 10,1 0 10,0 0 10)))"
+    )
+
+    # Already valid geometry collection
+    g = ogr.CreateGeometryFromWkt(
+        "GEOMETRYCOLLECTION (POLYGON ((0 0,1 0,1 1,0 1,0 0)))"
+    )
+    g = g.MakeValid(["METHOD=STRUCTURE"])
+    assert (
+        g.ExportToIsoWkt() == "GEOMETRYCOLLECTION (POLYGON ((0 0,1 0,1 1,0 1,0 0)))"
+        or g.ExportToIsoWkt() == "GEOMETRYCOLLECTION (POLYGON ((0 0,0 1,1 1,1 0,0 0)))"
+    )
 
 
 ###############################################################################
@@ -4492,12 +4720,34 @@ def test_ogr_geom_GeodesicArea():
 @gdaltest.enable_exceptions()
 def test_ogr_geom_GeodesicLength():
 
+    # Lat, lon order, not forming a polygon
+    g = ogr.CreateGeometryFromWkt("LINESTRING(49 2,49 3)")
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    g.AssignSpatialReference(srs)
+    l1 = g.GeodesicLength()
+    assert l1 == pytest.approx(73171.26435678436)
+
+    g = ogr.CreateGeometryFromWkt("LINESTRING(49 3,48 3)")
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    g.AssignSpatialReference(srs)
+    l2 = g.GeodesicLength()
+    assert l2 == pytest.approx(111200.0367623785)
+
+    g = ogr.CreateGeometryFromWkt("LINESTRING(48 3,49 2)")
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    g.AssignSpatialReference(srs)
+    l3 = g.GeodesicLength()
+    assert l3 == pytest.approx(133514.4852804854)
+
     # Lat, lon order
     g = ogr.CreateGeometryFromWkt("LINESTRING(49 2,49 3,48 3,49 2)")
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
     g.AssignSpatialReference(srs)
-    assert g.GeodesicLength() == pytest.approx(317885.78639964823)
+    assert g.GeodesicLength() == pytest.approx(l1 + l2 + l3)
 
     # Lat, lon order
     g = ogr.CreateGeometryFromWkt("POLYGON((49 2,49 3,48 3,49 2))")
@@ -4720,3 +4970,16 @@ def test_ogr_subgeom_use_after_parent_free():
     del g
 
     assert exterior_ring.GetPointCount() > 0  # does not crash
+
+
+def test_ogr_geom_create_from_envelope():
+
+    srs = osr.SpatialReference(epsg=32145)
+    g = ogr.CreateGeometryFromEnvelope(424788, 25211, 581555, 279799, srs)
+
+    assert g.GetSpatialReference().IsSame(srs)
+
+    assert (
+        g.ExportToWkt()
+        == "POLYGON ((424788 25211,424788 279799,581555 279799,581555 25211,424788 25211))"
+    )

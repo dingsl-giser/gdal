@@ -10,23 +10,7 @@
  * Copyright (c) 2017, Ari Jolma
  * Copyright (c) 2017, Finnish Environment Institute
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef WCSDATASET_H_INCLUDED
@@ -66,7 +50,7 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
     bool native_crs;       // the CRS is the native CRS of the server
     bool axis_order_swap;  // the CRS requires x and y coordinates to be swapped
                            // for requests
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     bool SetCRS(const std::string &crs, bool native);
     void SetGeometry(const std::vector<int> &size,
                      const std::vector<double> &origin,
@@ -83,15 +67,15 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
                           GSpacing nLineSpace, GSpacing nBandSpace,
                           GDALRasterIOExtraArg *psExtraArg);
 
-    virtual CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
-                             GDALDataType, int, BANDMAP_TYPE,
-                             GSpacing nPixelSpace, GSpacing nLineSpace,
-                             GSpacing nBandSpace,
-                             GDALRasterIOExtraArg *psExtraArg) override;
+    CPLErr IRasterIO(GDALRWFlag, int, int, int, int, void *, int, int,
+                     GDALDataType, int, BANDMAP_TYPE, GSpacing nPixelSpace,
+                     GSpacing nLineSpace, GSpacing nBandSpace,
+                     GDALRasterIOExtraArg *psExtraArg) override;
 
-    virtual std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize,
-                                          int nYSize, int nBufXSize,
-                                          int nBufYSize) = 0;
+    virtual std::vector<double> GetNativeExtent(int nXOff, int nYOff,
+                                                int nXSize, int nYSize,
+                                                int nBufXSize,
+                                                int nBufYSize) = 0;
 
     virtual std::string GetCoverageRequest(bool scaled, int nBufXSize,
                                            int nBufYSize,
@@ -135,7 +119,7 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
 
   public:
     WCSDataset(int version, const char *cache_dir);
-    virtual ~WCSDataset();
+    ~WCSDataset() override;
 
     static WCSDataset *CreateFromMetadata(const std::string &,
                                           const std::string &);
@@ -146,18 +130,19 @@ class WCSDataset CPL_NON_FINAL : public GDALPamDataset
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    virtual CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
-    virtual char **GetFileList(void) override;
+    char **GetFileList(void) override;
 
-    virtual char **GetMetadataDomainList() override;
-    virtual char **GetMetadata(const char *pszDomain) override;
+    char **GetMetadataDomainList() override;
+    char **GetMetadata(const char *pszDomain) override;
 };
 
 class WCSDataset100 final : public WCSDataset
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
     std::string GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
                                    const std::vector<double> &extent,
                                    const std::string &osBandList) override;
@@ -176,8 +161,9 @@ class WCSDataset100 final : public WCSDataset
 
 class WCSDataset110 CPL_NON_FINAL : public WCSDataset
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
     std::string GetCoverageRequest(bool scaled, int nBufXSize, int nBufYSize,
                                    const std::vector<double> &extent,
                                    const std::string &) override;
@@ -197,8 +183,9 @@ class WCSDataset110 CPL_NON_FINAL : public WCSDataset
 
 class WCSDataset201 final : public WCSDataset110
 {
-    std::vector<double> GetExtent(int nXOff, int nYOff, int nXSize, int nYSize,
-                                  int nBufXSize, int nBufYSize) override;
+    std::vector<double> GetNativeExtent(int nXOff, int nYOff, int nXSize,
+                                        int nYSize, int nBufXSize,
+                                        int nBufYSize) override;
     std::string GetSubdataset(const std::string &coverage);
     bool SetFormat(CPLXMLNode *coverage);
     static bool ParseGridFunction(CPLXMLNode *coverage,

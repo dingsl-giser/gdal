@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -37,35 +21,14 @@
 #include "ogr_p.h"
 
 /************************************************************************/
-/*                            OGRMultiCurve()                           */
-/************************************************************************/
-
-/**
- * \brief Create an empty multi curve collection.
- */
-
-OGRMultiCurve::OGRMultiCurve() = default;
-
-/************************************************************************/
 /*                OGRMultiCurve( const OGRMultiCurve& )                 */
 /************************************************************************/
 
 /**
  * \brief Copy constructor.
- *
- * Note: before GDAL 2.1, only the default implementation of the constructor
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRMultiCurve::OGRMultiCurve(const OGRMultiCurve &) = default;
-
-/************************************************************************/
-/*                           ~OGRMultiCurve()                           */
-/************************************************************************/
-
-OGRMultiCurve::~OGRMultiCurve() = default;
 
 /************************************************************************/
 /*                  operator=( const OGRMultiCurve&)                    */
@@ -73,11 +36,6 @@ OGRMultiCurve::~OGRMultiCurve() = default;
 
 /**
  * \brief Assignment operator.
- *
- * Note: before GDAL 2.1, only the default implementation of the operator
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRMultiCurve &OGRMultiCurve::operator=(const OGRMultiCurve &other)
@@ -96,7 +54,16 @@ OGRMultiCurve &OGRMultiCurve::operator=(const OGRMultiCurve &other)
 OGRMultiCurve *OGRMultiCurve::clone() const
 
 {
-    return new (std::nothrow) OGRMultiCurve(*this);
+    auto ret = new (std::nothrow) OGRMultiCurve(*this);
+    if (ret)
+    {
+        if (ret->WkbSize() != WkbSize())
+        {
+            delete ret;
+            ret = nullptr;
+        }
+    }
+    return ret;
 }
 
 /************************************************************************/

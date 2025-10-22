@@ -7,28 +7,16 @@
  ******************************************************************************
  * Copyright (c) 2000, Frank Warmerdam (warmerdam@pobox.com)
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "ogr_dgn.h"
 #include "cpl_conv.h"
 #include "cpl_string.h"
+
+#ifdef EMBED_RESOURCE_FILES
+#include "embedded_resources.h"
+#endif
 
 /************************************************************************/
 /*                         OGRDGNDataSource()                           */
@@ -47,7 +35,6 @@ OGRDGNDataSource::~OGRDGNDataSource()
         delete papoLayers[i];
 
     CPLFree(papoLayers);
-    CPLFree(pszName);
     CSLDestroy(papszOptions);
 
     if (hDGN != nullptr)
@@ -83,7 +70,6 @@ bool OGRDGNDataSource::Open(GDALOpenInfo *poOpenInfo)
     /*      Create the layer object.                                        */
     /* -------------------------------------------------------------------- */
     OGRDGNLayer *poLayer = new OGRDGNLayer(this, "elements", hDGN, bUpdate);
-    pszName = CPLStrdup(poOpenInfo->pszFilename);
 
     /* -------------------------------------------------------------------- */
     /*      Add layer to data source layer list.                            */
@@ -99,7 +85,7 @@ bool OGRDGNDataSource::Open(GDALOpenInfo *poOpenInfo)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRDGNDataSource::TestCapability(const char *pszCap)
+int OGRDGNDataSource::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, ODsCCreateLayer))
@@ -114,7 +100,7 @@ int OGRDGNDataSource::TestCapability(const char *pszCap)
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRDGNDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRDGNDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || iLayer >= nLayers)
@@ -128,17 +114,15 @@ OGRLayer *OGRDGNDataSource::GetLayer(int iLayer)
 /*                                                                      */
 /*      Called by OGRDGNDriver::Create() method to setup a stub         */
 /*      OGRDataSource object without the associated file created        */
-/*      yet.  It will be created by theICreateLayer() call.             */
+/*      yet.  It will be created by the ICreateLayer() call.            */
 /************************************************************************/
 
-bool OGRDGNDataSource::PreCreate(const char *pszFilename, char **papszOptionsIn)
+void OGRDGNDataSource::PreCreate(CSLConstList papszOptionsIn)
 
 {
     papszOptions = CSLDuplicate(papszOptionsIn);
-    pszName = CPLStrdup(pszFilename);
 
     m_osEncoding = CSLFetchNameValueDef(papszOptionsIn, "ENCODING", "");
-    return true;
 }
 
 /************************************************************************/
@@ -200,19 +184,58 @@ OGRDGNDataSource::ICreateLayer(const char *pszLayerName,
     const bool b3DRequested =
         CPLFetchBool(papszOptions, "3D", wkbHasZ(eGeomType));
 
-    const char *pszSeed = CSLFetchNameValue(papszOptions, "SEED");
+    const char *pszRequestSeed = CSLFetchNameValue(papszOptions, "SEED");
+    const char *pszSeed = pszRequestSeed;
     int nCreationFlags = 0;
+#ifdef EMBED_RESOURCE_FILES
+    std::string osTmpSeedFilename;
+#endif
     if (pszSeed)
         nCreationFlags |= DGNCF_USE_SEED_ORIGIN | DGNCF_USE_SEED_UNITS;
-    else if (b3DRequested)
-        pszSeed = CPLFindFile("gdal", "seed_3d.dgn");
     else
-        pszSeed = CPLFindFile("gdal", "seed_2d.dgn");
+    {
+        pszRequestSeed = b3DRequested ? "seed_3d.dgn" : "seed_2d.dgn";
+#ifdef EMBED_RESOURCE_FILES
+        CPLErrorStateBackuper oErrorStateBackuper(CPLQuietErrorHandler);
+#endif
+        pszSeed = CPLFindFile("gdal", pszRequestSeed);
+#ifdef EMBED_RESOURCE_FILES
+        if (!pszSeed)
+        {
+            if (b3DRequested)
+            {
+                static const bool bOnce [[maybe_unused]] = []()
+                {
+                    CPLDebug("DGN", "Using embedded seed_3d");
+                    return true;
+                }();
+            }
+            else
+            {
+                static const bool bOnce [[maybe_unused]] = []()
+                {
+                    CPLDebug("DGN", "Using embedded seed_2d");
+                    return true;
+                }();
+            }
+            unsigned nSize = 0;
+            const unsigned char *pabyData =
+                b3DRequested ? DGNGetSeed3D(&nSize) : DGNGetSeed2D(&nSize);
+            osTmpSeedFilename = VSIMemGenerateHiddenFilename(pszRequestSeed);
+            pszSeed = osTmpSeedFilename.c_str();
+            VSIFCloseL(VSIFileFromMemBuffer(osTmpSeedFilename.c_str(),
+                                            const_cast<GByte *>(pabyData),
+                                            static_cast<int>(nSize),
+                                            /* bTakeOwnership = */ false));
+        }
+#endif
+    }
 
     if (pszSeed == nullptr)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "No seed file provided, and unable to find seed_2d.dgn.");
+                 "No seed file provided, and unable to find %s.",
+                 pszRequestSeed);
         return nullptr;
     }
 
@@ -274,6 +297,10 @@ OGRDGNDataSource::ICreateLayer(const char *pszLayerName,
             CPLError(CE_Failure, CPLE_AppDefined,
                      "ORIGIN is not a valid 2d or 3d tuple.\n"
                      "Separate tuple values with comma.");
+#ifdef EMBED_RESOURCE_FILES
+            if (!osTmpSeedFilename.empty())
+                VSIUnlink(osTmpSeedFilename.c_str());
+#endif
             return nullptr;
         }
         CSLDestroy(papszTuple);
@@ -282,8 +309,14 @@ OGRDGNDataSource::ICreateLayer(const char *pszLayerName,
     /* -------------------------------------------------------------------- */
     /*      Try creating the base file.                                     */
     /* -------------------------------------------------------------------- */
-    hDGN = DGNCreate(pszName, pszSeed, nCreationFlags, dfOriginX, dfOriginY,
-                     dfOriginZ, nSUPerMU, nUORPerSU, pszMasterUnit, pszSubUnit);
+    hDGN = DGNCreate(GetDescription(), pszSeed, nCreationFlags, dfOriginX,
+                     dfOriginY, dfOriginZ, nSUPerMU, nUORPerSU, pszMasterUnit,
+                     pszSubUnit);
+#ifdef EMBED_RESOURCE_FILES
+    if (!osTmpSeedFilename.empty())
+        VSIUnlink(osTmpSeedFilename.c_str());
+#endif
+
     if (hDGN == nullptr)
         return nullptr;
 

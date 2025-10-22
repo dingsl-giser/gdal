@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Thomas Bonfort <thomas.bonfort@airbus.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -133,7 +117,7 @@ VSIPluginFilesystemHandler::~VSIPluginFilesystemHandler()
     delete m_cb;
 }
 
-VSIVirtualHandle *
+VSIVirtualHandleUniquePtr
 VSIPluginFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
                                  bool bSetError,
                                  CSLConstList /* papszOptions */)
@@ -150,16 +134,17 @@ VSIPluginFilesystemHandler::Open(const char *pszFilename, const char *pszAccess,
         }
         return nullptr;
     }
+    auto poPluginHandle = std::make_unique<VSIPluginHandle>(this, cbData);
     if (m_cb->nBufferSize == 0)
     {
-        return new VSIPluginHandle(this, cbData);
+        return VSIVirtualHandleUniquePtr(poPluginHandle.release());
     }
     else
     {
-        return VSICreateCachedFile(
-            new VSIPluginHandle(this, cbData), m_cb->nBufferSize,
+        return VSIVirtualHandleUniquePtr(VSICreateCachedFile(
+            poPluginHandle.release(), m_cb->nBufferSize,
             (m_cb->nCacheSize < m_cb->nBufferSize) ? m_cb->nBufferSize
-                                                   : m_cb->nCacheSize);
+                                                   : m_cb->nCacheSize));
     }
 }
 
@@ -468,7 +453,8 @@ int VSIPluginFilesystemHandler::Unlink(const char *pszFilename)
     return unlink(GetCallbackFilename(pszFilename));
 }
 
-int VSIPluginFilesystemHandler::Rename(const char *oldpath, const char *newpath)
+int VSIPluginFilesystemHandler::Rename(const char *oldpath, const char *newpath,
+                                       GDALProgressFunc, void *)
 {
     if (m_cb->rename == nullptr || !IsValidFilename(oldpath) ||
         !IsValidFilename(newpath))

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Interlis 1 Reader
  * Purpose:  Private Declarations for Reader code.
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2004, Pirmin Kalberer, Sourcepole AG
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef CPL_ILI1READERP_H_INCLUDED
@@ -40,7 +23,7 @@ class OGRILI1Layer;
 /*                              ILI1Reader                              */
 /************************************************************************/
 
-class ILI1Reader : public IILI1Reader
+class ILI1Reader final : public IILI1Reader
 {
   private:
     VSILFILE *fpItf;
@@ -51,9 +34,14 @@ class ILI1Reader : public IILI1Reader
     char codeUndefined;
     char codeContinue;
 
+    ILI1Reader(ILI1Reader &) = delete;
+    ILI1Reader &operator=(const ILI1Reader &) = delete;
+    ILI1Reader(ILI1Reader &&) = delete;
+    ILI1Reader &operator=(ILI1Reader &&) = delete;
+
   public:
     ILI1Reader();
-    ~ILI1Reader();
+    ~ILI1Reader() override;
 
     int OpenFile(const char *pszFilename) override;
     int ReadModel(ImdReader *poImdReader, const char *pszModelFilename,
@@ -65,9 +53,9 @@ class ILI1Reader : public IILI1Reader
     char **ReadParseLine();
 
     void AddLayer(OGRILI1Layer *poNewLayer);
-    OGRILI1Layer *GetLayer(int) override;
+    OGRILI1Layer *GetLayer(int) const override;
     OGRILI1Layer *GetLayerByName(const char *) override;
-    int GetLayerCount() override;
+    int GetLayerCount() const override;
 
     static const char *GetLayerNameString(const char *topicname,
                                           const char *tablename);

@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     osr_java.i
  * Project:  GDAL SWIG Interface
@@ -146,7 +145,6 @@ import org.gdal.gdal.gdalJNI;
     return TransformPoint(x, y, 0);
   }
 
-  /* New in GDAL 1.10 */
   public static CoordinateTransformation CreateCoordinateTransformation(SpatialReference src, SpatialReference dst)
   {
       CoordinateTransformation ct = osr.CreateCoordinateTransformation(src, dst);

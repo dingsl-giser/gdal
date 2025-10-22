@@ -8,23 +8,7 @@
  **********************************************************************
  * Copyright (c) 2017, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 //! @cond Doxygen_Suppress
@@ -72,7 +56,7 @@ static std::string GetSignature(const std::string &osStringToSign,
 static struct curl_slist *
 CPLGetOSSHeaders(const std::string &osSecretAccessKey,
                  const std::string &osAccessKeyId, const std::string &osVerb,
-                 const struct curl_slist *psExistingHeaders,
+                 struct curl_slist *psHeaders,
                  const std::string &osCanonicalizedResource)
 {
     std::string osDate = CPLGetConfigOption("CPL_OSS_TIMESTAMP", "");
@@ -83,15 +67,13 @@ CPLGetOSSHeaders(const std::string &osSecretAccessKey,
 
     std::map<std::string, std::string> oSortedMapHeaders;
     std::string osCanonicalizedHeaders(
-        IVSIS3LikeHandleHelper::BuildCanonicalizedHeaders(
-            oSortedMapHeaders, psExistingHeaders, "x-oss-"));
+        IVSIS3LikeHandleHelper::BuildCanonicalizedHeaders(oSortedMapHeaders,
+                                                          psHeaders, "x-oss-"));
 
     std::string osStringToSign;
     osStringToSign += osVerb + "\n";
-    osStringToSign +=
-        CPLAWSGetHeaderVal(psExistingHeaders, "Content-MD5") + "\n";
-    osStringToSign +=
-        CPLAWSGetHeaderVal(psExistingHeaders, "Content-Type") + "\n";
+    osStringToSign += CPLAWSGetHeaderVal(psHeaders, "Content-MD5") + "\n";
+    osStringToSign += CPLAWSGetHeaderVal(psHeaders, "Content-Type") + "\n";
     osStringToSign += osDate + "\n";
     osStringToSign += osCanonicalizedHeaders;
     osStringToSign += osCanonicalizedResource;
@@ -112,12 +94,11 @@ CPLGetOSSHeaders(const std::string &osSecretAccessKey,
     CPLDebug("OSS", "osAuthorization='%s'", osAuthorization.c_str());
 #endif
 
-    struct curl_slist *headers = nullptr;
-    headers =
-        curl_slist_append(headers, CPLSPrintf("Date: %s", osDate.c_str()));
-    headers = curl_slist_append(
-        headers, CPLSPrintf("Authorization: %s", osAuthorization.c_str()));
-    return headers;
+    psHeaders =
+        curl_slist_append(psHeaders, CPLSPrintf("Date: %s", osDate.c_str()));
+    psHeaders = curl_slist_append(
+        psHeaders, CPLSPrintf("Authorization: %s", osAuthorization.c_str()));
+    return psHeaders;
 }
 
 /************************************************************************/
@@ -207,7 +188,7 @@ bool VSIOSSHandleHelper::GetConfiguration(const std::string &osPathForOption,
                                      "OSS_ACCESS_KEY_ID", ""));
         if (osAccessKeyId.empty())
         {
-            VSIError(VSIE_AWSInvalidCredentials,
+            VSIError(VSIE_InvalidCredentials,
                      "OSS_ACCESS_KEY_ID configuration option not defined");
             return false;
         }
@@ -215,7 +196,7 @@ bool VSIOSSHandleHelper::GetConfiguration(const std::string &osPathForOption,
         return true;
     }
 
-    VSIError(VSIE_AWSInvalidCredentials,
+    VSIError(VSIE_InvalidCredentials,
              "OSS_SECRET_ACCESS_KEY configuration option not defined");
     return false;
 }
@@ -270,7 +251,7 @@ VSIOSSHandleHelper *VSIOSSHandleHelper::BuildFromURI(const char *pszURI,
 /************************************************************************/
 
 struct curl_slist *VSIOSSHandleHelper::GetCurlHeaders(
-    const std::string &osVerb, const struct curl_slist *psExistingHeaders,
+    const std::string &osVerb, struct curl_slist *psHeaders,
     const void * /*pabyDataContent*/, size_t /*nBytesContent*/) const
 {
     std::string osCanonicalQueryString;
@@ -285,7 +266,7 @@ struct curl_slist *VSIOSSHandleHelper::GetCurlHeaders(
     osCanonicalizedResource += osCanonicalQueryString;
 
     return CPLGetOSSHeaders(m_osSecretAccessKey, m_osAccessKeyId, osVerb,
-                            psExistingHeaders, osCanonicalizedResource);
+                            psHeaders, osCanonicalizedResource);
 }
 
 /************************************************************************/
@@ -303,7 +284,8 @@ bool VSIOSSHandleHelper::CanRestartOnError(const char *pszErrorMsg,
     {
         if (bSetError)
         {
-            VSIError(VSIE_AWSError, "Invalid AWS response: %s", pszErrorMsg);
+            VSIError(VSIE_ObjectStorageGenericError, "Invalid OSS response: %s",
+                     pszErrorMsg);
         }
         return false;
     }
@@ -313,8 +295,8 @@ bool VSIOSSHandleHelper::CanRestartOnError(const char *pszErrorMsg,
     {
         if (bSetError)
         {
-            VSIError(VSIE_AWSError, "Malformed AWS XML response: %s",
-                     pszErrorMsg);
+            VSIError(VSIE_ObjectStorageGenericError,
+                     "Malformed OSS XML response: %s", pszErrorMsg);
         }
         return false;
     }
@@ -325,8 +307,8 @@ bool VSIOSSHandleHelper::CanRestartOnError(const char *pszErrorMsg,
         CPLDestroyXMLNode(psTree);
         if (bSetError)
         {
-            VSIError(VSIE_AWSError, "Malformed AWS XML response: %s",
-                     pszErrorMsg);
+            VSIError(VSIE_ObjectStorageGenericError,
+                     "Malformed OSS XML response: %s", pszErrorMsg);
         }
         return false;
     }
@@ -355,27 +337,27 @@ bool VSIOSSHandleHelper::CanRestartOnError(const char *pszErrorMsg,
 
         if (pszMessage == nullptr)
         {
-            VSIError(VSIE_AWSError, "%s", pszErrorMsg);
+            VSIError(VSIE_ObjectStorageGenericError, "%s", pszErrorMsg);
         }
         else if (EQUAL(pszCode, "AccessDenied"))
         {
-            VSIError(VSIE_AWSAccessDenied, "%s", pszMessage);
+            VSIError(VSIE_AccessDenied, "%s", pszMessage);
         }
         else if (EQUAL(pszCode, "NoSuchBucket"))
         {
-            VSIError(VSIE_AWSBucketNotFound, "%s", pszMessage);
+            VSIError(VSIE_BucketNotFound, "%s", pszMessage);
         }
         else if (EQUAL(pszCode, "NoSuchKey"))
         {
-            VSIError(VSIE_AWSObjectNotFound, "%s", pszMessage);
+            VSIError(VSIE_ObjectNotFound, "%s", pszMessage);
         }
         else if (EQUAL(pszCode, "SignatureDoesNotMatch"))
         {
-            VSIError(VSIE_AWSSignatureDoesNotMatch, "%s", pszMessage);
+            VSIError(VSIE_SignatureDoesNotMatch, "%s", pszMessage);
         }
         else
         {
-            VSIError(VSIE_AWSError, "%s", pszMessage);
+            VSIError(VSIE_ObjectStorageGenericError, "%s", pszMessage);
         }
     }
 

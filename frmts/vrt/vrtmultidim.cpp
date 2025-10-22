@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     vrtmultidim.cpp
  * Purpose:  Implementation of VRTDriver
@@ -8,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2019, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 /*! @cond Doxygen_Suppress */
@@ -38,7 +21,10 @@
 #include "cpl_mem_cache.h"
 #include "cpl_minixml.h"
 #include "cpl_multiproc.h"
+#include "gdal_priv.h"
 #include "vrtdataset.h"
+
+VRTMDArraySource::~VRTMDArraySource() = default;
 
 static std::shared_ptr<GDALMDArray> ParseArray(const CPLXMLNode *psTree,
                                                const char *pszVRTPath,
@@ -158,11 +144,11 @@ VRTGroup *VRTGroup::GetRootGroup() const
 /*                       GetRootGroupSharedPtr()                        */
 /************************************************************************/
 
-std::shared_ptr<GDALGroup> VRTGroup::GetRootGroupSharedPtr() const
+std::shared_ptr<VRTGroup> VRTGroup::GetRootGroupSharedPtr() const
 {
     auto group = GetRootGroup();
     if (group)
-        return group->m_pSelf.lock();
+        return std::dynamic_pointer_cast<VRTGroup>(group->m_pSelf.lock());
     return nullptr;
 }
 
@@ -235,6 +221,7 @@ bool VRTGroup::XMLInit(const std::shared_ptr<VRTGroup> &poRoot,
                 m_bDirty = false;
                 return false;
             }
+            m_aosMDArrayNames.push_back(poArray->GetName());
             m_oMapMDArrays[poArray->GetName()] = poArray;
         }
     }
@@ -315,13 +302,17 @@ void VRTGroup::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
     {
         iter.second->Serialize(psGroup);
     }
-    for (const auto &iter : m_oMapMDArrays)
+    for (const auto &name : m_aosMDArrayNames)
     {
-        iter.second->Serialize(psGroup, pszVRTPath);
+        auto iter = m_oMapMDArrays.find(name);
+        CPLAssert(iter != m_oMapMDArrays.end());
+        iter->second->Serialize(psGroup, pszVRTPath);
     }
-    for (const auto &iter : m_oMapGroups)
+    for (const auto &name : m_aosGroupNames)
     {
-        iter.second->Serialize(psGroup, pszVRTPath);
+        auto iter = m_oMapGroups.find(name);
+        CPLAssert(iter != m_oMapGroups.end());
+        iter->second->Serialize(psGroup, pszVRTPath);
     }
 }
 
@@ -331,10 +322,7 @@ void VRTGroup::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
 
 std::vector<std::string> VRTGroup::GetGroupNames(CSLConstList) const
 {
-    std::vector<std::string> names;
-    for (const auto &iter : m_oMapGroups)
-        names.push_back(iter.first);
-    return names;
+    return m_aosGroupNames;
 }
 
 /************************************************************************/
@@ -442,10 +430,7 @@ VRTGroup::GetAttributes(CSLConstList) const
 
 std::vector<std::string> VRTGroup::GetMDArrayNames(CSLConstList) const
 {
-    std::vector<std::string> names;
-    for (const auto &iter : m_oMapMDArrays)
-        names.push_back(iter.first);
-    return names;
+    return m_aosMDArrayNames;
 }
 
 /************************************************************************/
@@ -473,11 +458,12 @@ void VRTGroup::SetDirty()
 }
 
 /************************************************************************/
-/*                             CreateGroup()                            */
+/*                            CreateVRTGroup()                          */
 /************************************************************************/
 
-std::shared_ptr<GDALGroup> VRTGroup::CreateGroup(const std::string &osName,
-                                                 CSLConstList /*papszOptions*/)
+std::shared_ptr<VRTGroup>
+VRTGroup::CreateVRTGroup(const std::string &osName,
+                         CSLConstList /*papszOptions*/)
 {
     if (osName.empty())
     {
@@ -494,8 +480,19 @@ std::shared_ptr<GDALGroup> VRTGroup::CreateGroup(const std::string &osName,
     SetDirty();
     auto newGroup(VRTGroup::Create(GetFullName(), osName.c_str()));
     newGroup->SetRootGroupRef(GetRootGroupRef());
+    m_aosGroupNames.push_back(osName);
     m_oMapGroups[osName] = newGroup;
     return newGroup;
+}
+
+/************************************************************************/
+/*                             CreateGroup()                            */
+/************************************************************************/
+
+std::shared_ptr<GDALGroup> VRTGroup::CreateGroup(const std::string &osName,
+                                                 CSLConstList papszOptions)
+{
+    return CreateVRTGroup(osName, papszOptions);
 }
 
 /************************************************************************/
@@ -551,13 +548,13 @@ VRTGroup::CreateAttribute(const std::string &osName,
 }
 
 /************************************************************************/
-/*                            CreateMDArray()                           */
+/*                           CreateVRTMDArray()                         */
 /************************************************************************/
 
-std::shared_ptr<GDALMDArray> VRTGroup::CreateMDArray(
+std::shared_ptr<VRTMDArray> VRTGroup::CreateVRTMDArray(
     const std::string &osName,
     const std::vector<std::shared_ptr<GDALDimension>> &aoDimensions,
-    const GDALExtendedDataType &oType, CSLConstList)
+    const GDALExtendedDataType &oType, CSLConstList papszOptions)
 {
     if (osName.empty())
     {
@@ -585,11 +582,43 @@ std::shared_ptr<GDALMDArray> VRTGroup::CreateMDArray(
             return nullptr;
         }
     }
-    auto newArray(std::make_shared<VRTMDArray>(GetRef(), GetFullName(), osName,
-                                               aoDimensions, oType));
+
+    std::vector<GUInt64> anBlockSize(aoDimensions.size(), 0);
+    const char *pszBlockSize = CSLFetchNameValue(papszOptions, "BLOCKSIZE");
+    if (pszBlockSize)
+    {
+        const auto aszTokens(
+            CPLStringList(CSLTokenizeString2(pszBlockSize, ",", 0)));
+        if (static_cast<size_t>(aszTokens.size()) != aoDimensions.size())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid number of values in BLOCKSIZE");
+            return nullptr;
+        }
+        for (size_t i = 0; i < anBlockSize.size(); ++i)
+        {
+            anBlockSize[i] = std::strtoull(aszTokens[i], nullptr, 10);
+        }
+    }
+
+    auto newArray(std::make_shared<VRTMDArray>(
+        GetRef(), GetFullName(), osName, aoDimensions, oType, anBlockSize));
     newArray->SetSelf(newArray);
+    m_aosMDArrayNames.push_back(osName);
     m_oMapMDArrays[osName] = newArray;
     return newArray;
+}
+
+/************************************************************************/
+/*                            CreateMDArray()                           */
+/************************************************************************/
+
+std::shared_ptr<GDALMDArray> VRTGroup::CreateMDArray(
+    const std::string &osName,
+    const std::vector<std::shared_ptr<GDALDimension>> &aoDimensions,
+    const GDALExtendedDataType &oType, CSLConstList papszOptions)
+{
+    return CreateVRTMDArray(osName, aoDimensions, oType, papszOptions);
 }
 
 /************************************************************************/
@@ -986,6 +1015,7 @@ VRTMDArray::Create(const std::shared_ptr<VRTGroup> &poThisGroup,
     }
     std::vector<std::shared_ptr<GDALDimension>> dims;
     std::map<std::string, std::shared_ptr<VRTAttribute>> oMapAttributes;
+    std::string osBlockSize;
     for (const auto *psIter = psNode->psChild; psIter; psIter = psIter->psNext)
     {
         if (psIter->eType == CXT_Element &&
@@ -1021,11 +1051,34 @@ VRTMDArray::Create(const std::shared_ptr<VRTGroup> &poThisGroup,
                 return nullptr;
             oMapAttributes[poAttr->GetName()] = poAttr;
         }
+        else if (psIter->eType == CXT_Element &&
+                 strcmp(psIter->pszValue, "BlockSize") == 0 &&
+                 psIter->psChild && psIter->psChild->eType == CXT_Text)
+        {
+            osBlockSize = psIter->psChild->pszValue;
+        }
     }
 
-    auto array(std::make_shared<VRTMDArray>(poThisGroup->GetRef(), osParentName,
-                                            pszName, dt, std::move(dims),
-                                            std::move(oMapAttributes)));
+    std::vector<GUInt64> anBlockSize(dims.size(), 0);
+    if (!osBlockSize.empty())
+    {
+        const auto aszTokens(
+            CPLStringList(CSLTokenizeString2(osBlockSize.c_str(), ",", 0)));
+        if (static_cast<size_t>(aszTokens.size()) != dims.size())
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Invalid number of values in BLOCKSIZE");
+            return nullptr;
+        }
+        for (size_t i = 0; i < anBlockSize.size(); ++i)
+        {
+            anBlockSize[i] = std::strtoull(aszTokens[i], nullptr, 10);
+        }
+    }
+
+    auto array(std::make_shared<VRTMDArray>(
+        poThisGroup->GetRef(), osParentName, pszName, dt, std::move(dims),
+        std::move(oMapAttributes), std::move(anBlockSize)));
     array->SetSelf(array);
     array->SetSpatialRef(poSRS.get());
 
@@ -1290,7 +1343,8 @@ VRTMDArraySourceInlinedValues::Create(const VRTMDArray *array,
     }
 
     const size_t nExpectedVals = nArrayByteSize / nDTSize;
-    CPLStringList aosValues;
+    CPLStringList aosValues;  // keep in this scope
+    std::vector<const char *> apszValues;
 
     if (strcmp(psNode->pszValue, "InlineValuesWithValueElement") == 0)
     {
@@ -1299,7 +1353,12 @@ VRTMDArraySourceInlinedValues::Create(const VRTMDArray *array,
             if (psIter->eType == CXT_Element &&
                 strcmp(psIter->pszValue, "Value") == 0)
             {
-                aosValues.AddString(CPLGetXMLValue(psIter, nullptr, ""));
+                apszValues.push_back(CPLGetXMLValue(psIter, nullptr, ""));
+            }
+            else if (psIter->eType == CXT_Element &&
+                     strcmp(psIter->pszValue, "NullValue") == 0)
+            {
+                apszValues.push_back(nullptr);
             }
         }
     }
@@ -1313,13 +1372,15 @@ VRTMDArraySourceInlinedValues::Create(const VRTMDArray *array,
             return nullptr;
         }
         aosValues.Assign(CSLTokenizeString2(pszValue, ", \r\n", 0), true);
+        for (const char *pszVal : aosValues)
+            apszValues.push_back(pszVal);
     }
 
-    if (static_cast<size_t>(aosValues.size()) != nExpectedVals)
+    if (apszValues.size() != nExpectedVals)
     {
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Invalid number of values. Got %u, expected %u",
-                 static_cast<unsigned>(aosValues.size()),
+                 static_cast<unsigned>(apszValues.size()),
                  static_cast<unsigned>(nExpectedVals));
         return nullptr;
     }
@@ -1336,9 +1397,9 @@ VRTMDArraySourceInlinedValues::Create(const VRTMDArray *array,
 
     const auto dtString(GDALExtendedDataType::CreateString());
     GByte *pabyPtr = &abyValues[0];
-    for (int i = 0; i < aosValues.size(); ++i)
+    for (size_t i = 0; i < apszValues.size(); ++i)
     {
-        const char *pszVal = &aosValues[i][0];
+        const char *pszVal = apszValues[i];
         GDALExtendedDataType::CopyValue(&pszVal, dtString, pabyPtr, dt);
         pabyPtr += nDTSize;
     }
@@ -1546,17 +1607,15 @@ void VRTMDArraySourceInlinedValues::Serialize(CPLXMLNode *psParent,
             char *pszStr = nullptr;
             GDALExtendedDataType::CopyValue(&m_abyValues[i * nDTSize], dt,
                                             &pszStr, dtString);
-            if (pszStr)
-            {
-                auto psNode =
-                    CPLCreateXMLElementAndValue(nullptr, "Value", pszStr);
-                if (psLast)
-                    psLast->psNext = psNode;
-                else
-                    psSource->psChild = psNode;
-                psLast = psNode;
-                CPLFree(pszStr);
-            }
+            auto psNode =
+                pszStr ? CPLCreateXMLElementAndValue(nullptr, "Value", pszStr)
+                       : CPLCreateXMLNode(nullptr, CXT_Element, "NullValue");
+            if (psLast)
+                psLast->psNext = psNode;
+            else
+                psSource->psChild = psNode;
+            psLast = psNode;
+            CPLFree(pszStr);
         }
     }
     else
@@ -1917,6 +1976,9 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
 {
     // Preliminary check without trying to open source array
     const auto nDims(m_poDstArray->GetDimensionCount());
+
+    // Check that end of request is not lower than the beginning of the dest slab
+    // and that the start of request is not greater than the end of the dest slab
     for (size_t i = 0; i < nDims; i++)
     {
         auto start_i = arrayStartIdx[i];
@@ -1924,29 +1986,14 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
         if (arrayStep[i] < 0)
         {
             // For negative step request, temporarily simulate a positive step
-            start_i = start_i - (m_anCount[i] - 1) * (-step_i);
+            start_i = start_i - (count[i] - 1) * (-step_i);
             step_i = -step_i;
         }
         if (start_i + (count[i] - 1) * step_i < m_anDstOffset[i])
         {
             return true;
         }
-    }
-
-    for (size_t i = 0; i < nDims; i++)
-    {
-        if (m_anCount[i] == 0)  // we need to open the array...
-            break;
-
-        auto start_i = arrayStartIdx[i];
-        auto step_i = arrayStep[i] == 0 ? 1 : arrayStep[i];
-        if (arrayStep[i] < 0)
-        {
-            // For negative step request, temporarily simulate a positive step
-            start_i = start_i - (m_anCount[i] - 1) * (-step_i);
-            // step_i = -step_i;
-        }
-        if (start_i >= m_anDstOffset[i] + m_anCount[i])
+        else if (m_anCount[i] > 0 && start_i >= m_anDstOffset[i] + m_anCount[i])
         {
             return true;
         }
@@ -1954,8 +2001,8 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
 
     const std::string osFilename =
         m_bRelativeToVRT
-            ? std::string(CPLProjectRelativeFilename(
-                  m_poDstArray->GetVRTPath().c_str(), m_osFilename.c_str()))
+            ? CPLProjectRelativeFilenameSafe(m_poDstArray->GetVRTPath().c_str(),
+                                             m_osFilename.c_str())
             : m_osFilename;
     const std::string key(CreateKey(osFilename));
 
@@ -1976,11 +2023,11 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
         }
         else
         {
-            poSrcDS = GDALDataset::Open(
-                osFilename.c_str(),
-                (m_osBand.empty() ? GDAL_OF_MULTIDIM_RASTER : GDAL_OF_RASTER) |
-                    GDAL_OF_INTERNAL | GDAL_OF_VERBOSE_ERROR,
-                nullptr, nullptr, nullptr);
+            poSrcDS =
+                GDALDataset::Open(osFilename.c_str(),
+                                  GDAL_OF_MULTIDIM_RASTER | GDAL_OF_RASTER |
+                                      GDAL_OF_INTERNAL | GDAL_OF_VERBOSE_ERROR,
+                                  nullptr, nullptr, nullptr);
             if (!poSrcDS)
                 return false;
             poSrcDSWrapper = std::make_shared<VRTArrayDatasetWrapper>(poSrcDS);
@@ -1991,7 +2038,7 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
     }
 
     std::shared_ptr<GDALMDArray> poArray;
-    if (m_osBand.empty())
+    if (m_osBand.empty() && poSrcDS->GetRasterCount() == 0)
     {
         auto rg(poSrcDS->GetRootGroup());
         if (rg == nullptr)
@@ -2007,6 +2054,11 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
                      m_osArray.c_str());
             return false;
         }
+    }
+    else if (m_osBand.empty())
+    {
+        poArray = poSrcDS->AsMDArray();
+        CPLAssert(poArray);
     }
     else
     {
@@ -2071,22 +2123,17 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
             CPLError(CE_Failure, CPLE_AppDefined, "Invalid SourceSlab.offset");
             return false;
         }
+        if (m_anCount[i] == 0)
+            m_anCount[i] = srcDims[i]->GetSize() - m_anSrcOffset[i];
+
         auto start_i = arrayStartIdx[i];
         auto step_i = arrayStep[i] == 0 ? 1 : arrayStep[i];
         if (arrayStep[i] < 0)
         {
-            if (m_anCount[i] == 0)
-                m_anCount[i] = (m_anSrcOffset[i] + 1) / -step_i;
             // For negative step request, temporarily simulate a positive step
             // and fix up the start at the end of the loop.
-            start_i = start_i - (m_anCount[i] - 1) * (-step_i);
+            start_i = start_i - (count[i] - 1) * (-step_i);
             step_i = -step_i;
-        }
-        else
-        {
-            if (m_anCount[i] == 0)
-                m_anCount[i] =
-                    (srcDims[i]->GetSize() - m_anSrcOffset[i]) / step_i;
         }
 
         const auto nRightDstOffsetFromConfig = m_anDstOffset[i] + m_anCount[i];
@@ -2121,9 +2168,12 @@ bool VRTMDArraySourceFromArray::Read(const GUInt64 *arrayStartIdx,
     std::vector<GInt64> anSrcArrayStep(nDims);
     for (size_t i = 0; i < nDims; i++)
     {
-        const size_t nRelStartDst =
-            static_cast<size_t>(anReqDstStart[i] - arrayStartIdx[i]);
-        nDstOffset += nRelStartDst * bufferStride[i] * nBufferDataTypeSize;
+        if (anReqDstStart[i] > arrayStartIdx[i])
+        {
+            const GPtrDiff_t nRelStartDst =
+                static_cast<size_t>(anReqDstStart[i] - arrayStartIdx[i]);
+            nDstOffset += nRelStartDst * bufferStride[i] * nBufferDataTypeSize;
+        }
         anSrcArrayOffset[i] =
             m_anSrcOffset[i] +
             (anReqDstStart[i] - m_anDstOffset[i]) * m_anStep[i];
@@ -2239,7 +2289,15 @@ bool VRTMDArray::IRead(const GUInt64 *arrayStartIdx, const size_t *count,
         std::vector<GByte *> abyStackDstPtr;
         size_t iDim = 0;
         abyStackDstPtr.push_back(static_cast<GByte *>(pDstBuffer));
+        // GCC 15.1 on msys2-mingw64
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
         abyStackDstPtr.resize(nDims + 1);
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     lbl_next_depth:
         if (iDim == nDims)
         {
@@ -2528,6 +2586,23 @@ void VRTMDArray::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
         }
     }
 
+    std::string osBlockSize;
+    for (auto v : m_anBlockSize)
+    {
+        if (v == 0)
+        {
+            osBlockSize.clear();
+            break;
+        }
+        if (!osBlockSize.empty())
+            osBlockSize += ",";
+        osBlockSize += std::to_string(v);
+    }
+    if (!osBlockSize.empty())
+    {
+        CPLCreateXMLElementAndValue(psArray, "BlockSize", osBlockSize.c_str());
+    }
+
     if (m_poSRS && !m_poSRS->IsEmpty())
     {
         char *pszWKT = nullptr;
@@ -2590,7 +2665,7 @@ void VRTMDArray::Serialize(CPLXMLNode *psParent, const char *pszVRTPath) const
 /*                           VRTArraySource()                           */
 /************************************************************************/
 
-class VRTArraySource : public VRTSource
+class VRTArraySource final : public VRTSource
 {
     std::unique_ptr<CPLXMLNode, CPLXMLTreeCloserDeleter> m_poXMLTree{};
     std::unique_ptr<GDALDataset> m_poDS{};
@@ -2685,8 +2760,8 @@ ParseSingleSourceArray(const CPLXMLNode *psSingleSourceArray,
     }
     const std::string osSourceFilename(
         bRelativeToVRT
-            ? CPLProjectRelativeFilename(pszVRTPath, pszSourceFilename)
-            : pszSourceFilename);
+            ? CPLProjectRelativeFilenameSafe(pszVRTPath, pszSourceFilename)
+            : std::string(pszSourceFilename));
     auto poDS = std::unique_ptr<GDALDataset>(
         GDALDataset::Open(osSourceFilename.c_str(),
                           GDAL_OF_MULTIDIM_RASTER | GDAL_OF_VERBOSE_ERROR,

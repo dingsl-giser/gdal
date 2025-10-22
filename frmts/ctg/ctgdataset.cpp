@@ -7,27 +7,15 @@
  ******************************************************************************
  * Copyright (c) 2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 constexpr int HEADER_LINE_COUNT = 5;
@@ -123,7 +111,7 @@ class CTGDataset final : public GDALPamDataset
     CTGDataset();
     ~CTGDataset() override;
 
-    CPLErr GetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -188,7 +176,7 @@ CTGRasterBand::~CTGRasterBand()
 CPLErr CTGRasterBand::IReadBlock(int /* nBlockXOff */, int /* nBlockYOff */,
                                  void *pImage)
 {
-    CTGDataset *poGDS = (CTGDataset *)poDS;
+    CTGDataset *poGDS = cpl::down_cast<CTGDataset *>(poDS);
 
     poGDS->ReadImagery();
     memcpy(pImage,
@@ -331,9 +319,9 @@ int CTGDataset::ReadImagery()
             int nVal = atoi(ExtractField(szField, szLine, 20 + 10 * i, 10));
             if (nVal >= 2000000000)
                 nVal = 0;
-            ((int *)
-                 pabyImage)[i * nCells +
-                            static_cast<int>(nCellY) * nRasterXSize + nCellX] =
+            reinterpret_cast<int *>(
+                pabyImage)[i * nCells +
+                           static_cast<int>(nCellY) * nRasterXSize + nCellX] =
                 nVal;
         }
 
@@ -431,9 +419,7 @@ GDALDataset *CTGDataset::Open(GDALOpenInfo *poOpenInfo)
 
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The CTG driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("CTG");
         return nullptr;
     }
 
@@ -539,15 +525,15 @@ GDALDataset *CTGDataset::Open(GDALOpenInfo *poOpenInfo)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr CTGDataset::GetGeoTransform(double *padfTransform)
+CPLErr CTGDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    padfTransform[0] = static_cast<double>(nNWEasting) - nCellSize / 2;
-    padfTransform[1] = nCellSize;
-    padfTransform[2] = 0;
-    padfTransform[3] = static_cast<double>(nNWNorthing) + nCellSize / 2;
-    padfTransform[4] = 0.;
-    padfTransform[5] = -nCellSize;
+    gt[0] = static_cast<double>(nNWEasting) - nCellSize / 2;
+    gt[1] = nCellSize;
+    gt[2] = 0;
+    gt[3] = static_cast<double>(nNWNorthing) + nCellSize / 2;
+    gt[4] = 0.;
+    gt[5] = -nCellSize;
 
     return CE_None;
 }

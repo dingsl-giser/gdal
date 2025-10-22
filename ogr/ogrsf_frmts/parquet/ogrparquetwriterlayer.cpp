@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifdef STANDALONE
@@ -39,6 +23,7 @@
 
 #include "ogr_wkb.h"
 
+#include <cassert>
 #include <utility>
 
 /************************************************************************/
@@ -224,7 +209,7 @@ bool OGRParquetWriterLayer::CopyTmpGpkgLayerToFinalFile()
 
             // nCellCount shouldn't be over 51 normally, but even 65535
             // would be fine...
-            // coverity[tainted_data]
+            assert(nCellCount <= 65535);
             for (int i = 0; i < nCellCount; ++i)
             {
                 int64_t nFID;
@@ -277,7 +262,7 @@ bool OGRParquetWriterLayer::CopyTmpGpkgLayerToFinalFile()
 
             // nCellCount shouldn't be over 51 normally, but even 65535
             // would be fine...
-            // coverity[tainted_data]
+            assert(nCellCount <= 65535);
             for (int i = 0; i < nCellCount; ++i)
             {
                 int64_t nNode;
@@ -326,13 +311,16 @@ bool OGRParquetWriterLayer::IsSupportedGeometryType(
 /*                           SetOptions()                               */
 /************************************************************************/
 
-bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
-                                       const OGRSpatialReference *poSpatialRef,
-                                       OGRwkbGeometryType eGType)
+bool OGRParquetWriterLayer::SetOptions(
+    const OGRGeomFieldDefn *poSrcGeomFieldDefn, CSLConstList papszOptions)
 {
-    m_bWriteBBoxStruct = CPLTestBool(CSLFetchNameValueDef(
+    m_aosCreationOptions = papszOptions;
+
+    const char *pszWriteCoveringBBox = CSLFetchNameValueDef(
         papszOptions, "WRITE_COVERING_BBOX",
-        CPLGetConfigOption("OGR_PARQUET_WRITE_COVERING_BBOX", "YES")));
+        CPLGetConfigOption("OGR_PARQUET_WRITE_COVERING_BBOX", nullptr));
+    m_bWriteBBoxStruct =
+        pszWriteCoveringBBox == nullptr || CPLTestBool(pszWriteCoveringBBox);
 
     if (CPLTestBool(CSLFetchNameValueDef(papszOptions, "SORT_BY_BBOX", "NO")))
     {
@@ -355,9 +343,9 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
         if (!m_poTmpGPKGLayer)
             return false;
         // Serialized feature
-        m_poTmpGPKGLayer->CreateField(
+        CPL_IGNORE_RET_VAL(m_poTmpGPKGLayer->CreateField(
             std::make_unique<OGRFieldDefn>("serialized_feature", OFTBinary)
-                .get());
+                .get()));
         CPL_IGNORE_RET_VAL(m_poTmpGPKGLayer->StartTransaction());
     }
 
@@ -372,17 +360,12 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
             m_eGeomEncoding = OGRArrowGeomEncoding::WKT;
         else if (EQUAL(pszGeomEncoding, "GEOARROW_INTERLEAVED"))
         {
-            static bool bHasWarned = false;
-            if (!bHasWarned)
-            {
-                bHasWarned = true;
-                CPLError(
-                    CE_Warning, CPLE_AppDefined,
-                    "Use of GEOMETRY_ENCODING=GEOARROW_INTERLEAVED is not "
-                    "recommended. "
-                    "GeoParquet 1.1 uses GEOMETRY_ENCODING=GEOARROW (struct) "
-                    "instead.");
-            }
+            CPLErrorOnce(
+                CE_Warning, CPLE_AppDefined,
+                "Use of GEOMETRY_ENCODING=GEOARROW_INTERLEAVED is not "
+                "recommended. "
+                "GeoParquet 1.1 uses GEOMETRY_ENCODING=GEOARROW (struct) "
+                "instead.");
             m_eGeomEncoding = OGRArrowGeomEncoding::GEOARROW_FSL_GENERIC;
         }
         else if (EQUAL(pszGeomEncoding, "GEOARROW") ||
@@ -406,7 +389,9 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
                                    "COUNTERCLOCKWISE"),
               "COUNTERCLOCKWISE");
 
-    if (eGType != wkbNone)
+    const auto eGType =
+        poSrcGeomFieldDefn ? poSrcGeomFieldDefn->GetType() : wkbNone;
+    if (poSrcGeomFieldDefn && eGType != wkbNone)
     {
         if (!IsSupportedGeometryType(eGType))
         {
@@ -424,8 +409,19 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
                 return false;
         }
         m_aeGeomEncoding.push_back(eGeomEncoding);
-        m_poFeatureDefn->GetGeomFieldDefn(0)->SetName(
-            CSLFetchNameValueDef(papszOptions, "GEOMETRY_NAME", "geometry"));
+
+        std::string osGeometryName;
+        const char *pszGeometryName =
+            CSLFetchNameValue(papszOptions, "GEOMETRY_NAME");
+        if (pszGeometryName)
+            osGeometryName = pszGeometryName;
+        else if (poSrcGeomFieldDefn->GetNameRef()[0])
+            osGeometryName = poSrcGeomFieldDefn->GetNameRef();
+        else
+            osGeometryName = "geometry";
+        m_poFeatureDefn->GetGeomFieldDefn(0)->SetName(osGeometryName.c_str());
+
+        const auto poSpatialRef = poSrcGeomFieldDefn->GetSpatialRef();
         if (poSpatialRef)
         {
             auto poSRS = poSpatialRef->Clone();
@@ -469,8 +465,20 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
                  pszCompression);
         return false;
     }
-
     m_oWriterPropertiesBuilder.compression(m_eCompression);
+
+    const char *pszCompressionLevel =
+        CSLFetchNameValue(papszOptions, "COMPRESSION_LEVEL");
+    if (pszCompressionLevel)
+    {
+        const int nCompressionLevel = atoi(pszCompressionLevel);
+        if (nCompressionLevel != DEFAULT_COMPRESSION_LEVEL)
+            m_oWriterPropertiesBuilder.compression_level(nCompressionLevel);
+    }
+    else if (EQUAL(pszCompression, "ZSTD"))
+        m_oWriterPropertiesBuilder.compression_level(
+            OGR_PARQUET_ZSTD_DEFAULT_COMPRESSION_LEVEL);
+
     const std::string osCreator =
         CSLFetchNameValueDef(papszOptions, "CREATOR", "");
     if (!osCreator.empty())
@@ -483,11 +491,38 @@ bool OGRParquetWriterLayer::SetOptions(CSLConstList papszOptions,
     if (!CPLTestBool(CSLFetchNameValueDef(papszOptions, "STATISTICS", "YES")))
         m_oWriterPropertiesBuilder.disable_statistics();
 
+#if PARQUET_VERSION_MAJOR >= 12
+    // Undocumented option. Not clear it is useful to disable it.
+    if (CPLTestBool(CSLFetchNameValueDef(papszOptions, "PAGE_INDEX", "YES")))
+        m_oWriterPropertiesBuilder.enable_write_page_index();
+#endif
+
+    const char *pszWriteGeo =
+        CPLGetConfigOption("OGR_PARQUET_WRITE_GEO", nullptr);
+    m_bWriteGeoMetadata = pszWriteGeo == nullptr || CPLTestBool(pszWriteGeo);
+
     if (m_eGeomEncoding == OGRArrowGeomEncoding::WKB && eGType != wkbNone)
     {
+#if ARROW_VERSION_MAJOR >= 21
+        const char *pszUseParquetGeoTypes =
+            CSLFetchNameValueDef(papszOptions, "USE_PARQUET_GEO_TYPES", "NO");
+        if (EQUAL(pszUseParquetGeoTypes, "ONLY"))
+        {
+            m_bUseArrowWKBExtension = true;
+            if (pszWriteGeo == nullptr)
+                m_bWriteGeoMetadata = false;
+            if (pszWriteCoveringBBox == nullptr)
+                m_bWriteBBoxStruct = false;
+        }
+        else
+        {
+            m_bUseArrowWKBExtension = CPLTestBool(pszUseParquetGeoTypes);
+        }
+#else
         m_oWriterPropertiesBuilder.disable_statistics(
             parquet::schema::ColumnPath::FromDotString(
                 m_poFeatureDefn->GetGeomFieldDefn(0)->GetNameRef()));
+#endif
     }
 
     const char *pszRowGroupSize =
@@ -527,120 +562,6 @@ bool OGRParquetWriterLayer::CloseFileWriter()
 }
 
 /************************************************************************/
-/*                            IdentifyCRS()                             */
-/************************************************************************/
-
-static OGRSpatialReference IdentifyCRS(const OGRSpatialReference *poSRS)
-{
-    OGRSpatialReference oSRSIdentified(*poSRS);
-
-    if (poSRS->GetAuthorityName(nullptr) == nullptr)
-    {
-        // Try to find a registered CRS that matches the input one
-        int nEntries = 0;
-        int *panConfidence = nullptr;
-        OGRSpatialReferenceH *pahSRS =
-            poSRS->FindMatches(nullptr, &nEntries, &panConfidence);
-
-        // If there are several matches >= 90%, take the only one
-        // that is EPSG
-        int iOtherAuthority = -1;
-        int iEPSG = -1;
-        const char *const apszOptions[] = {
-            "IGNORE_DATA_AXIS_TO_SRS_AXIS_MAPPING=YES", nullptr};
-        int iConfidenceBestMatch = -1;
-        for (int iSRS = 0; iSRS < nEntries; iSRS++)
-        {
-            auto poCandidateCRS = OGRSpatialReference::FromHandle(pahSRS[iSRS]);
-            if (panConfidence[iSRS] < iConfidenceBestMatch ||
-                panConfidence[iSRS] < 70)
-            {
-                break;
-            }
-            if (poSRS->IsSame(poCandidateCRS, apszOptions))
-            {
-                const char *pszAuthName =
-                    poCandidateCRS->GetAuthorityName(nullptr);
-                if (pszAuthName != nullptr && EQUAL(pszAuthName, "EPSG"))
-                {
-                    iOtherAuthority = -2;
-                    if (iEPSG < 0)
-                    {
-                        iConfidenceBestMatch = panConfidence[iSRS];
-                        iEPSG = iSRS;
-                    }
-                    else
-                    {
-                        iEPSG = -1;
-                        break;
-                    }
-                }
-                else if (iEPSG < 0 && pszAuthName != nullptr)
-                {
-                    if (EQUAL(pszAuthName, "OGC"))
-                    {
-                        const char *pszAuthCode =
-                            poCandidateCRS->GetAuthorityCode(nullptr);
-                        if (pszAuthCode && EQUAL(pszAuthCode, "CRS84"))
-                        {
-                            iOtherAuthority = iSRS;
-                            break;
-                        }
-                    }
-                    else if (iOtherAuthority == -1)
-                    {
-                        iConfidenceBestMatch = panConfidence[iSRS];
-                        iOtherAuthority = iSRS;
-                    }
-                    else
-                        iOtherAuthority = -2;
-                }
-            }
-        }
-        if (iEPSG >= 0)
-        {
-            oSRSIdentified = *OGRSpatialReference::FromHandle(pahSRS[iEPSG]);
-        }
-        else if (iOtherAuthority >= 0)
-        {
-            oSRSIdentified =
-                *OGRSpatialReference::FromHandle(pahSRS[iOtherAuthority]);
-        }
-        OSRFreeSRSArray(pahSRS);
-        CPLFree(panConfidence);
-    }
-
-    return oSRSIdentified;
-}
-
-/************************************************************************/
-/*                      RemoveIDFromMemberOfEnsembles()                 */
-/************************************************************************/
-
-static void RemoveIDFromMemberOfEnsembles(CPLJSONObject &obj)
-{
-    // Remove "id" from members of datum ensembles for compatibility with
-    // older PROJ versions
-    // Cf https://github.com/opengeospatial/geoparquet/discussions/110
-    // and https://github.com/OSGeo/PROJ/pull/3221
-    if (obj.GetType() == CPLJSONObject::Type::Object)
-    {
-        for (auto &subObj : obj.GetChildren())
-        {
-            RemoveIDFromMemberOfEnsembles(subObj);
-        }
-    }
-    else if (obj.GetType() == CPLJSONObject::Type::Array &&
-             obj.GetName() == "members")
-    {
-        for (auto &subObj : obj.ToArray())
-        {
-            subObj.Delete("id");
-        }
-    }
-}
-
-/************************************************************************/
 /*                            GetGeoMetadata()                          */
 /************************************************************************/
 
@@ -652,8 +573,7 @@ std::string OGRParquetWriterLayer::GetGeoMetadata() const
     if (pszGeoMetadata)
         return pszGeoMetadata;
 
-    if (m_poFeatureDefn->GetGeomFieldCount() != 0 &&
-        CPLTestBool(CPLGetConfigOption("OGR_PARQUET_WRITE_GEO", "YES")))
+    if (m_poFeatureDefn->GetGeomFieldCount() != 0 && m_bWriteGeoMetadata)
     {
         CPLJSONObject oRoot;
         oRoot.Add("version", "1.1.0");
@@ -841,7 +761,7 @@ void OGRParquetWriterLayer::PerformStepsBeforeFinalFlushGroup()
 {
     if (m_poKeyValueMetadata)
     {
-        const std::string osGeoMetadata = GetGeoMetadata();
+        std::string osGeoMetadata = GetGeoMetadata();
         auto poTmpSchema = m_poSchema;
         if (!osGeoMetadata.empty())
         {
@@ -854,7 +774,7 @@ void OGRParquetWriterLayer::PerformStepsBeforeFinalFlushGroup()
             auto kvMetadata = poTmpSchema->metadata()
                                   ? poTmpSchema->metadata()->Copy()
                                   : std::make_shared<arrow::KeyValueMetadata>();
-            kvMetadata->Append("geo", osGeoMetadata);
+            kvMetadata->Append("geo", std::move(osGeoMetadata));
             poTmpSchema = poTmpSchema->WithMetadata(kvMetadata);
         }
 
@@ -868,12 +788,12 @@ void OGRParquetWriterLayer::PerformStepsBeforeFinalFlushGroup()
                 // The serialized schema is not UTF-8, which is required for
                 // Thrift
                 const std::string schema_as_string = (*status)->ToString();
-                const std::string schema_base64 =
+                std::string schema_base64 =
                     ::arrow::util::base64_encode(schema_as_string);
                 static const std::string kArrowSchemaKey = "ARROW:schema";
                 const_cast<arrow::KeyValueMetadata *>(
                     m_poKeyValueMetadata.get())
-                    ->Append(kArrowSchemaKey, schema_base64);
+                    ->Append(kArrowSchemaKey, std::move(schema_base64));
             }
         }
 
@@ -928,6 +848,30 @@ void OGRParquetWriterLayer::PerformStepsBeforeFinalFlushGroup()
                 ->Append(
                     "gdal:metadata",
                     oMultiMetadata.Format(CPLJSONObject::PrettyFormat::Plain));
+        }
+
+        if (!m_aosCreationOptions.empty())
+        {
+            CPLJSONObject oCreationOptions;
+            bool bEmpty = true;
+            for (const auto &[key, value] :
+                 cpl::IterateNameValue(m_aosCreationOptions))
+            {
+                if (!EQUAL(key, "FID") && !EQUAL(key, "GEOMETRY_NAME") &&
+                    !EQUAL(key, "EDGES"))
+                {
+                    bEmpty = false;
+                    oCreationOptions.Add(key, value);
+                }
+            }
+            if (!bEmpty)
+            {
+                const_cast<arrow::KeyValueMetadata *>(
+                    m_poKeyValueMetadata.get())
+                    ->Append("gdal:creation-options",
+                             oCreationOptions.Format(
+                                 CPLJSONObject::PrettyFormat::Plain));
+            }
         }
     }
 }
@@ -987,7 +931,12 @@ OGRErr OGRParquetWriterLayer::CreateGeomField(const OGRGeomFieldDefn *poField,
 {
     OGRErr eErr = OGRArrowWriterLayer::CreateGeomField(poField, bApproxOK);
     if (eErr == OGRERR_NONE &&
-        m_aeGeomEncoding.back() == OGRArrowGeomEncoding::WKB)
+        m_aeGeomEncoding.back() == OGRArrowGeomEncoding::WKB
+#if ARROW_VERSION_MAJOR < 21
+        // Geostatistics in Arrow 21 do not support geographic type for now
+        && m_bEdgesSpherical
+#endif
+    )
     {
         m_oWriterPropertiesBuilder.disable_statistics(
             parquet::schema::ColumnPath::FromDotString(
@@ -1091,7 +1040,11 @@ OGRErr OGRParquetWriterLayer::ICreateFeature(OGRFeature *poFeature)
 
 bool OGRParquetWriterLayer::FlushGroup()
 {
+#if PARQUET_VERSION_MAJOR >= 20
+    auto status = m_poFileWriter->NewRowGroup();
+#else
     auto status = m_poFileWriter->NewRowGroup(m_apoBuilders[0]->length());
+#endif
     if (!status.ok())
     {
         CPLError(CE_Failure, CPLE_AppDefined, "NewRowGroup() failed with %s",
@@ -1217,7 +1170,7 @@ OGRParquetWriterLayer::WriteArrowBatch(const struct ArrowSchema *schema,
 /*                         TestCapability()                             */
 /************************************************************************/
 
-inline int OGRParquetWriterLayer::TestCapability(const char *pszCap)
+inline int OGRParquetWriterLayer::TestCapability(const char *pszCap) const
 {
 #if PARQUET_VERSION_MAJOR <= 10
     if (EQUAL(pszCap, OLCFastWriteArrowBatch))
@@ -1280,6 +1233,29 @@ bool OGRParquetWriterLayer::IsArrowSchemaSupported(
     {
         osErrorMsg = "float16 not supported";
         return false;
+    }
+    if (schema->format[0] == 'v' && schema->format[1] == 'u')
+    {
+        osErrorMsg = "StringView not supported";
+        return false;
+    }
+    if (schema->format[0] == 'v' && schema->format[1] == 'z')
+    {
+        osErrorMsg = "BinaryView not supported";
+        return false;
+    }
+    if (schema->format[0] == '+' && schema->format[1] == 'v')
+    {
+        if (schema->format[2] == 'l')
+        {
+            osErrorMsg = "ListView not supported";
+            return false;
+        }
+        else if (schema->format[2] == 'L')
+        {
+            osErrorMsg = "LargeListView not supported";
+            return false;
+        }
     }
     for (int64_t i = 0; i < schema->n_children; ++i)
     {

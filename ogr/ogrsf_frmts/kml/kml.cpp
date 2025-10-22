@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Jens Oberender
  * Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 #include "kmlnode.h"
 #include "kml.h"
@@ -43,12 +27,7 @@
 
 constexpr int PARSER_BUF_SIZE = 8192;
 
-KML::KML()
-    : poTrunk_(nullptr), nNumLayers_(-1), papoLayers_(nullptr), nDepth_(0),
-      validity(KML_VALIDITY_UNKNOWN), pKMLFile_(nullptr), poCurrent_(nullptr),
-      oCurrentParser(nullptr), nDataHandlerCounter(0), nWithoutEventCounter(0)
-{
-}
+KML::KML() = default;
 
 KML::~KML()
 {
@@ -103,7 +82,8 @@ bool KML::parse()
     do
     {
         nDataHandlerCounter = 0;
-        nLen = (unsigned)VSIFReadL(aBuf.data(), 1, aBuf.size(), pKMLFile_);
+        nLen = static_cast<unsigned>(
+            VSIFReadL(aBuf.data(), 1, aBuf.size(), pKMLFile_));
         nDone = nLen < aBuf.size();
         if (XML_Parse(oParser, aBuf.data(), nLen, nDone) == XML_STATUS_ERROR)
         {
@@ -210,8 +190,8 @@ void KML::checkValidity()
                     CE_Failure, CPLE_AppDefined,
                     "XML parsing of KML file failed : %s at line %d, column %d",
                     XML_ErrorString(XML_GetErrorCode(oParser)),
-                    (int)XML_GetCurrentLineNumber(oParser),
-                    (int)XML_GetCurrentColumnNumber(oParser));
+                    static_cast<int>(XML_GetCurrentLineNumber(oParser)),
+                    static_cast<int>(XML_GetCurrentColumnNumber(oParser)));
             }
 
             validity = KML_VALIDITY_INVALID;
@@ -419,16 +399,20 @@ void XMLCALL KML::endElement(void *pUserData, const char *pszName)
                         break;
 
                     const std::size_t nPosBegin = nPos;
+                    size_t nContentSize = 0;
 
                     // Get content
                     while (nPos < nLength && pszData[nPos] != ' ' &&
                            pszData[nPos] != '\n' && pszData[nPos] != '\r' &&
                            pszData[nPos] != '\t')
-                        nPos++;
-
-                    if (nPos - nPosBegin > 0)
                     {
-                        std::string sTmp(pszData + nPosBegin, nPos - nPosBegin);
+                        nContentSize++;
+                        nPos++;
+                    }
+
+                    if (nContentSize > 0)
+                    {
+                        std::string sTmp(pszData + nPosBegin, nContentSize);
                         poKML->poCurrent_->addContent(sTmp);
                     }
                 }
@@ -461,7 +445,7 @@ void XMLCALL KML::endElement(void *pUserData, const char *pszName)
                             std::string sTmp(pszData + nLineStartPos,
                                              nPos - nLineStartPos);
                             if (!sDataWithoutNL.empty())
-                                sDataWithoutNL += " ";
+                                sDataWithoutNL += '\n';
                             sDataWithoutNL += sTmp;
                             bLineStart = true;
                         }
@@ -481,7 +465,7 @@ void XMLCALL KML::endElement(void *pUserData, const char *pszName)
                         std::string sTmp(pszData + nLineStartPos,
                                          nPos - nLineStartPos);
                         if (!sDataWithoutNL.empty())
-                            sDataWithoutNL += " ";
+                            sDataWithoutNL += '\n';
                         sDataWithoutNL += sTmp;
                     }
 

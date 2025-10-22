@@ -9,23 +9,7 @@
  * Copyright (c) 2000, Frank Warmerdam
  * Copyright (c) 2008-2012, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -82,10 +66,13 @@ toff_t GTIFFWriteDirectory(TIFF *hTIFF, int nSubfileType, int nXSize,
 {
     const toff_t nBaseDirOffset = TIFFCurrentDirOffset(hTIFF);
 
-    // This is a bit of a hack to cause (*tif->tif_cleanup)(tif); to be called.
-    // See https://trac.osgeo.org/gdal/ticket/2055
+#if !(defined(INTERNAL_LIBTIFF) || TIFFLIB_VERSION > 20240911)
+    // This is a bit of a hack to cause (*tif->tif_cleanup)(tif); to be
+    // called. See https://trac.osgeo.org/gdal/ticket/2055
+    // Fixed in libtiff > 4.7.0
     TIFFSetField(hTIFF, TIFFTAG_COMPRESSION, COMPRESSION_NONE);
     TIFFFreeDirectory(hTIFF);
+#endif
 
     TIFFCreateDirectory(hTIFF);
 
@@ -384,6 +371,13 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
                 nBandFormat = SAMPLEFORMAT_INT;
                 break;
 
+            case GDT_Float16:
+                // Convert Float16 to float.
+                // TODO: At some point we should support Float16.
+                nBandBits = 32;
+                nBandFormat = SAMPLEFORMAT_IEEEFP;
+                break;
+
             case GDT_Float32:
                 nBandBits = 32;
                 nBandFormat = SAMPLEFORMAT_IEEEFP;
@@ -402,6 +396,13 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
             case GDT_CInt32:
                 nBandBits = 64;
                 nBandFormat = SAMPLEFORMAT_COMPLEXINT;
+                break;
+
+            case GDT_CFloat16:
+                // Convert Float16 to float.
+                // TODO: At some point we should support Float16.
+                nBandBits = 64;
+                nBandFormat = SAMPLEFORMAT_COMPLEXIEEEFP;
                 break;
 
             case GDT_CFloat32:
@@ -537,7 +538,8 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
             nPlanarConfig = PLANARCONFIG_CONTIG;
         }
         else if (nCompression == COMPRESSION_WEBP ||
-                 nCompression == COMPRESSION_JXL)
+                 nCompression == COMPRESSION_JXL ||
+                 nCompression == COMPRESSION_JXL_DNG_1_7)
         {
             nPlanarConfig = PLANARCONFIG_CONTIG;
         }
@@ -639,16 +641,16 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
         for (iOverview = 0; iOverview < nOverviews; iOverview++)
         {
             const int nOXSize =
-                panOverviewList ? (nXSize + panOverviewList[iOverview] - 1) /
-                                      panOverviewList[iOverview]
-                                :
-                                // cppcheck-suppress nullPointer
+                panOverviewList
+                    ? DIV_ROUND_UP(nXSize, panOverviewList[iOverview])
+                    :
+                    // cppcheck-suppress nullPointer
                     pasOverviewSize[iOverview].first;
             const int nOYSize =
-                panOverviewList ? (nYSize + panOverviewList[iOverview] - 1) /
-                                      panOverviewList[iOverview]
-                                :
-                                // cppcheck-suppress nullPointer
+                panOverviewList
+                    ? DIV_ROUND_UP(nYSize, panOverviewList[iOverview])
+                    :
+                    // cppcheck-suppress nullPointer
                     pasOverviewSize[iOverview].second;
 
             dfUncompressedOverviewSize +=
@@ -848,8 +850,8 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
     /* -------------------------------------------------------------------- */
     int nOvrBlockXSize = 0;
     int nOvrBlockYSize = 0;
-    GTIFFGetOverviewBlockSize(papoBandList[0], &nOvrBlockXSize,
-                              &nOvrBlockYSize);
+    GTIFFGetOverviewBlockSize(papoBandList[0], &nOvrBlockXSize, &nOvrBlockYSize,
+                              papszOptions, "BLOCKSIZE");
 
     CPLString osNoData;  // don't move this in inner scope
     const char *pszNoData = nullptr;
@@ -891,23 +893,19 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
 
     for (iOverview = 0; iOverview < nOverviews; iOverview++)
     {
-        const int nOXSize = panOverviewList
-                                ? (nXSize + panOverviewList[iOverview] - 1) /
-                                      panOverviewList[iOverview]
-                                :
-                                // cppcheck-suppress nullPointer
-                                pasOverviewSize[iOverview].first;
-        const int nOYSize = panOverviewList
-                                ? (nYSize + panOverviewList[iOverview] - 1) /
-                                      panOverviewList[iOverview]
-                                :
-                                // cppcheck-suppress nullPointer
-                                pasOverviewSize[iOverview].second;
+        const int nOXSize =
+            panOverviewList ? DIV_ROUND_UP(nXSize, panOverviewList[iOverview]) :
+                            // cppcheck-suppress nullPointer
+                pasOverviewSize[iOverview].first;
+        const int nOYSize =
+            panOverviewList ? DIV_ROUND_UP(nYSize, panOverviewList[iOverview]) :
+                            // cppcheck-suppress nullPointer
+                pasOverviewSize[iOverview].second;
 
-        unsigned nTileXCount = DIV_ROUND_UP(nOXSize, nOvrBlockXSize);
-        unsigned nTileYCount = DIV_ROUND_UP(nOYSize, nOvrBlockYSize);
+        const int nTileXCount = DIV_ROUND_UP(nOXSize, nOvrBlockXSize);
+        const int nTileYCount = DIV_ROUND_UP(nOYSize, nOvrBlockYSize);
         // libtiff implementation limitation
-        if (nTileXCount > 0x80000000U / (bCreateBigTIFF ? 8 : 4) / nTileYCount)
+        if (nTileXCount > INT_MAX / (bCreateBigTIFF ? 8 : 4) / nTileYCount)
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "File too large regarding tile size. This would result "
@@ -949,6 +947,11 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
         return CE_Failure;
     fpL = nullptr;
 
+    if (EQUAL(pszResampling, "NONE"))
+    {
+        return CE_None;
+    }
+
     /* -------------------------------------------------------------------- */
     /*      Open the overview dataset so that we can get at the overview    */
     /*      bands.                                                          */
@@ -970,7 +973,7 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
     /* -------------------------------------------------------------------- */
     /*      Do we need to set the jpeg quality?                             */
     /* -------------------------------------------------------------------- */
-    TIFF *hTIFF = static_cast<TIFF *>(hODS->GetInternalHandle(nullptr));
+    TIFF *hTIFF = static_cast<TIFF *>(hODS->GetInternalHandle("TIFF_HANDLE"));
 
     const char *pszJPEGQuality =
         GetOptionValue("JPEG_QUALITY", "JPEG_QUALITY_OVERVIEW");
@@ -1052,12 +1055,13 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
     }
 
 #if HAVE_JXL
-    if (nCompression == COMPRESSION_JXL)
+    if (nCompression == COMPRESSION_JXL ||
+        nCompression == COMPRESSION_JXL_DNG_1_7)
     {
         if (const char *pszJXLLossLess =
                 GetOptionValue("JXL_LOSSLESS", "JXL_LOSSLESS_OVERVIEW"))
         {
-            const double bJXLLossless = CPLTestBool(pszJXLLossLess);
+            const bool bJXLLossless = CPLTestBool(pszJXLLossLess);
             TIFFSetField(hTIFF, TIFFTAG_JXL_LOSSYNESS,
                          bJXLLossless ? JXL_LOSSLESS : JXL_LOSSY);
             GTIFFSetJXLLossless(GDALDataset::ToHandle(hODS), bJXLLossless);
@@ -1074,7 +1078,8 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
         {
             const float fJXLDistance =
                 static_cast<float>(CPLAtof(pszJXLDistance));
-            TIFFSetField(hTIFF, TIFFTAG_JXL_DISTANCE, fJXLDistance);
+            TIFFSetField(hTIFF, TIFFTAG_JXL_DISTANCE,
+                         static_cast<double>(fJXLDistance));
             GTIFFSetJXLDistance(GDALDataset::ToHandle(hODS), fJXLDistance);
         }
         if (const char *pszJXLAlphaDistance = GetOptionValue(
@@ -1082,7 +1087,8 @@ CPLErr GTIFFBuildOverviewsEx(const char *pszFilename, int nBands,
         {
             const float fJXLAlphaDistance =
                 static_cast<float>(CPLAtof(pszJXLAlphaDistance));
-            TIFFSetField(hTIFF, TIFFTAG_JXL_ALPHA_DISTANCE, fJXLAlphaDistance);
+            TIFFSetField(hTIFF, TIFFTAG_JXL_ALPHA_DISTANCE,
+                         static_cast<double>(fJXLAlphaDistance));
             GTIFFSetJXLAlphaDistance(GDALDataset::ToHandle(hODS),
                                      fJXLAlphaDistance);
         }

@@ -10,31 +10,20 @@
  * Copyright (c) 2012, Roger Veciana <rveciana@gmail.com>
  * Copyright (c) 2012-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 #include <algorithm>
+#include <cassert>
 #include <sstream>
 
 static double DEG2RAD = M_PI / 180.0;
@@ -65,7 +54,7 @@ class IRISDataset final : public GDALPamDataset
     unsigned char nProjectionCode;
     float fNyquistVelocity;
     mutable OGRSpatialReference m_oSRS{};
-    mutable double adfGeoTransform[6];
+    mutable GDALGeoTransform m_gt{};
     mutable bool bHasLoadedProjection;
     void LoadProjection() const;
     static bool GeodesicCalculation(double fLat, double fLon, double fAngle,
@@ -75,12 +64,12 @@ class IRISDataset final : public GDALPamDataset
 
   public:
     IRISDataset();
-    virtual ~IRISDataset();
+    ~IRISDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static int Identify(GDALOpenInfo *);
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
     const OGRSpatialReference *GetSpatialRef() const override;
 };
 
@@ -199,12 +188,12 @@ class IRISRasterBand final : public GDALPamRasterBand
 
   public:
     IRISRasterBand(IRISDataset *, int);
-    virtual ~IRISRasterBand();
+    ~IRISRasterBand() override;
 
-    virtual CPLErr IReadBlock(int, int, void *) override;
+    CPLErr IReadBlock(int, int, void *) override;
 
-    virtual double GetNoDataValue(int *) override;
-    virtual CPLErr SetNoDataValue(double) override;
+    double GetNoDataValue(int *) override;
+    CPLErr SetNoDataValue(double) override;
 };
 
 /************************************************************************/
@@ -452,12 +441,6 @@ IRISDataset::IRISDataset()
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
     std::fill_n(abyHeader, CPL_ARRAYSIZE(abyHeader), static_cast<GByte>(0));
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -577,12 +560,12 @@ void IRISDataset::LoadProjection() const
         if (poTransform == nullptr || !poTransform->Transform(1, &dfX2, &dfY2))
             CPLError(CE_Failure, CPLE_None, "Transformation Failed");
 
-        adfGeoTransform[0] = dfX - (dfRadarLocX * (dfX2 - dfX));
-        adfGeoTransform[1] = dfX2 - dfX;
-        adfGeoTransform[2] = 0.0;
-        adfGeoTransform[3] = dfY + (dfRadarLocY * (dfY2 - dfY));
-        adfGeoTransform[4] = 0.0;
-        adfGeoTransform[5] = -1 * (dfY2 - dfY);
+        m_gt[0] = dfX - (dfRadarLocX * (dfX2 - dfX));
+        m_gt[1] = dfX2 - dfX;
+        m_gt[2] = 0.0;
+        m_gt[3] = dfY + (dfRadarLocY * (dfY2 - dfY));
+        m_gt[4] = 0.0;
+        m_gt[5] = -1 * (dfY2 - dfY);
 
         delete poTransform;
     }
@@ -593,23 +576,23 @@ void IRISDataset::LoadProjection() const
                          "degree", 0.0174532925199433);
         m_oSRS.SetAE(dfProjRefLat, dfProjRefLon, 0.0, 0.0);
 
-        adfGeoTransform[0] = -1 * (dfRadarLocX * dfScaleX);
-        adfGeoTransform[1] = dfScaleX;
-        adfGeoTransform[2] = 0.0;
-        adfGeoTransform[3] = dfRadarLocY * dfScaleY;
-        adfGeoTransform[4] = 0.0;
-        adfGeoTransform[5] = -1 * dfScaleY;
+        m_gt[0] = -1 * (dfRadarLocX * dfScaleX);
+        m_gt[1] = dfScaleX;
+        m_gt[2] = 0.0;
+        m_gt[3] = dfRadarLocY * dfScaleY;
+        m_gt[4] = 0.0;
+        m_gt[5] = -1 * dfScaleY;
         // When the projection is different from Mercator or Azimutal
         // equidistant, we set a standard geotransform.
     }
     else
     {
-        adfGeoTransform[0] = -1 * (dfRadarLocX * dfScaleX);
-        adfGeoTransform[1] = dfScaleX;
-        adfGeoTransform[2] = 0.0;
-        adfGeoTransform[3] = dfRadarLocY * dfScaleY;
-        adfGeoTransform[4] = 0.0;
-        adfGeoTransform[5] = -1 * dfScaleY;
+        m_gt[0] = -1 * (dfRadarLocX * dfScaleX);
+        m_gt[1] = dfScaleX;
+        m_gt[2] = 0.0;
+        m_gt[3] = dfRadarLocY * dfScaleY;
+        m_gt[4] = 0.0;
+        m_gt[5] = -1 * dfScaleY;
     }
 }
 
@@ -721,12 +704,12 @@ bool IRISDataset::GeodesicCalculation(double fLat, double fLon, double fAngle,
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr IRISDataset::GetGeoTransform(double *padfTransform)
+CPLErr IRISDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
     if (!bHasLoadedProjection)
         LoadProjection();
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -798,9 +781,7 @@ GDALDataset *IRISDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The IRIS driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("IRIS");
         return nullptr;
     }
 
@@ -1153,7 +1134,7 @@ GDALDataset *IRISDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     /*      Create band information objects.                                */
     /* -------------------------------------------------------------------- */
-    // coverity[tainted_data]
+    assert(nNumBands <= INT_MAX - 1);
     for (int iBandNum = 1; iBandNum <= nNumBands; iBandNum++)
     {
         poDS->SetBand(iBandNum, new IRISRasterBand(poDS, iBandNum));

@@ -10,23 +10,7 @@
  *  Copyright (c) 2016 Alexandr Borzykh
  *  Copyright (c) 2016, NextGIS
  *
- *  Permission is hereby granted, free of charge, to any person obtaining a copy
- *  of this software and associated documentation files (the "Software"), to
- *deal in the Software without restriction, including without limitation the
- *rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- *sell copies of the Software, and to permit persons to whom the Software is
- *  furnished to do so, subject to the following conditions:
- *
- *  The above copyright notice and this permission notice shall be included in
- *all copies or substantial portions of the Software.
- *
- *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- *IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *******************************************************************************/
 #ifndef OGR_CAD_H_INCLUDED
 #define OGR_CAD_H_INCLUDED
@@ -52,25 +36,25 @@ class OGRCADLayer final : public OGRLayer
   public:
     OGRCADLayer(GDALDataset *poDS, CADLayer &poCADLayer,
                 OGRSpatialReference *poSR, int nEncoding);
-    ~OGRCADLayer();
+    ~OGRCADLayer() override;
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
     OGRFeature *GetFeature(GIntBig nFID) override;
     GIntBig GetFeatureCount(int /* bForce */) override;
 
-    OGRSpatialReference *GetSpatialRef() override
+    const OGRSpatialReference *GetSpatialRef() const override
     {
         return poSpatialRef;
     }
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
     std::set<CPLString> asFeaturesAttributes;
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
     GDALDataset *GetDataset() override
     {
@@ -86,34 +70,34 @@ class GDALCADDataset final : public GDALDataset
     OGRCADLayer **papoLayers;
     int nLayers;
     // raster
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
     GDALDataset *poRasterDS;
     mutable OGRSpatialReference *poSpatialReference;
 
   public:
     GDALCADDataset();
-    virtual ~GDALCADDataset();
+    ~GDALCADDataset() override;
 
     int Open(GDALOpenInfo *poOpenInfo, CADFileIO *pFileIO,
              long nSubRasterLayer = -1, long nSubRasterFID = -1);
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return nLayers;
     }
 
-    OGRLayer *GetLayer(int) override;
-    int TestCapability(const char *) override;
-    virtual char **GetFileList() override;
+    const OGRLayer *GetLayer(int) const override;
+    int TestCapability(const char *) const override;
+    char **GetFileList() override;
     const OGRSpatialReference *GetSpatialRef() const override;
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual int GetGCPCount() override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    int GetGCPCount() override;
     const OGRSpatialReference *GetGCPSpatialRef() const override;
-    virtual const GDAL_GCP *GetGCPs() override;
-    virtual int CloseDependentDatasets() override;
+    const GDAL_GCP *GetGCPs() override;
+    int CloseDependentDatasets() override;
 
   protected:
-    const char *GetPrjFilePath() const;
+    const std::string GetPrjFilePath() const;
     void FillTransform(CADImage *pImage, double dfUnits);
     int GetCadEncoding() const;
 

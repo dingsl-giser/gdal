@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -47,12 +31,12 @@ class OGRGTFSDataset final : public GDALDataset
   public:
     OGRGTFSDataset() = default;
 
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return static_cast<int>(m_apoLayers.size());
     }
 
-    OGRLayer *GetLayer(int nIdx) override;
+    const OGRLayer *GetLayer(int nIdx) const override;
 
     static int Identify(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
@@ -62,7 +46,7 @@ class OGRGTFSDataset final : public GDALDataset
 /*                              GetLayer()                             */
 /***********************************************************************/
 
-OGRLayer *OGRGTFSDataset::GetLayer(int nIdx)
+const OGRLayer *OGRGTFSDataset::GetLayer(int nIdx) const
 {
     return nIdx >= 0 && nIdx < static_cast<int>(m_apoLayers.size())
                ? m_apoLayers[nIdx].get()
@@ -96,10 +80,10 @@ class OGRGTFSLayer final : public OGRLayer
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
     GIntBig GetFeatureCount(int bForce) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
@@ -375,7 +359,7 @@ GIntBig OGRGTFSLayer::GetFeatureCount(int bForce)
 /*                          TestCapability()                           */
 /***********************************************************************/
 
-int OGRGTFSLayer::TestCapability(const char *pszCap)
+int OGRGTFSLayer::TestCapability(const char *pszCap) const
 {
     return EQUAL(pszCap, OLCStringsAsUTF8);
 }
@@ -402,9 +386,9 @@ class OGRGTFSShapesGeomLayer final : public OGRLayer
 
     void ResetReading() override;
     OGRFeature *GetNextFeature() override;
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return m_poFeatureDefn;
     }
@@ -527,7 +511,7 @@ OGRFeature *OGRGTFSShapesGeomLayer::GetNextFeature()
 /*                          TestCapability()                           */
 /***********************************************************************/
 
-int OGRGTFSShapesGeomLayer::TestCapability(const char *pszCap)
+int OGRGTFSShapesGeomLayer::TestCapability(const char *pszCap) const
 {
     return EQUAL(pszCap, OLCStringsAsUTF8);
 }
@@ -563,7 +547,7 @@ int OGRGTFSDataset::Identify(GDALOpenInfo *poOpenInfo)
         return TRUE;
     }
 
-    if (!EQUAL(CPLGetExtension(poOpenInfo->pszFilename), "zip"))
+    if (!poOpenInfo->IsExtensionEqualToCI("zip"))
         return FALSE;
 
     // Check first filename in ZIP
@@ -621,9 +605,9 @@ GDALDataset *OGRGTFSDataset::Open(GDALOpenInfo *poOpenInfo)
     if (STARTS_WITH(pszGTFSFilename, "GTFS:"))
         pszGTFSFilename += strlen("GTFS:");
 
-    const std::string osBaseDir(
+    std::string osBaseDir(
         (!STARTS_WITH(pszGTFSFilename, "/vsizip/") &&
-         EQUAL(CPLGetExtension(pszGTFSFilename), "zip"))
+         EQUAL(CPLGetExtensionSafe(pszGTFSFilename).c_str(), "zip"))
             ? std::string("/vsizip/{").append(pszGTFSFilename).append("}")
             : std::string(pszGTFSFilename));
 
@@ -634,7 +618,7 @@ GDALDataset *OGRGTFSDataset::Open(GDALOpenInfo *poOpenInfo)
     std::string osShapesFilename;
     for (const char *pszFilename : cpl::Iterate(aosFilenames))
     {
-        if (!EQUAL(CPLGetExtension(pszFilename), "txt"))
+        if (!EQUAL(CPLGetExtensionSafe(pszFilename).c_str(), "txt"))
             continue;
         for (const char *pszFilenameInDir : apszRequiredFiles)
         {
@@ -660,7 +644,7 @@ GDALDataset *OGRGTFSDataset::Open(GDALOpenInfo *poOpenInfo)
                 {
                     poDS->m_apoLayers.emplace_back(
                         std::make_unique<OGRGTFSLayer>(
-                            osBaseDir, CPLGetBasename(pszFilename),
+                            osBaseDir, CPLGetBasenameSafe(pszFilename).c_str(),
                             std::move(poCSVDataset)));
                 }
             }
@@ -679,6 +663,7 @@ GDALDataset *OGRGTFSDataset::Open(GDALOpenInfo *poOpenInfo)
         auto poCSVDataset = std::unique_ptr<GDALDataset>(GDALDataset::Open(
             std::string(osBaseDir).append("/").append(osShapesFilename).c_str(),
             GDAL_OF_VERBOSE_ERROR | GDAL_OF_VECTOR, apszCSVDriver));
+        CPL_IGNORE_RET_VAL(osBaseDir);
         if (poCSVDataset)
         {
             auto poUnderlyingLayer = poCSVDataset->GetLayer(0);

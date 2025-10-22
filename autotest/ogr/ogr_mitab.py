@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  MapInfo driver testing.
@@ -2211,11 +2210,11 @@ def test_ogr_mitab_style(tmp_vsimem):
     lyr.CreateFeature(f)
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetGeometryDirectly(ogr.CreateGeometryFromWkt("POLYGON((0 0,0 1,1 1,0 0))"))
-    f.SetStyleString('BRUSH(fc:#AABBCC,id:"mapinfo-brush-1")')
+    f.SetStyleString('BRUSH(fc:#AABBCC,id:"mapinfo-brush-1");PEN(w:2px)')
     lyr.CreateFeature(f)
     f = ogr.Feature(lyr.GetLayerDefn())
     f.SetGeometryDirectly(ogr.CreateGeometryFromWkt("POLYGON((0 0,0 1,1 1,0 0))"))
-    f.SetStyleString("BRUSH(fc:#AABBCC00,bc:#ddeeff00)")
+    f.SetStyleString("BRUSH(fc:#AABBCC00,bc:#ddeeff00);PEN(w:2.5pt)")
     lyr.CreateFeature(f)
     ds = None
 
@@ -2231,14 +2230,14 @@ def test_ogr_mitab_style(tmp_vsimem):
     f = lyr.GetNextFeature()
     if (
         f.GetStyleString()
-        != 'BRUSH(fc:#aabbcc,id:"mapinfo-brush-1,ogr-brush-1");PEN(w:1px,c:#000000,id:"mapinfo-pen-2,ogr-pen-0",cap:r,j:r)'
+        != 'BRUSH(fc:#aabbcc,id:"mapinfo-brush-1,ogr-brush-1");PEN(w:2px,c:#000000,id:"mapinfo-pen-2,ogr-pen-0",cap:r,j:r)'
     ):
         f.DumpReadable()
         pytest.fail()
     f = lyr.GetNextFeature()
     if (
         f.GetStyleString()
-        != 'BRUSH(fc:#aabbcc,id:"mapinfo-brush-1,ogr-brush-1");PEN(w:1px,c:#000000,id:"mapinfo-pen-2,ogr-pen-0",cap:r,j:r)'
+        != 'BRUSH(fc:#aabbcc,id:"mapinfo-brush-1,ogr-brush-1");PEN(w:2.5pt,c:#000000,id:"mapinfo-pen-2,ogr-pen-0",cap:r,j:r)'
     ):
         f.DumpReadable()
         pytest.fail()
@@ -2648,6 +2647,7 @@ def _test_srs(workdir, srs, input_srs=None, ext="tab"):
     assert srs
     if isinstance(srs, str):
         tmp = osr.SpatialReference()
+        tmp.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
         tmp.SetFromUserInput(srs)
         srs = tmp
     if input_srs and isinstance(input_srs, str):
@@ -2764,6 +2764,17 @@ def test_ogr_mitab_write_etrs89_from_custom_wkt_no_geogcs_code(tmp_vsimem):
         AXIS["Northing",NORTH]]"""
     )
     _test_srs(tmp_vsimem, srs, "EPSG:25832")
+
+
+###############################################################################
+
+
+def test_ogr_mitab_write_estonia_1977(tmp_vsimem):
+
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(3301)
+    srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    _test_srs(tmp_vsimem, srs, "EPSG:3301")
 
 
 ###############################################################################
@@ -2985,3 +2996,28 @@ def test_ogr_mitab_alter_field_defn_to_string(tmp_vsimem):
     assert fld_defn.GetWidth() == 254
     f = lyr.GetNextFeature()
     assert f["str_field"] == "1234"
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_mitab_read_dbf_with_delete_column():
+
+    with ogr.Open("data/mitab/tab_with_dbf_with_delete_column.tab") as ds:
+        lyr = ds.GetLayer(0)
+        assert lyr.GetLayerDefn().GetFieldCount() == 2
+        f = lyr.GetNextFeature()
+        assert f["id"] == 1
+        assert f["str"] == "foo"
+
+
+###############################################################################
+
+
+@gdaltest.enable_exceptions()
+def test_ogr_mitab_creation_illegal_layer_name(tmp_vsimem):
+
+    ds = ogr.GetDriverByName("MapInfo File").CreateDataSource(tmp_vsimem / "out")
+    with pytest.raises(Exception, match="Illegal character"):
+        ds.CreateLayer("illegal/with/slash")

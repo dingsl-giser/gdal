@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2014, Even Rouault <even dot rouault at spatialys dot com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -40,35 +24,14 @@
 #include "ogr_spatialref.h"
 
 /************************************************************************/
-/*                            OGRCurvePolygon()                         */
-/************************************************************************/
-
-/**
- * \brief Create an empty curve polygon.
- */
-
-OGRCurvePolygon::OGRCurvePolygon() = default;
-
-/************************************************************************/
 /*               OGRCurvePolygon( const OGRCurvePolygon& )              */
 /************************************************************************/
 
 /**
  * \brief Copy constructor.
- *
- * Note: before GDAL 2.1, only the default implementation of the constructor
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRCurvePolygon::OGRCurvePolygon(const OGRCurvePolygon &) = default;
-
-/************************************************************************/
-/*                           ~OGRCurvePolygon()                         */
-/************************************************************************/
-
-OGRCurvePolygon::~OGRCurvePolygon() = default;
 
 /************************************************************************/
 /*                 operator=( const OGRCurvePolygon&)                  */
@@ -76,11 +39,6 @@ OGRCurvePolygon::~OGRCurvePolygon() = default;
 
 /**
  * \brief Assignment operator.
- *
- * Note: before GDAL 2.1, only the default implementation of the operator
- * existed, which could be unsafe to use.
- *
- * @since GDAL 2.1
  */
 
 OGRCurvePolygon &OGRCurvePolygon::operator=(const OGRCurvePolygon &other)
@@ -88,6 +46,17 @@ OGRCurvePolygon &OGRCurvePolygon::operator=(const OGRCurvePolygon &other)
     if (this != &other)
     {
         OGRSurface::operator=(other);
+
+        for (const auto *poRing : other.oCC)
+        {
+            if (!isRingCorrectType(poRing))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Illegal use of OGRCurvePolygon::operator=(): "
+                         "trying to assign an incompatible sub-geometry");
+                return *this;
+            }
+        }
 
         oCC = other.oCC;
     }
@@ -353,11 +322,25 @@ OGRErr OGRCurvePolygon::addRing(const OGRCurve *poNewRing)
 }
 
 /************************************************************************/
+/*                            isRingCorrectType()                       */
+/************************************************************************/
+bool OGRCurvePolygon::isRingCorrectType(const OGRCurve *poRing) const
+{
+    return poRing && !EQUAL(poRing->getGeometryName(), "LINEARRING");
+}
+
+/************************************************************************/
 /*                            checkRing()                               */
 /************************************************************************/
 
-int OGRCurvePolygon::checkRing(OGRCurve *poNewRing) const
+bool OGRCurvePolygon::checkRing(const OGRCurve *poNewRing) const
 {
+    if (!isRingCorrectType(poNewRing))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Linearring not allowed.");
+        return false;
+    }
+
     if (!poNewRing->IsEmpty() && !poNewRing->get_IsClosed())
     {
         // This configuration option name must be the same as in
@@ -367,7 +350,7 @@ int OGRCurvePolygon::checkRing(OGRCurve *poNewRing) const
         if (pszEnvVar != nullptr && !CPLTestBool(pszEnvVar))
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Non closed ring detected.");
-            return FALSE;
+            return false;
         }
         else
         {
@@ -384,17 +367,11 @@ int OGRCurvePolygon::checkRing(OGRCurve *poNewRing) const
     {
         if (poNewRing->getNumPoints() < 4)
         {
-            return FALSE;
-        }
-
-        if (EQUAL(poNewRing->getGeometryName(), "LINEARRING"))
-        {
-            CPLError(CE_Failure, CPLE_AppDefined, "Linearring not allowed.");
-            return FALSE;
+            return false;
         }
     }
 
-    return TRUE;
+    return true;
 }
 
 /************************************************************************/
@@ -583,8 +560,6 @@ std::string OGRCurvePolygon::exportToWkt(const OGRWktOptions &opts,
  *                     Unused for now. Must be set to NULL.
  *
  * @return a linestring
- *
- * @since OGR 2.0
  */
 
 OGRPolygon *

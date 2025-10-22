@@ -7,23 +7,7 @@
  * Copyright (c) 2008, Frank Warmerdam
  * Copyright (c) 2009-2020, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -88,7 +72,7 @@ static CPLErr GPMaskImageData(GDALRasterBandH hMaskBand, GByte *pabyMaskLine,
 template <class DataType, class EqualityTest>
 static CPLErr GDALPolygonizeT(GDALRasterBandH hSrcBand,
                               GDALRasterBandH hMaskBand, OGRLayerH hOutLayer,
-                              int iPixValField, char **papszOptions,
+                              int iPixValField, CSLConstList papszOptions,
                               GDALProgressFunc pfnProgress, void *pProgressArg,
                               GDALDataType eDT)
 
@@ -151,35 +135,30 @@ static CPLErr GDALPolygonizeT(GDALRasterBandH hSrcBand,
     /*      Get the geotransform, if there is one, so we can convert the    */
     /*      vectors into georeferenced coordinates.                         */
     /* -------------------------------------------------------------------- */
-    double adfGeoTransform[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    GDALGeoTransform gt;
     bool bGotGeoTransform = false;
     const char *pszDatasetForGeoRef =
         CSLFetchNameValue(papszOptions, "DATASET_FOR_GEOREF");
     if (pszDatasetForGeoRef)
     {
-        GDALDatasetH hSrcDS = GDALOpen(pszDatasetForGeoRef, GA_ReadOnly);
-        if (hSrcDS)
+        auto poSrcDS = std::unique_ptr<GDALDataset>(GDALDataset::Open(
+            pszDatasetForGeoRef, GDAL_OF_RASTER | GDAL_OF_VERBOSE_ERROR));
+        if (poSrcDS)
         {
-            bGotGeoTransform =
-                GDALGetGeoTransform(hSrcDS, adfGeoTransform) == CE_None;
-            GDALClose(hSrcDS);
+            bGotGeoTransform = poSrcDS->GetGeoTransform(gt) == CE_None;
         }
     }
     else
     {
-        GDALDatasetH hSrcDS = GDALGetBandDataset(hSrcBand);
-        if (hSrcDS)
-            bGotGeoTransform =
-                GDALGetGeoTransform(hSrcDS, adfGeoTransform) == CE_None;
+        auto poSrcDS = GDALRasterBand::FromHandle(hSrcBand)->GetDataset();
+        if (poSrcDS)
+        {
+            bGotGeoTransform = poSrcDS->GetGeoTransform(gt) == CE_None;
+        }
     }
     if (!bGotGeoTransform)
     {
-        adfGeoTransform[0] = 0;
-        adfGeoTransform[1] = 1;
-        adfGeoTransform[2] = 0;
-        adfGeoTransform[3] = 0;
-        adfGeoTransform[4] = 0;
-        adfGeoTransform[5] = 1;
+        gt = GDALGeoTransform();
     }
 
     /* -------------------------------------------------------------------- */
@@ -250,8 +229,9 @@ static CPLErr GDALPolygonizeT(GDALRasterBandH hSrcBand,
     GDALRasterPolygonEnumeratorT<DataType, EqualityTest> oSecondEnum(
         nConnectedness);
 
-    OGRPolygonWriter<DataType> oPolygonWriter{hOutLayer, iPixValField,
-                                              adfGeoTransform};
+    OGRPolygonWriter<DataType> oPolygonWriter{
+        hOutLayer, iPixValField, gt,
+        atoi(CSLFetchNameValueDef(papszOptions, "COMMIT_INTERVAL", "100000"))};
     Polygonizer<GInt32, DataType> oPolygonizer{-1, &oPolygonWriter};
     TwoArm *paoLastLineArm =
         static_cast<TwoArm *>(VSI_CALLOC_VERBOSE(sizeof(TwoArm), nXSize + 2));
@@ -379,13 +359,18 @@ static CPLErr GDALPolygonizeT(GDALRasterBandH hSrcBand,
         /*      Report progress, and support interrupts. */
         /* --------------------------------------------------------------------
          */
-        if (!pfnProgress(0.10 + 0.90 * ((iY + 1) / static_cast<double>(nYSize)),
-                         "", pProgressArg))
+        if (!pfnProgress(
+                std::min(1.0, 0.10 + 0.90 * ((iY + 1) /
+                                             static_cast<double>(nYSize))),
+                "", pProgressArg))
         {
             CPLError(CE_Failure, CPLE_UserInterrupt, "User terminated");
             eErr = CE_Failure;
         }
     }
+
+    if (!oPolygonWriter.Finalize())
+        eErr = CE_Failure;
 
     /* -------------------------------------------------------------------- */
     /*      Cleanup                                                         */
@@ -503,6 +488,14 @@ GBool GDALFloatEquals(float A, float B)
  * <li>DATASET_FOR_GEOREF=dataset_name: Name of a dataset from which to read
  * the geotransform. This useful if hSrcBand has no related dataset, which is
  * typical for mask bands.</li>
+ * <li>COMMIT_INTERVAL=num:
+ * (GDAL >= 3.12) Interval in number of features at which transactions must be
+ * flushed. A value of 0 means that no transactions are opened.
+ * A negative value means a single transaction.
+ * The default value is 100000.
+ * The function takes care of issuing the starting transaction and committing
+ * the final one.
+ * </li>
  * </ul>
  * @param pfnProgress callback for reporting algorithm progress matching the
  * GDALProgressFunc() semantics.  May be NULL.
@@ -577,6 +570,14 @@ CPLErr CPL_STDCALL GDALPolygonize(GDALRasterBandH hSrcBand,
  * <li>DATASET_FOR_GEOREF=dataset_name: Name of a dataset from which to read
  * the geotransform. This useful if hSrcBand has no related dataset, which is
  * typical for mask bands.</li>
+ * <li>COMMIT_INTERVAL=num:
+ * (GDAL >= 3.12) Interval in number of features at which transactions must be
+ * flushed. A value of 0 means that no transactions are opened.
+ * A negative value means a single transaction.
+ * The default value is 100000.
+ * The function takes care of issuing the starting transaction and committing
+ * the final one.
+ * </li>
  * </ul>
  * @param pfnProgress callback for reporting algorithm progress matching the
  * GDALProgressFunc() semantics.  May be NULL.
@@ -584,7 +585,6 @@ CPLErr CPL_STDCALL GDALPolygonize(GDALRasterBandH hSrcBand,
  *
  * @return CE_None on success or CE_Failure on a failure.
  *
- * @since GDAL 1.9.0
  */
 
 CPLErr CPL_STDCALL GDALFPolygonize(GDALRasterBandH hSrcBand,

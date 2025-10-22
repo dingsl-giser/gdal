@@ -8,23 +8,7 @@
  * Copyright (c) 2003, Frank Warmerdam
  * Copyright (c) 2007-2008, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_port.h"
@@ -67,14 +51,17 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
 {
     VALIDATE_POINTER1(hBand, "GDALChecksumImage", 0);
 
-    const static int anPrimes[11] = {7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43};
+    constexpr int LARGEST_MODULO = 43;
+    const static int anPrimes[11] = {
+        7, 11, 13, 17, 19, 23, 29, 31, 37, 41, LARGEST_MODULO};
 
     int nChecksum = 0;
     int iPrime = 0;
     const GDALDataType eDataType = GDALGetRasterDataType(hBand);
     const bool bComplex = CPL_TO_BOOL(GDALDataTypeIsComplex(eDataType));
     const bool bIsFloatingPoint =
-        (eDataType == GDT_Float32 || eDataType == GDT_Float64 ||
+        (eDataType == GDT_Float16 || eDataType == GDT_Float32 ||
+         eDataType == GDT_Float64 || eDataType == GDT_CFloat16 ||
          eDataType == GDT_CFloat32 || eDataType == GDT_CFloat64);
 
     const auto IntFromDouble = [](double dfVal)
@@ -100,6 +87,15 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
         return nVal;
     };
 
+    const auto ClampForCoverity = [](int x)
+    {
+#ifdef __COVERITY__
+        return std::max(0, std::min(x, LARGEST_MODULO - 1));
+#else
+        return x;
+#endif
+    };
+
     if (bIsFloatingPoint && nXOff == 0 && nYOff == 0)
     {
         const GDALDataType eDstDataType = bComplex ? GDT_CFloat64 : GDT_Float64;
@@ -122,7 +118,7 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                 // allowed memory
                 nChunkXSize = nXSize;
             }
-            else
+            else if (nDstDataTypeSize > 0)
             {
                 // Otherwise compute a size that is a multiple of nBlockXSize
                 nChunkXSize = static_cast<int>(std::min(
@@ -166,7 +162,6 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                              "Checksum value could not be computed due to I/O "
                              "read error.");
                     nChecksum = -1;
-                    iYBlock = nYBlocks;
                     break;
                 }
                 const size_t xIters =
@@ -184,13 +179,17 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                     for (size_t i = 0; i < xIters; ++i)
                     {
                         const double dfVal = padfLineData[nOffset + i];
-                        nChecksum += IntFromDouble(dfVal) % anPrimes[iPrime++];
+                        nChecksum += ClampForCoverity(IntFromDouble(dfVal) %
+                                                      anPrimes[iPrime++]);
                         if (iPrime > 10)
                             iPrime = 0;
                     }
                     nChecksum &= 0xffff;
                 }
             }
+
+            if (nChecksum < 0)
+                break;
         }
 
         CPLFree(padfLineData);
@@ -224,7 +223,8 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
             for (size_t i = 0; i < nCount; i++)
             {
                 const double dfVal = padfLineData[i];
-                nChecksum += IntFromDouble(dfVal) % anPrimes[iPrime++];
+                nChecksum +=
+                    ClampForCoverity(IntFromDouble(dfVal) % anPrimes[iPrime++]);
                 if (iPrime > 10)
                     iPrime = 0;
 
@@ -256,7 +256,7 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                 // allowed memory
                 nChunkXSize = nXSize;
             }
-            else
+            else if (nDstDataTypeSize > 0)
             {
                 // Otherwise compute a size that is a multiple of nBlockXSize
                 nChunkXSize = static_cast<int>(std::min(
@@ -300,7 +300,6 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                              "Checksum value could not be computed due to I/O "
                              "read error.");
                     nChecksum = -1;
-                    iYBlock = nYBlocks;
                     break;
                 }
                 const size_t xIters =
@@ -325,6 +324,9 @@ int CPL_STDCALL GDALChecksumImage(GDALRasterBandH hBand, int nXOff, int nYOff,
                     nChecksum &= 0xffff;
                 }
             }
+
+            if (nChecksum < 0)
+                break;
         }
 
         CPLFree(panChunkData);

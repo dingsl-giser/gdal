@@ -71,6 +71,15 @@ The following layer creation options are supported:
       Available values depend on how the Parquet library was compiled.
       Defaults to SNAPPY when available, otherwise NONE.
 
+- .. lco:: COMPRESSION_LEVEL
+     :choices: <integer>
+     :since: 3.12
+
+     Specify the compression level for the selected compression method. The
+     compression level has a different meaning for each codec. The description
+     of this option, returned at runtime for example by ``ogrinfo --format PARQUET``,
+     gives the range and default value for each codec.
+
 - .. lco:: GEOMETRY_ENCODING
      :choices: WKB, WKT, GEOARROW, GEOARROW_INTERLEAVED
      :default: WKB
@@ -129,8 +138,8 @@ The following layer creation options are supported:
      Name of creating application.
 
 - .. lco:: WRITE_COVERING_BBOX
-     :choices: YES, NO
-     :default: YES
+     :choices: AUTO, YES, NO
+     :default: AUTO
      :since: 3.9
 
      Whether to write xmin/ymin/xmax/ymax columns with the bounding box of
@@ -138,6 +147,37 @@ The following layer creation options are supported:
      perform faster spatial filtering. Writing a geometry bounding box is less
      necessary for the GeoArrow geometry encoding than for the default WKB, as
      implementations may be able to directly use the geometry columns.
+
+     If the :lco:`USE_PARQUET_GEO_TYPES` layer creation option is set to ``ONLY``,
+     and :lco:`WRITE_COVERING_BBOX` is set or let to its default ``AUTO`` value,
+     no covering bounding box columns is written.
+
+- .. lco:: USE_PARQUET_GEO_TYPES
+     :choices: YES, NO, ONLY
+     :default: NO
+     :since: 3.12
+
+     Only available with libarrow >= 21.
+
+     Whether to use Parquet Geometry/Geography logical types (introduced in libarrow 21),
+     when using the default GEOMETRY_ENCODING=WKB encoding.
+
+     - ``YES``: use the Geometry logical type (or the Geography
+       one if the EDGES=SPHERICAL creation option is also set), and also
+       write file-level GeoParquet metadata. Such files can be read by older
+       GDAL, but require libarrow >= 20.
+
+     - ``NO`` (default): only file-level GeoParquet metadata is written. Such
+       files can be read by older GDAL and libarrow versions.
+
+     - ``ONLY``: use the Geometry logical type (or the Geography
+       one if the EDGES=SPHERICAL creation option is also set), but do not
+       write file-level GeoParquet metadata. Such files will only be fully compatible
+       of GDAL >= 3.12 and libarrow >= 21.
+       With libarrow 20, the geometry column of such files
+       will only be recognized if it is among one of the GEOM_POSSIBLE_NAMES open
+       option value, and the CRS of such files will not be recognized.
+       With older libarrow, such files cannot be opened at all.
 
 - .. lco:: SORT_BY_BBOX
      :choices: YES, NO
@@ -172,6 +212,8 @@ SQL statements are run through the OGR SQL engine. Statistics can be used to
 speed-up evaluations of SQL requests like:
 "SELECT MIN(colname), MAX(colname), COUNT(colname) FROM layername"
 
+.. _target_drivers_vector_parqquet_dataset_partitioning:
+
 Dataset/partitioning read support
 ---------------------------------
 
@@ -201,6 +243,25 @@ maximum number of available CPUs returned by :cpp:func:`CPLGetNumCPUs()` if
 it is lower by 4). This number can be configured with the configuration option
 :config:`GDAL_NUM_THREADS`, which can be set to an integer value or
 ``ALL_CPUS``.
+
+Update support
+--------------
+
+.. versionadded:: 3.12.0
+
+The driver supports adding, updating, removing features and fields. Note that
+this is accomplished by rewriting the whole file during :cpp:func:`GDALDataset::FlushCache`
+or when closing the dataset, and keeping into memory all modifications between
+two flushes.
+
+If the file to be updated has been created by GDAL >= 3.12, the creation options
+to create the original file will be re-applied when creating the updated file.
+Stability of feature ids is only guaranteed if the original file has been
+created with an explicit ``FID`` creation option.
+
+If the file to be updated has been created outside of GDAL, the original
+non-scalar/nested field types will not always be preserved, but a JSON
+representation may be used instead.
 
 Validation script
 -----------------

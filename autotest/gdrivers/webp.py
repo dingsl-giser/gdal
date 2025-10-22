@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test WEBP driver
@@ -10,24 +9,10 @@
 ###############################################################################
 # Copyright (c) 2011-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
+
+import os
 
 import gdaltest
 import pytest
@@ -193,3 +178,61 @@ def test_webp_lossless_copy_with_xmp():
     gdal.VSIFCloseL(f)
     assert data == open(src_ds.GetDescription(), "rb").read()
     gdaltest.webp_drv.Delete(outfilename)
+
+
+###############################################################################
+
+
+def test_webp_create_copy_only_visible_at_close_time(tmp_path):
+
+    src_ds = gdal.Open("data/rgbsmall.tif")
+    out_filename = tmp_path / "tmp.webp"
+
+    def my_callback(pct, msg, user_data):
+        if pct < 1:
+            assert gdal.VSIStatL(out_filename) is None
+        return True
+
+    drv = gdal.GetDriverByName("WEBP")
+    assert drv.GetMetadataItem(gdal.DCAP_CREATE_ONLY_VISIBLE_AT_CLOSE_TIME) == "YES"
+    drv.CreateCopy(
+        out_filename,
+        src_ds,
+        options=["@CREATE_ONLY_VISIBLE_AT_CLOSE_TIME=YES"],
+        callback=my_callback,
+    )
+
+    with gdal.Open(out_filename) as ds:
+        ds.GetRasterBand(1).Checksum()
+
+
+###############################################################################
+
+
+def test_webp_world_file(tmp_vsimem):
+
+    src_ds = gdal.Open("data/rgbsmall.tif")
+
+    drv = gdal.GetDriverByName("WEBP")
+    drv.CreateCopy(tmp_vsimem / "out.webp", src_ds, options={"WORLDFILE": "YES"})
+    assert gdal.VSIStatL(tmp_vsimem / "out.wld") is not None
+    gdal.Unlink(tmp_vsimem / "out.webp.aux.xml")
+    with gdal.Open(tmp_vsimem / "out.webp") as ds:
+        assert ds.GetGeoTransform() == pytest.approx(src_ds.GetGeoTransform())
+    with gdal.Open(tmp_vsimem / "out.webp") as ds:
+        assert ds.GetFileList() == [
+            str(tmp_vsimem / "out.webp"),
+            str(tmp_vsimem / "out.wld"),
+        ]
+
+
+###############################################################################
+
+
+def test_webp_close(tmp_path):
+
+    ds = gdal.GetDriverByName("WEBP").CreateCopy(
+        tmp_path / "out.webp", gdal.Open("data/rgbsmall.tif")
+    )
+    ds.Close()
+    os.remove(tmp_path / "out.webp")

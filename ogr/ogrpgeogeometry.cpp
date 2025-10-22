@@ -10,23 +10,7 @@
  * Copyright (c) 2011, Paul Ramsey <pramsey at cleverelephant.ca>
  * Copyright (c) 2011-2014, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 // PGeo == ESRI Personal GeoDatabase.
@@ -53,6 +37,13 @@
 #include "ogr_api.h"
 #include "ogr_core.h"
 #include "ogr_p.h"
+
+#ifdef HAVE_WFLAG_UNREACHABLE_CODE_AGGRESSIVE
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunreachable-code"
+#endif
+#endif
 
 constexpr int SHPP_TRISTRIP = 0;
 constexpr int SHPP_TRIFAN = 1;
@@ -856,7 +847,7 @@ id,WKT
         }
 
         // Swap if needed. Shape doubles always LSB.
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             CPL_SWAPDOUBLE(pabyPtr);
             CPL_SWAPDOUBLE(pabyPtr + 8);
@@ -880,7 +871,7 @@ id,WKT
     memcpy(pabyPtr + 8 + 8 + 8, &(envelope.MaxY), 8);
 
     // Swap box if needed. Shape doubles are always LSB.
-    if (OGR_SWAP(wkbNDR))
+    if constexpr (OGR_SWAP(wkbNDR))
     {
         for (int i = 0; i < 4; i++)
             CPL_SWAPDOUBLE(pabyPtr + 8 * i);
@@ -894,7 +885,7 @@ id,WKT
         memcpy(pabyPtrZ + 8, &(envelope.MaxZ), 8);
 
         // Swap Z bounds if necessary.
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             for (int i = 0; i < 2; i++)
                 CPL_SWAPDOUBLE(pabyPtrZ + 8 * i);
@@ -951,7 +942,7 @@ id,WKT
         }
 
         // Swap if necessary.
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             for (GUInt32 k = 0; k < nPoints; k++)
             {
@@ -1047,7 +1038,7 @@ id,WKT
             }
 
             // Swap if necessary.
-            if (OGR_SWAP(wkbNDR))
+            if constexpr (OGR_SWAP(wkbNDR))
             {
                 for (int k = 0; k < nRingNumPoints; k++)
                 {
@@ -1118,7 +1109,7 @@ id,WKT
             }
 
             // Swap if necessary.
-            if (OGR_SWAP(wkbNDR))
+            if constexpr (OGR_SWAP(wkbNDR))
             {
                 CPL_SWAPDOUBLE(pabyPtr);
                 CPL_SWAPDOUBLE(pabyPtr + 8);
@@ -1188,7 +1179,7 @@ id,WKT
             }
 
             // Swap if necessary.
-            if (OGR_SWAP(wkbNDR))
+            if constexpr (OGR_SWAP(wkbNDR))
             {
                 for (int k = 0; k < nLineNumPoints; k++)
                 {
@@ -1301,7 +1292,7 @@ id,WKT
                 }
 
                 // Swap if necessary.
-                if (OGR_SWAP(wkbNDR))
+                if constexpr (OGR_SWAP(wkbNDR))
                 {
                     for (int k = 0; k < nRingNumPoints; k++)
                     {
@@ -1337,7 +1328,7 @@ id,WKT
         memcpy(pabyPtrMBounds + 8, &(dfMaxM), 8);
 
         // Swap M bounds if necessary.
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             for (int i = 0; i < 2; i++)
                 CPL_SWAPDOUBLE(pabyPtrMBounds + 8 * i);
@@ -1581,7 +1572,7 @@ OGRErr OGRWriteMultiPatchToShapeBin(const OGRGeometry *poGeom,
     memcpy(pabyPtr + 8 + 8 + 8, &(envelope.MaxY), 8);
 
     // Swap box if needed. Shape doubles are always LSB.
-    if (OGR_SWAP(wkbNDR))
+    if constexpr (OGR_SWAP(wkbNDR))
     {
         for (int i = 0; i < 4; i++)
             CPL_SWAPDOUBLE(pabyPtr + 8 * i);
@@ -1615,7 +1606,7 @@ OGRErr OGRWriteMultiPatchToShapeBin(const OGRGeometry *poGeom,
         memcpy(pabyPtr, aoPoints.data(), 2 * 8 * nPoints);
 
     // Swap box if needed. Shape doubles are always LSB.
-    if (OGR_SWAP(wkbNDR))
+    if constexpr (OGR_SWAP(wkbNDR))
     {
         for (int i = 0; i < 2 * nPoints; i++)
             CPL_SWAPDOUBLE(pabyPtr + 8 * i);
@@ -1626,7 +1617,7 @@ OGRErr OGRWriteMultiPatchToShapeBin(const OGRGeometry *poGeom,
     {
         memcpy(pabyPtr, &(envelope.MinZ), 8);
         memcpy(pabyPtr + 8, &(envelope.MaxZ), 8);
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             for (int i = 0; i < 2; i++)
                 CPL_SWAPDOUBLE(pabyPtr + 8 * i);
@@ -1636,7 +1627,7 @@ OGRErr OGRWriteMultiPatchToShapeBin(const OGRGeometry *poGeom,
         if (!adfZ.empty())
             memcpy(pabyPtr, adfZ.data(), 8 * nPoints);
         // Swap box if needed. Shape doubles are always LSB.
-        if (OGR_SWAP(wkbNDR))
+        if constexpr (OGR_SWAP(wkbNDR))
         {
             for (int i = 0; i < nPoints; i++)
                 CPL_SWAPDOUBLE(pabyPtr + 8 * i);
@@ -1851,10 +1842,8 @@ static OGRCurve *OGRShapeCreateCompoundCurve(int nPartStartIdx, int nPartPoints,
                 dfStartAngle += 2 * M_PI;
             else if (dfEndAngle + M_PI < dfStartAngle)
                 dfEndAngle += 2 * M_PI;
-            // coverity[tainted_data]
             const double dfStepSizeRad =
-                CPLAtofM(CPLGetConfigOption("OGR_ARC_STEPSIZE", "4")) / 180.0 *
-                M_PI;
+                OGRGeometryFactory::GetDefaultArcStepSize() / 180.0 * M_PI;
             const double dfLengthTangentStart =
                 (dfX1 - dfX0) * (dfX1 - dfX0) + (dfY1 - dfY0) * (dfY1 - dfY0);
             const double dfLengthTangentEnd =
@@ -3021,3 +3010,9 @@ OGRErr OGRCreateFromShapeBin(GByte *pabyShape, OGRGeometry **ppoGeom,
 
     return OGRERR_FAILURE;
 }
+
+#ifdef HAVE_WFLAG_UNREACHABLE_CODE_AGGRESSIVE
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+#endif

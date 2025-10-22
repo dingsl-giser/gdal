@@ -49,14 +49,13 @@ and precision of each column, e.g.
 "Integer(5)","Real(10.7)","String(15)". The driver will then use these
 types as specified for the csv columns. Subtypes
 can be passed between parenthesis, such as "Integer(Boolean)",
-"Integer(Int16)" and "Real(Float32)". Starting with GDAL 2.1,
-accordingly with the `GeoCSV
+"Integer(Int16)" and "Real(Float32)". Accordingly with the `GeoCSV
 specification <http://giswiki.hsr.ch/GeoCSV>`__, the "CoordX" or
 "Point(X)" type can be used to specify a column with longitude/easting
 values, "CoordY" or "Point(Y)" for latitude/northing values and "WKT"
 for geometries encoded in WKT
 
-Starting with GDAL 2.2, the "JSonStringList", "JSonIntegerList",
+The "JSonStringList", "JSonIntegerList",
 "JSonInteger64List" and "JSonRealList" types can be used in .csvt to map
 to the corresponding OGR StringList, IntegerList, Integer64List and
 RealList types. The field values are then encoded as JSON arrays, with
@@ -101,7 +100,7 @@ names is all numeric it is assumed that the first line is actually data
 values and dummy field names are generated internally (field_1 through
 field_n) and the first record is treated as a feature.
 Numeric values are treated as field names if they are
-enclosed in double quotes. Starting with GDAL 2.1, this behavior can be
+enclosed in double quotes. This behavior can be
 modified via the HEADERS open option.
 
 All CSV files are treated as UTF-8 encoded. A
@@ -115,8 +114,8 @@ Example (employee.csv):
 ::
 
    ID,Salary,Name,Comments
+   131,11000.0,Jane Lake,Chief Technical Officer
    132,55000.0,John Walker,"The ""big"" cheese."
-   133,11000.0,Jane Lake,Cleaning Staff
 
 Note that the Comments value for the first data record is placed in
 double quotes because the value contains quotes, and those quotes have
@@ -147,7 +146,7 @@ Consider the following CSV file (test.csv):
    49.2,1.1,"Second point"
    47.5,0.75,"Third point"
 
-Starting with GDAL 2.1, it is possible to directly specify the potential
+It is possible to directly specify the potential
 names of the columns that can contain X/longitude and Y/latitude with
 the :oo:`X_POSSIBLE_NAMES` and :oo:`Y_POSSIBLE_NAMES` open option.
 
@@ -413,13 +412,23 @@ The following open options are supported:
 
       Maximum number of bytes for a line (-1=unlimited).
 
+-  .. oo:: OGR_SCHEMA
+      :choices: <filename>|<json string>
+      :since: 3.11.0
+
+      Partially or totally overrides the auto-detected schema to use for creating the layer.
+      The overrides are defined as a JSON list of field definitions.
+      This can be a filename, a URL or JSON string conformant with the `ogr_fields_override.schema.json schema <https://raw.githubusercontent.com/OSGeo/gdal/refs/heads/master/ogr/data/ogr_fields_override.schema.json>`_
+      This option takes precedence over any other option and over the .csvt file.
+
+
 Creation Issues
 ---------------
 
 The driver supports creating new databases (as a directory of .csv
 files), adding new .csv files to an existing directory or .csv files or
-appending features to an existing .csv table. Starting with GDAL 2.1,
-deleting or replacing existing features, or adding/modifying/deleting
+appending features to an existing .csv table.
+Deleting or replacing existing features, or adding/modifying/deleting
 fields is supported, provided the modifications done are small enough to
 be stored in RAM temporarily before flushing to disk.
 
@@ -459,9 +468,10 @@ The following layer creation options are supported:
       Create the
       associated .csvt file (see above paragraph) to describe the type of
       each column of the layer and its optional width and precision.
+      This option also creates .prj file which stores coordinate system information.
 
 -  .. lco:: SEPARATOR
-      :choices: COMMA, SEMICOLON, TAB, SPACE
+      :choices: COMMA, SEMICOLON, TAB, SPACE, PIPE
       :default: COMMA
 
       Field separator character.
@@ -471,6 +481,13 @@ The following layer creation options are supported:
       :default: NO
 
       Write a UTF-8 Byte Order Mark (BOM) at the start of the file.
+
+-  .. lco:: HEADER
+      :choices: YES, NO
+      :default: YES
+      :since: 3.12
+
+      Whether to write a header line with the field names.
 
 -  .. lco:: GEOMETRY_NAME
       :since: 2.1
@@ -550,7 +567,7 @@ Examples
     $ cat input.csv
     WKT,ID,Name
     "LINESTRING (-900 -1450,-900 100)",0,900W
-    
+
     $ ogr2ogr -segmentize 400 -lco GEOMETRY=AS_WKT \
       -sql "SELECT ID, Name FROM input" output.csv input.csv
 
@@ -581,8 +598,7 @@ The CSV driver can also read files whose structure is close to CSV files
 Other Notes
 -----------
 
--  `GeoCSV specification <http://giswiki.hsr.ch/GeoCSV>`__ (supported by
-   GDAL >= 2.1)
+-  `GeoCSV specification <http://giswiki.hsr.ch/GeoCSV>`__
 -  Initial development of the OGR CSV driver was supported by `DM
    Solutions Group <http://www.dmsolutions.ca/>`__ and
    `GoMOOS <http://www.gomoos.org/>`__.

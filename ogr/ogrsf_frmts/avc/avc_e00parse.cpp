@@ -1,5 +1,4 @@
 /**********************************************************************
- * $Id$
  *
  * Name:     avc_e00parse.c
  * Project:  Arc/Info vector coverage (AVC)  E00->BIN conversion library
@@ -10,23 +9,7 @@
  **********************************************************************
  * Copyright (c) 1999-2005, Daniel Morissette
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************
  *
  * $Log: avc_e00parse.c,v $
@@ -1648,16 +1631,30 @@ AVCTxt *AVCE00ParseNextTx6Line(AVCE00ParseInfo *psInfo, const char *pszLine)
          * Text Justification stuff... 2 sets of 20 int16 values.
          *------------------------------------------------------------*/
         GInt16 *pValue;
-        int numValPerLine = 7;
+        int numValPerLine;
 
-        if (psInfo->iCurItem < 3)
+        if (psInfo->iCurItem == 0 || psInfo->iCurItem == 1)
+        {
             pValue = psTxt->anJust2 + psInfo->iCurItem * 7;
-        else
-            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
-
-        /* Last line of each set contains only 6 values instead of 7 */
-        if (psInfo->iCurItem == 2 || psInfo->iCurItem == 5)
+            numValPerLine = 7;
+        }
+        else if (psInfo->iCurItem == 2)
+        {
+            pValue = psTxt->anJust2 + psInfo->iCurItem * 7;
+            /* Last line of each set contains only 6 values instead of 7 */
             numValPerLine = 6;
+        }
+        else if (psInfo->iCurItem == 3 || psInfo->iCurItem == 4)
+        {
+            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
+            numValPerLine = 7;
+        }
+        else /* if (psInfo->iCurItem == 5) */
+        {
+            pValue = psTxt->anJust1 + (psInfo->iCurItem - 3) * 7;
+            /* Last line of each set contains only 6 values instead of 7 */
+            numValPerLine = 6;
+        }
 
         for (i = 0;
              i < numValPerLine && nLen >= static_cast<size_t>(i) * 10 + 10; i++)

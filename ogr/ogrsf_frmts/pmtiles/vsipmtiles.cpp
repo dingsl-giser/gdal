@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2023, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_vsi_virtual.h"
@@ -50,8 +34,9 @@ class VSIPMTilesFilesystemHandler final : public VSIFilesystemHandler
   public:
     VSIPMTilesFilesystemHandler() = default;
 
-    VSIVirtualHandle *Open(const char *pszFilename, const char *pszAccess,
-                           bool bSetError, CSLConstList papszOptions) override;
+    VSIVirtualHandleUniquePtr Open(const char *pszFilename,
+                                   const char *pszAccess, bool bSetError,
+                                   CSLConstList papszOptions) override;
     int Stat(const char *pszFilename, VSIStatBufL *pStatBuf,
              int nFlags) override;
     char **ReadDirEx(const char *pszDirname, int nMaxFiles) override;
@@ -222,7 +207,7 @@ VSIPMTilesOpen(const char *pszFilename, std::string &osSubfilename,
 /*                               Open()                                 */
 /************************************************************************/
 
-VSIVirtualHandle *
+VSIVirtualHandleUniquePtr
 VSIPMTilesFilesystemHandler::Open(const char *pszFilename,
                                   const char *pszAccess, bool /*bSetError*/,
                                   CSLConstList /*papszOptions*/)
@@ -242,18 +227,19 @@ VSIPMTilesFilesystemHandler::Open(const char *pszFilename,
 
     if (osSubfilename == METADATA_JSON)
     {
-        return VSIFileFromMemBuffer(nullptr,
-                                    reinterpret_cast<GByte *>(CPLStrdup(
-                                        poDS->GetMetadataContent().c_str())),
-                                    poDS->GetMetadataContent().size(), true);
+        return VSIVirtualHandleUniquePtr(
+            VSIFileFromMemBuffer(nullptr,
+                                 reinterpret_cast<GByte *>(CPLStrdup(
+                                     poDS->GetMetadataContent().c_str())),
+                                 poDS->GetMetadataContent().size(), true));
     }
 
     if (osSubfilename == PMTILES_HEADER_JSON)
     {
         const auto osStr = VSIPMTilesGetPMTilesHeaderJson(poDS.get());
-        return VSIFileFromMemBuffer(
+        return VSIVirtualHandleUniquePtr(VSIFileFromMemBuffer(
             nullptr, reinterpret_cast<GByte *>(CPLStrdup(osStr.c_str())),
-            osStr.size(), true);
+            osStr.size(), true));
     }
 
     if (nComponents != 3)
@@ -274,7 +260,8 @@ VSIPMTilesFilesystemHandler::Open(const char *pszFilename,
 
     GByte *pabyData = static_cast<GByte *>(CPLMalloc(posStr->size()));
     memcpy(pabyData, posStr->data(), posStr->size());
-    return VSIFileFromMemBuffer(nullptr, pabyData, posStr->size(), true);
+    return VSIVirtualHandleUniquePtr(
+        VSIFileFromMemBuffer(nullptr, pabyData, posStr->size(), true));
 }
 
 /************************************************************************/

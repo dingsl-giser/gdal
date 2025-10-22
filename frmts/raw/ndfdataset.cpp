@@ -8,27 +8,12 @@
  * Copyright (c) 2005, Frank Warmerdam
  * Copyright (c) 2008-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_string.h"
 #include "gdal_frmts.h"
+#include "gdal_priv.h"
 #include "ogr_spatialref.h"
 #include "rawdataset.h"
 
@@ -40,7 +25,7 @@
 
 class NDFDataset final : public RawDataset
 {
-    double adfGeoTransform[6];
+    GDALGeoTransform m_gt{};
 
     OGRSpatialReference m_oSRS{};
     char **papszExtraFiles;
@@ -56,7 +41,7 @@ class NDFDataset final : public RawDataset
     NDFDataset();
     ~NDFDataset() override;
 
-    CPLErr GetGeoTransform(double *padfTransform) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
 
     const OGRSpatialReference *GetSpatialRef() const override
     {
@@ -76,12 +61,6 @@ class NDFDataset final : public RawDataset
 NDFDataset::NDFDataset() : papszExtraFiles(nullptr), papszHeader(nullptr)
 {
     m_oSRS.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-    adfGeoTransform[0] = 0.0;
-    adfGeoTransform[1] = 1.0;
-    adfGeoTransform[2] = 0.0;
-    adfGeoTransform[3] = 0.0;
-    adfGeoTransform[4] = 0.0;
-    adfGeoTransform[5] = 1.0;
 }
 
 /************************************************************************/
@@ -119,10 +98,10 @@ CPLErr NDFDataset::Close()
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr NDFDataset::GetGeoTransform(double *padfTransform)
+CPLErr NDFDataset::GetGeoTransform(GDALGeoTransform &gt) const
 
 {
-    memcpy(padfTransform, adfGeoTransform, sizeof(double) * 6);
+    gt = m_gt;
     return CE_None;
 }
 
@@ -196,9 +175,7 @@ GDALDataset *NDFDataset::Open(GDALOpenInfo *poOpenInfo)
     /* -------------------------------------------------------------------- */
     if (poOpenInfo->eAccess == GA_Update)
     {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The NDF driver does not support update access to existing"
-                 " datasets.");
+        ReportUpdateNotSupportedByDriver("NDF");
         return nullptr;
     }
     /* -------------------------------------------------------------------- */
@@ -257,9 +234,7 @@ GDALDataset *NDFDataset::Open(GDALOpenInfo *poOpenInfo)
     if (poOpenInfo->eAccess == GA_Update)
     {
         CSLDestroy(papszHeader);
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The NDF driver does not support update access to existing"
-                 " datasets.\n");
+        ReportUpdateNotSupportedByDriver("NDF");
         return nullptr;
     }
 
@@ -303,12 +278,18 @@ GDALDataset *NDFDataset::Open(GDALOpenInfo *poOpenInfo)
             snprintf(szBandExtension, sizeof(szBandExtension), "I%d",
                      iBand + 1);
             osFilename =
-                CPLResetExtension(poOpenInfo->pszFilename, szBandExtension);
+                CPLResetExtensionSafe(poOpenInfo->pszFilename, szBandExtension);
         }
         else
         {
-            CPLString osBasePath = CPLGetPath(poOpenInfo->pszFilename);
-            osFilename = CPLFormFilename(osBasePath, osFilename, nullptr);
+            if (CPLHasPathTraversal(osFilename.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s", osFilename.c_str());
+                return nullptr;
+            }
+            CPLString osBasePath = CPLGetPathSafe(poOpenInfo->pszFilename);
+            osFilename = CPLFormFilenameSafe(osBasePath, osFilename, nullptr);
         }
 
         VSILFILE *fpRaw = VSIFOpenL(osFilename, "rb");
@@ -401,23 +382,23 @@ GDALDataset *NDFDataset::Open(GDALOpenInfo *poOpenInfo)
     if (CSLCount(papszUL) == 4 && CSLCount(papszUR) == 4 &&
         CSLCount(papszLL) == 4)
     {
-        poDS->adfGeoTransform[0] = CPLAtof(papszUL[2]);
-        poDS->adfGeoTransform[1] = (CPLAtof(papszUR[2]) - CPLAtof(papszUL[2])) /
-                                   (poDS->nRasterXSize - 1);
-        poDS->adfGeoTransform[2] = (CPLAtof(papszUR[3]) - CPLAtof(papszUL[3])) /
-                                   (poDS->nRasterXSize - 1);
+        poDS->m_gt[0] = CPLAtof(papszUL[2]);
+        poDS->m_gt[1] = (CPLAtof(papszUR[2]) - CPLAtof(papszUL[2])) /
+                        (poDS->nRasterXSize - 1);
+        poDS->m_gt[2] = (CPLAtof(papszUR[3]) - CPLAtof(papszUL[3])) /
+                        (poDS->nRasterXSize - 1);
 
-        poDS->adfGeoTransform[3] = CPLAtof(papszUL[3]);
-        poDS->adfGeoTransform[4] = (CPLAtof(papszLL[2]) - CPLAtof(papszUL[2])) /
-                                   (poDS->nRasterYSize - 1);
-        poDS->adfGeoTransform[5] = (CPLAtof(papszLL[3]) - CPLAtof(papszUL[3])) /
-                                   (poDS->nRasterYSize - 1);
+        poDS->m_gt[3] = CPLAtof(papszUL[3]);
+        poDS->m_gt[4] = (CPLAtof(papszLL[2]) - CPLAtof(papszUL[2])) /
+                        (poDS->nRasterYSize - 1);
+        poDS->m_gt[5] = (CPLAtof(papszLL[3]) - CPLAtof(papszUL[3])) /
+                        (poDS->nRasterYSize - 1);
 
         // Move origin up-left half a pixel.
-        poDS->adfGeoTransform[0] -= poDS->adfGeoTransform[1] * 0.5;
-        poDS->adfGeoTransform[0] -= poDS->adfGeoTransform[4] * 0.5;
-        poDS->adfGeoTransform[3] -= poDS->adfGeoTransform[2] * 0.5;
-        poDS->adfGeoTransform[3] -= poDS->adfGeoTransform[5] * 0.5;
+        poDS->m_gt[0] -= poDS->m_gt[1] * 0.5;
+        poDS->m_gt[0] -= poDS->m_gt[4] * 0.5;
+        poDS->m_gt[3] -= poDS->m_gt[2] * 0.5;
+        poDS->m_gt[3] -= poDS->m_gt[5] * 0.5;
     }
 
     CSLDestroy(papszUL);

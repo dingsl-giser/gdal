@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2010-2011, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "cpl_conv.h"
@@ -36,8 +20,7 @@ using namespace OGRPDS;
 /*                           OGRPDSDataSource()                         */
 /************************************************************************/
 
-OGRPDSDataSource::OGRPDSDataSource()
-    : pszName(nullptr), papoLayers(nullptr), nLayers(0)
+OGRPDSDataSource::OGRPDSDataSource() : papoLayers(nullptr), nLayers(0)
 {
 }
 
@@ -51,24 +34,13 @@ OGRPDSDataSource::~OGRPDSDataSource()
     for (int i = 0; i < nLayers; i++)
         delete papoLayers[i];
     CPLFree(papoLayers);
-
-    CPLFree(pszName);
-}
-
-/************************************************************************/
-/*                           TestCapability()                           */
-/************************************************************************/
-
-int OGRPDSDataSource::TestCapability(const char * /* pszCap */)
-{
-    return FALSE;
 }
 
 /************************************************************************/
 /*                              GetLayer()                              */
 /************************************************************************/
 
-OGRLayer *OGRPDSDataSource::GetLayer(int iLayer)
+const OGRLayer *OGRPDSDataSource::GetLayer(int iLayer) const
 
 {
     if (iLayer < 0 || iLayer >= nLayers)
@@ -174,9 +146,18 @@ bool OGRPDSDataSource::LoadTable(const char *pszFilename, int nRecordSize,
                      osTableLink.c_str());
             return false;
         }
-        CPLString osTPath = CPLGetPath(pszFilename);
+        CPLString osTPath = CPLGetPathSafe(pszFilename);
         CleanString(osTableFilename);
-        osTableFilename = CPLFormCIFilename(osTPath, osTableFilename, nullptr);
+
+        if (CPLHasPathTraversal(osTableFilename.c_str()))
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Path traversal detected in %s", osTableFilename.c_str());
+            return false;
+        }
+
+        osTableFilename =
+            CPLFormCIFilenameSafe(osTPath, osTableFilename, nullptr);
     }
     else
     {
@@ -206,10 +187,19 @@ bool OGRPDSDataSource::LoadTable(const char *pszFilename, int nRecordSize,
         }
         else
         {
-            CPLString osTPath = CPLGetPath(pszFilename);
+            CPLString osTPath = CPLGetPathSafe(pszFilename);
             CleanString(osTableFilename);
+
+            if (CPLHasPathTraversal(osTableFilename.c_str()))
+            {
+                CPLError(CE_Failure, CPLE_AppDefined,
+                         "Path traversal detected in %s",
+                         osTableFilename.c_str());
+                return false;
+            }
+
             osTableFilename =
-                CPLFormCIFilename(osTPath, osTableFilename, nullptr);
+                CPLFormCIFilenameSafe(osTPath, osTableFilename, nullptr);
             nStartBytes = 0;
         }
     }
@@ -257,10 +247,19 @@ bool OGRPDSDataSource::LoadTable(const char *pszFilename, int nRecordSize,
         oKeywords.GetKeyword(MakeAttr(osTableID, "^STRUCTURE"), "");
     if (!osTableStructure.empty())
     {
-        CPLString osTPath = CPLGetPath(pszFilename);
+        CPLString osTPath = CPLGetPathSafe(pszFilename);
         CleanString(osTableStructure);
+
+        if (CPLHasPathTraversal(osTableStructure.c_str()))
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Path traversal detected in %s", osTableStructure.c_str());
+            VSIFCloseL(fp);
+            return false;
+        }
+
         osTableStructure =
-            CPLFormCIFilename(osTPath, osTableStructure, nullptr);
+            CPLFormCIFilenameSafe(osTPath, osTableStructure, nullptr);
     }
 
     GByte *pabyRecord = (GByte *)VSI_MALLOC_VERBOSE(nRecordSize + 1);
@@ -289,8 +288,6 @@ bool OGRPDSDataSource::LoadTable(const char *pszFilename, int nRecordSize,
 int OGRPDSDataSource::Open(const char *pszFilename)
 
 {
-    pszName = CPLStrdup(pszFilename);
-
     // --------------------------------------------------------------------
     //      Does this appear to be a .PDS table file?
     // --------------------------------------------------------------------

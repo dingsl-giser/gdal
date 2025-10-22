@@ -13,16 +13,7 @@ ogrtindex
 Synopsis
 --------
 
-.. code-block::
-
-    ogrtindex [--help] [--help-general]
-              [-lnum <n>]... [-lname <name>]... [-f <output_format>]
-              [-write_absolute_path] [-skip_different_projection]
-              [-t_srs <target_srs>]
-              [-src_srs_name <field_name>] [-src_srs_format {AUTO|WKT|EPSG|PROJ}]
-              [-accept_different_schemas]
-              <output_dataset> <src_dataset> <src_dataset>...
-
+.. program-output:: ogrtindex --help-doc
 
 Description
 -----------
@@ -70,21 +61,15 @@ the OGR connection type.
     rectangular polygons in the same coordinate reference system as the
     input vector layers.
 
-    .. versionadded:: 2.2.0
-
 .. option:: -src_srs_name <field_name>
 
     The name of the field to store the SRS of each tile. This field name
     can be used as the value of the TILESRS keyword in MapServer >= 7.2.
 
-    .. versionadded:: 2.2.0
-
 .. option:: -src_srs_format {AUTO|WKT|EPSG|PROJ}
 
     The format in which the SRS of each tile must be written.
     Available formats are: ``AUTO``, ``WKT``, ``EPSG``, ``PROJ``.
-
-    .. versionadded:: 2.2.0
 
 .. option:: -accept_different_schemas
 
@@ -100,13 +85,15 @@ independent records.
 If the tile index already exists it will be appended to, otherwise it
 will be created.
 
-Example
--------
+Examples
+--------
 
-This example would create a shapefile (:file:`tindex.shp`) containing
-a tile index of the ``BL2000_LINK`` layers in all the NTF files
-in the :file:`wrk` directory:
+.. example::
 
-.. code-block::
+   This example would create a shapefile (:file:`tindex.shp`) containing
+   a tile index of the ``BL2000_LINK`` layers in all the NTF files
+   in the :file:`wrk` directory:
 
-    ogrtindex tindex.shp wrk/*.NTF
+   .. code-block:: bash
+
+       ogrtindex tindex.shp wrk/*.NTF

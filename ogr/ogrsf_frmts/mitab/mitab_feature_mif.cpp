@@ -10,23 +10,7 @@
  **********************************************************************
  * Copyright (c) 1999-2002, Stephane Villeneuve
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
@@ -202,14 +186,13 @@ int TABFeature::WriteRecordToMIDFile(MIDDATAFile *fp)
 
     const char *delimiter = fp->GetDelimiter();
 
-    OGRFieldDefn *poFDefn = nullptr;
     const int numFields = GetFieldCount();
 
     for (int iField = 0; iField < numFields; iField++)
     {
         if (iField != 0)
             fp->WriteLine("%s", delimiter);
-        poFDefn = GetFieldDefnRef(iField);
+        const auto poFDefn = GetFieldDefnRef(iField);
 
         switch (poFDefn->GetType())
         {
@@ -682,7 +665,6 @@ int TABPolyline::ReadGeometryFromMIFFile(MIDDATAFile *fp)
                         return -1;
                     }
                     nNumPoints = atoi(pszLine);
-                    break;
                 }
                 else
                 {
@@ -696,7 +678,6 @@ int TABPolyline::ReadGeometryFromMIFFile(MIDDATAFile *fp)
                     bMultiple = TRUE;
                     nNumSec = atoi(papszToken[2]);
                     nNumPoints = atoi(papszToken[3]);
-                    break;
                 }
                 else
                 {
@@ -707,7 +688,6 @@ int TABPolyline::ReadGeometryFromMIFFile(MIDDATAFile *fp)
             default:
                 CSLDestroy(papszToken);
                 return -1;
-                break;
         }
 
         if (bMultiple)

@@ -8,23 +8,7 @@
  * Copyright (c) 2007, Mateusz Loskot
  * Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include <algorithm>
@@ -109,7 +93,7 @@ void OGRGeoJSONLayer::TerminateAppendSession()
 /*                           GetFIDColumn                               */
 /************************************************************************/
 
-const char *OGRGeoJSONLayer::GetFIDColumn()
+const char *OGRGeoJSONLayer::GetFIDColumn() const
 {
     return sFIDColumn_.c_str();
 }
@@ -470,13 +454,8 @@ OGRErr OGRGeoJSONLayer::CreateGeomField(const OGRGeomFieldDefn *poGeomField,
     return OGRMemLayer::CreateGeomField(poGeomField, bApproxOK);
 }
 
-OGRErr OGRGeoJSONLayer::GetExtent(OGREnvelope *psExtent, int bForce)
-{
-    return GetExtent(0, psExtent, bForce);
-}
-
-OGRErr OGRGeoJSONLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
-                                  int bForce)
+OGRErr OGRGeoJSONLayer::IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                                   bool bForce)
 {
     if (iGeomField != 0)
     {
@@ -491,12 +470,12 @@ OGRErr OGRGeoJSONLayer::GetExtent(int iGeomField, OGREnvelope *psExtent,
     }
     else
     {
-        return OGRMemLayer::GetExtentInternal(iGeomField, psExtent, bForce);
+        return OGRMemLayer::IGetExtent(iGeomField, psExtent, bForce);
     }
 }
 
-OGRErr OGRGeoJSONLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
-                                    int bForce)
+OGRErr OGRGeoJSONLayer::IGetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
+                                     bool bForce)
 {
 
     if (iGeomField != 0)
@@ -512,7 +491,7 @@ OGRErr OGRGeoJSONLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
     }
     else
     {
-        return OGRMemLayer::GetExtent3D(iGeomField, psExtent3D, bForce);
+        return OGRMemLayer::IGetExtent3D(iGeomField, psExtent3D, bForce);
     }
 }
 
@@ -520,13 +499,15 @@ OGRErr OGRGeoJSONLayer::GetExtent3D(int iGeomField, OGREnvelope3D *psExtent3D,
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int OGRGeoJSONLayer::TestCapability(const char *pszCap)
+int OGRGeoJSONLayer::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, OLCCurveGeometries))
         return FALSE;
+    else if (EQUAL(pszCap, OLCMeasuredGeometries))
+        return m_bSupportsMGeometries;
     else if (EQUAL(pszCap, OLCZGeometries))
-        return TRUE;
+        return m_bSupportsZGeometries;
     else if (EQUAL(pszCap, OLCStringsAsUTF8))
         return TRUE;
     else if (EQUAL(pszCap, OLCFastGetExtent) ||
@@ -609,7 +590,8 @@ void OGRGeoJSONLayer::AddFeature(OGRFeature *poFeature)
 
 void OGRGeoJSONLayer::DetectGeometryType()
 {
-    if (GetLayerDefn()->GetGeomType() != wkbUnknown)
+    auto poFDefn = GetLayerDefn();
+    if (poFDefn->GetGeomType() != wkbUnknown)
         return;
 
     ResetReading();
@@ -630,7 +612,6 @@ void OGRGeoJSONLayer::DetectGeometryType()
     }
 
     {
-        auto poFDefn = GetLayerDefn();
         auto oTemporaryUnsealer(poFDefn->GetTemporaryUnsealer());
         poFDefn->SetGeomType(eLayerGeomType);
     }

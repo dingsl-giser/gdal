@@ -17,9 +17,14 @@ All GDAL command line programs support the following common options.
 .. _raster_common_options_formats:
 .. include:: options/formats_raster.rst
 
+.. _raster_common_options_format:
 .. option:: --format <format>
 
     List detailed information about a single format driver. The format should be the short name reported in the --formats list, such as GTiff.
+
+.. option:: --formats
+
+    List all drivers. Can be combined with ``-json`` switch of :program:`gdalinfo` of since GDAL 3.10
 
 .. _raster_common_options_optfile:
 .. option:: --optfile <filename>
@@ -57,10 +62,7 @@ and are introduced here.
     The list of all format codes can be listed with the :option:`--formats` switch.
     Only formats list as ``(rw)`` (read-write) can be written.
 
-    .. versionadded:: 2.3
-
-        If not specified, the format is guessed from the extension.
-        Previously, it was generally GTiff for raster, or ESRI Shapefile for vector.
+    If not specified, the format is guessed from the extension.
 
 .. include:: options/co.rst
 

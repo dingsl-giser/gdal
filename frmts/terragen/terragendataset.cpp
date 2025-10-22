@@ -20,23 +20,7 @@
  ******************************************************************************
  * Copyright (c) 2006-2007 Daylon Graphics Ltd.
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ******************************************************************************
  */
 
@@ -104,6 +88,10 @@
 #include "cpl_string.h"
 #include "gdal_frmts.h"
 #include "gdal_pam.h"
+#include "gdal_driver.h"
+#include "gdal_drivermanager.h"
+#include "gdal_openinfo.h"
+#include "gdal_cpp_functions.h"
 #include "ogr_spatialref.h"
 
 #include <cmath>
@@ -143,8 +131,10 @@ class TerragenDataset final : public GDALPamDataset
 
     double m_dScale, m_dOffset,
         m_dSCAL,  // 30.0 normally, from SCAL chunk
-        m_adfTransform[6], m_dGroundScale, m_dMetersPerGroundUnit,
-        m_dMetersPerElevUnit, m_dLogSpan[2], m_span_m[2], m_span_px[2];
+        m_dGroundScale, m_dMetersPerGroundUnit, m_dMetersPerElevUnit,
+        m_dLogSpan[2], m_span_m[2], m_span_px[2];
+
+    GDALGeoTransform m_gt{};
 
     VSILFILE *m_fp;
     vsi_l_offset m_nDataOffset;
@@ -162,15 +152,15 @@ class TerragenDataset final : public GDALPamDataset
 
   public:
     TerragenDataset();
-    virtual ~TerragenDataset();
+    ~TerragenDataset() override;
 
     static GDALDataset *Open(GDALOpenInfo *);
     static GDALDataset *Create(const char *pszFilename, int nXSize, int nYSize,
                                int nBandsIn, GDALDataType eType,
                                char **papszOptions);
 
-    virtual CPLErr GetGeoTransform(double *) override;
-    virtual CPLErr SetGeoTransform(double *) override;
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override;
+    CPLErr SetGeoTransform(const GDALGeoTransform &gt) override;
     const OGRSpatialReference *GetSpatialRef() const override;
     CPLErr SetSpatialRef(const OGRSpatialReference *poSRS) override;
 
@@ -214,20 +204,20 @@ class TerragenRasterBand final : public GDALPamRasterBand
   public:
     explicit TerragenRasterBand(TerragenDataset *);
 
-    virtual ~TerragenRasterBand()
+    ~TerragenRasterBand() override
     {
         if (m_pvLine != nullptr)
             CPLFree(m_pvLine);
     }
 
     // Geomeasure support.
-    virtual CPLErr IReadBlock(int, int, void *) override;
-    virtual const char *GetUnitType() override;
-    virtual double GetOffset(int *pbSuccess = nullptr) override;
-    virtual double GetScale(int *pbSuccess = nullptr) override;
+    CPLErr IReadBlock(int, int, void *) override;
+    const char *GetUnitType() override;
+    double GetOffset(int *pbSuccess = nullptr) override;
+    double GetScale(int *pbSuccess = nullptr) override;
 
-    virtual CPLErr IWriteBlock(int, int, void *) override;
-    virtual CPLErr SetUnitType(const char *) override;
+    CPLErr IWriteBlock(int, int, void *) override;
+    CPLErr SetUnitType(const char *) override;
 };
 
 /************************************************************************/
@@ -258,7 +248,7 @@ CPLErr TerragenRasterBand::IReadBlock(CPL_UNUSED int nBlockXOff, int nBlockYOff,
     CPLAssert(nBlockXOff == 0);
     CPLAssert(pImage != nullptr);
 
-    TerragenDataset &ds = *reinterpret_cast<TerragenDataset *>(poDS);
+    TerragenDataset &ds = *cpl::down_cast<TerragenDataset *>(poDS);
 
     /* -------------------------------------------------------------------- */
     /*      Seek to scanline.
@@ -305,7 +295,7 @@ const char *TerragenRasterBand::GetUnitType()
 {
     // todo: Return elevation units.
     // For Terragen documents, it is the same as the ground units.
-    TerragenDataset *poGDS = reinterpret_cast<TerragenDataset *>(poDS);
+    TerragenDataset *poGDS = cpl::down_cast<TerragenDataset *>(poDS);
 
     return poGDS->m_szUnits;
 }
@@ -316,7 +306,7 @@ const char *TerragenRasterBand::GetUnitType()
 
 double TerragenRasterBand::GetScale(int *pbSuccess)
 {
-    const TerragenDataset &ds = *reinterpret_cast<TerragenDataset *>(poDS);
+    const TerragenDataset &ds = *cpl::down_cast<TerragenDataset *>(poDS);
     if (pbSuccess != nullptr)
         *pbSuccess = TRUE;
 
@@ -329,7 +319,7 @@ double TerragenRasterBand::GetScale(int *pbSuccess)
 
 double TerragenRasterBand::GetOffset(int *pbSuccess)
 {
-    const TerragenDataset &ds = *reinterpret_cast<TerragenDataset *>(poDS);
+    const TerragenDataset &ds = *cpl::down_cast<TerragenDataset *>(poDS);
     if (pbSuccess != nullptr)
         *pbSuccess = TRUE;
 
@@ -349,7 +339,7 @@ CPLErr TerragenRasterBand::IWriteBlock(CPL_UNUSED int nBlockXOff,
 
     const size_t pixelsize = sizeof(GInt16);
 
-    TerragenDataset &ds = *reinterpret_cast<TerragenDataset *>(poDS);
+    TerragenDataset &ds = *cpl::down_cast<TerragenDataset *>(poDS);
     if (m_bFirstTime)
     {
         m_bFirstTime = false;
@@ -389,7 +379,7 @@ CPLErr TerragenRasterBand::IWriteBlock(CPL_UNUSED int nBlockXOff,
 
 CPLErr TerragenRasterBand::SetUnitType(const char *psz)
 {
-    TerragenDataset &ds = *reinterpret_cast<TerragenDataset *>(poDS);
+    TerragenDataset &ds = *cpl::down_cast<TerragenDataset *>(poDS);
 
     if (EQUAL(psz, "m"))
         ds.m_dMetersPerElevUnit = 1.0;
@@ -424,12 +414,12 @@ TerragenDataset::TerragenDataset()
     m_dLogSpan[0] = 0.0;
     m_dLogSpan[1] = 0.0;
 
-    m_adfTransform[0] = 0.0;
-    m_adfTransform[1] = m_dSCAL;
-    m_adfTransform[2] = 0.0;
-    m_adfTransform[3] = 0.0;
-    m_adfTransform[4] = 0.0;
-    m_adfTransform[5] = m_dSCAL;
+    m_gt[0] = 0.0;
+    m_gt[1] = m_dSCAL;
+    m_gt[2] = 0.0;
+    m_gt[3] = 0.0;
+    m_gt[4] = 0.0;
+    m_gt[5] = m_dSCAL;
     m_span_m[0] = 0.0;
     m_span_m[1] = 0.0;
     m_span_px[0] = 0.0;
@@ -509,16 +499,16 @@ bool TerragenDataset::write_header()
         */
 
         /* const double m_dDegLongPerPixel =
-              fabs(m_adfTransform[1]); */
+              fabs(m_gt[1]); */
 
-        const double m_dDegLatPerPixel = std::abs(m_adfTransform[5]);
+        const double m_dDegLatPerPixel = std::abs(m_gt[5]);
 
         /* const double m_dCenterLongitude =
-              m_adfTransform[0] +
+              m_gt[0] +
               (0.5 * m_dDegLongPerPixel * (nXSize-1)); */
 
         const double m_dCenterLatitude =
-            m_adfTransform[3] + (0.5 * m_dDegLatPerPixel * (nYSize - 1));
+            m_gt[3] + (0.5 * m_dDegLatPerPixel * (nYSize - 1));
 
         const double dLatCircum =
             kdEarthCircumEquat *
@@ -798,12 +788,12 @@ int TerragenDataset::LoadFromFile()
     // Make our projection to have origin at the
     // NW corner, and groundscale to match elev scale
     // (i.e., uniform voxels).
-    m_adfTransform[0] = 0.0;
-    m_adfTransform[1] = m_dSCAL;
-    m_adfTransform[2] = 0.0;
-    m_adfTransform[3] = 0.0;
-    m_adfTransform[4] = 0.0;
-    m_adfTransform[5] = m_dSCAL;
+    m_gt[0] = 0.0;
+    m_gt[1] = m_dSCAL;
+    m_gt[2] = 0.0;
+    m_gt[3] = 0.0;
+    m_gt[4] = 0.0;
+    m_gt[5] = m_dSCAL;
 
     /* -------------------------------------------------------------------- */
     /*      Set projection.                                                 */
@@ -871,12 +861,12 @@ const OGRSpatialReference *TerragenDataset::GetSpatialRef() const
 /*                          SetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr TerragenDataset::SetGeoTransform(double *padfGeoTransform)
+CPLErr TerragenDataset::SetGeoTransform(const GDALGeoTransform &gt)
 {
-    memcpy(m_adfTransform, padfGeoTransform, sizeof(m_adfTransform));
+    m_gt = gt;
 
     // Average the projection scales.
-    m_dGroundScale = average(fabs(m_adfTransform[1]), fabs(m_adfTransform[5]));
+    m_dGroundScale = average(fabs(m_gt[1]), fabs(m_gt[5]));
     return CE_None;
 }
 
@@ -884,9 +874,9 @@ CPLErr TerragenDataset::SetGeoTransform(double *padfGeoTransform)
 /*                          GetGeoTransform()                           */
 /************************************************************************/
 
-CPLErr TerragenDataset::GetGeoTransform(double *padfTransform)
+CPLErr TerragenDataset::GetGeoTransform(GDALGeoTransform &gt) const
 {
-    memcpy(padfTransform, m_adfTransform, sizeof(m_adfTransform));
+    gt = m_gt;
     return CE_None;
 }
 

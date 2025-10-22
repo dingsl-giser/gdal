@@ -13,15 +13,7 @@ gdaladdo
 Synopsis
 --------
 
-.. code-block::
-
-    gdaladdo [--help] [--help-general]
-             [-r {nearest|average|rms|gauss|bilinear|cubic|cubicspline|lanczos|average_mp|average_magphase|mode}]
-             [-ro] [-clean] [-q] [-oo <NAME>=<VALUE>]... [-minsize <val>]
-             [--partial-refresh-from-source-timestamp]
-             [--partial-refresh-from-projwin <ulx> <uly> <lrx> <lry>]
-             [--partial-refresh-from-source-extent <filename1>[,<filenameN>]...]
-             <filename> [<levels>]...
+.. program-output:: gdaladdo --help-doc
 
 Description
 -----------
@@ -91,8 +83,6 @@ most supported file formats with one of several downsampling algorithms.
     Maximum width or height of the smallest overview level. Only taken into
     account if explicit levels are not specified. Defaults to 256.
 
-    .. versionadded:: 2.3
-
 .. option:: --partial-refresh-from-source-timestamp
 
     .. versionadded:: 3.8
@@ -103,7 +93,7 @@ most supported file formats with one of several downsampling algorithms.
     and regenerate the overview for areas corresponding to sources whose
     timestamp is more recent than the external overview of the VRT.
     By default all existing overview levels will be refreshed, unless explicit
-    levels are specified.
+    levels are specified. See :example:`refresh-vrt`.
 
 .. option:: --partial-refresh-from-projwin <ulx> <uly> <lrx> <lry>
 
@@ -126,7 +116,7 @@ most supported file formats with one of several downsampling algorithms.
     Note that the filenames are only used to determine the regions of interest
     to refresh. The reference source pixels are the one of the main dataset.
     By default all existing overview levels will be refreshed, unless explicit
-    levels are specified.
+    levels are specified. See :example:`refresh-tiff`.
 
 .. option:: <filename>
 
@@ -135,8 +125,6 @@ most supported file formats with one of several downsampling algorithms.
 .. option:: <levels>
 
     A list of integral overview levels to build. Ignored with :option:`-clean` option.
-
-    .. versionadded:: 2.3
 
         Levels are no longer required to build overviews.
         In which case, appropriate overview power-of-two factors will be selected
@@ -168,7 +156,7 @@ in TIFF format.  By default, the GeoTIFF driver stores overviews internally to t
 operated on (if it is writable), unless the -ro flag is specified.
 
 Most drivers also support an alternate overview format using Erdas Imagine
-format.  To trigger this use the :config:`USE_RRD=YES` configuration option.  This will
+format.  To trigger this use the :config:`USE_RRD=YES` configuration option (:example:`use-rrd`).  This will
 place the overviews in an associated .aux file suitable for direct use with
 Imagine or ArcGIS as well as GDAL applications.  (e.g. --config USE_RRD YES)
 
@@ -227,7 +215,7 @@ External overviews can be created in the BigTIFF format by using
 the :config:`BIGTIFF_OVERVIEW` configuration option:
 ``--config BIGTIFF_OVERVIEW {IF_NEEDED|IF_SAFER|YES|NO}``.
 
-The default value is IF_SAFER starting with GDAL 2.3.0 (previously was IF_NEEDED).
+The default value is IF_SAFER.
 The behavior of this option is exactly the same as the BIGTIFF creation option
 documented in the GeoTIFF driver documentation.
 
@@ -280,64 +268,78 @@ Functionality of this utility can be done from C with :cpp:func:`GDALBuildOvervi
 Examples
 --------
 
-Create overviews, embedded in the supplied TIFF file, with automatic computation
-of levels (GDAL 2.3 or later)
+.. example::
+   :title: Create overviews, embedded in the supplied TIFF file, with automatic computation of levels
 
-::
+   .. code-block:: bash
 
-    gdaladdo -r average abc.tif
+       gdaladdo -r average abc.tif
 
-Create overviews, embedded in the supplied TIFF file:
+.. example::
+   :title: Create overviews, embedded in the supplied TIFF file
 
-::
+   .. code-block:: bash
 
-    gdaladdo -r average abc.tif 2 4 8 16
+       gdaladdo -r average abc.tif 2 4 8 16
 
-Create an external compressed GeoTIFF overview file from the ERDAS .IMG file:
+.. example::
+   :title: Create an external compressed GeoTIFF overview file from the ERDAS .IMG file
 
-::
+   .. code-block:: bash
 
-    gdaladdo -ro --config COMPRESS_OVERVIEW DEFLATE erdas.img 2 4 8 16
+       gdaladdo -ro --config COMPRESS_OVERVIEW=YES erdas.img 2 4 8 16
 
-Create an external JPEG-compressed GeoTIFF overview file from a 3-band RGB dataset
-(if the dataset is a writable GeoTIFF, you also need to add the -ro option to
-force the generation of external overview):
+.. example::
+   :title: Create an external JPEG-compressed GeoTIFF overview file from a 3-band RGB dataset
 
-::
+   If the dataset is a writable GeoTIFF, you also need to add the :option:`-ro` option to
+   force the generation of external overview.
 
-    gdaladdo --config COMPRESS_OVERVIEW JPEG --config PHOTOMETRIC_OVERVIEW YCBCR
-             --config INTERLEAVE_OVERVIEW PIXEL rgb_dataset.ext 2 4 8 16
+   .. code-block:: bash
 
-Create an Erdas Imagine format overviews for the indicated JPEG file:
+       gdaladdo --config COMPRESS_OVERVIEW=JPEG --config PHOTOMETRIC_OVERVIEW=YCBCR
+                --config INTERLEAVE_OVERVIEW=PIXEL rgb_dataset.ext 2 4 8 16
 
-::
+.. example::
+   :title: Create Erdas Imagine format overviews for the indicated JPEG file
+   :id: use-rrd
 
-    gdaladdo --config USE_RRD YES airphoto.jpg 3 9 27 81
+   .. code-block:: bash
 
-Create overviews for a specific subdataset, like for example one of potentially many raster layers in a GeoPackage (the "filename" parameter must be driver prefix, filename and subdataset name, like e.g. shown by gdalinfo):
+       gdaladdo --config USE_RRD=YES airphoto.jpg 3 9 27 81
 
-::
+.. example::
+   :title: Create overviews for a specific subdataset
 
-    gdaladdo GPKG:file.gpkg:layer
+   For example, one of potentially many raster layers in a GeoPackage (the "filename" parameter must be driver prefix, filename and subdataset name, like e.g. shown by gdalinfo):
 
+   .. code-block:: bash
 
-Refresh overviews of a VRT file, for sources that have been modified after the
-.vrt.ovr generation:
-
-::
-
-    gdalbuildvrt my.vrt tile1.tif tile2.tif                          # create VRT
-    gdaladdo -r cubic my.vrt                                         # initial overview generation
-    touch tile1.tif                                                  # simulate update of one of the source tiles
-    gdaladdo --partial-refresh-from-source-timestamp -r cubic my.vrt # refresh overviews
+       gdaladdo GPKG:file.gpkg:layer
 
 
-Refresh overviews of a TIFF file:
+.. example::
+   :title: Refresh overviews of a VRT file
+   :id: refresh-vrt
 
-::
+   This is needed when for sources have been modified after the .vrt.ovr generation:
 
-    gdalwarp -overwrite tile1.tif tile2.tif mosaic.tif                      # create mosaic
-    gdaladdo -r cubic mosaic.tif                                            # initial overview generation
-    touch tile1.tif                                                         # simulate update of one of the source tiles
-    gdalwarp tile1.tif mosaic.tif                                           # update mosaic
-    gdaladdo --partial-refresh-from-source-extent tile1.tif -r cubic my.vrt # refresh overviews
+   .. code-block:: bash
+
+       gdalbuildvrt my.vrt tile1.tif tile2.tif                          # create VRT
+       gdaladdo -r cubic my.vrt                                         # initial overview generation
+       touch tile1.tif                                                  # simulate update of one of the source tiles
+       gdaladdo --partial-refresh-from-source-timestamp -r cubic my.vrt # refresh overviews
+
+
+.. example::
+   :title: Refresh overviews of a TIFF file
+   :id: refresh-tiff
+
+   .. code-block:: bash
+
+       gdalwarp -overwrite tile1.tif tile2.tif mosaic.tif                          # create mosaic
+       gdaladdo -r cubic mosaic.tif                                                # initial overview generation
+       touch tile1.tif                                                             # simulate update of one of the source tiles
+       gdalwarp tile1.tif mosaic.tif                                               # update mosaic
+       gdaladdo --partial-refresh-from-source-extent tile1.tif -r cubic mosaic.tif # refresh overviews

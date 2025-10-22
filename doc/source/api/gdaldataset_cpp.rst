@@ -9,10 +9,13 @@
 GDALDataset C++ API
 ================================================================================
 
-Include file
-------------
+Include files
+-------------
 
-:file:`gdal_priv.h`
+- :source_file:`gcore/gdal_dataset.h`
+- :source_file:`gcore/gdal_openinfo.h`
+- :source_file:`gcore/gdal_geotransform.h`
+- :source_file:`gcore/gdal_relationship.h`
 
 GDALDataset class
 -----------------
@@ -20,3 +23,32 @@ GDALDataset class
 .. doxygenclass:: GDALDataset
    :project: api
    :members:
+
+GDALOpenInfo class
+----------------------
+
+.. doxygenclass:: GDALOpenInfo
+   :project: api
+   :members:
+
+GDALGeoTransform class
+----------------------
+
+.. doxygenclass:: GDALGeoTransform
+   :project: api
+   :members:
+
+GDALRelationship class
+----------------------
+
+.. doxygenclass:: GDALRelationship
+   :project: api
+   :members:
+
+
+
+.. below is an allow-list for spelling checker.
+
+.. spelling:word-list::
+     GetMetadataItem
+     CREATIONOPTIONLIST

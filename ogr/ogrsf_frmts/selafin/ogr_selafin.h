@@ -6,23 +6,7 @@
  ******************************************************************************
  * Copyright (c) 2014,  François Hissel <francois.hissel@gmail.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_SELAFIN_H_INCLUDED
@@ -100,9 +84,9 @@ class OGRSelafinLayer final : public OGRLayer
                     const OGRSpatialReference *poSpatialRefP,
                     Selafin::Header *poHeaderP, int nStepNumberP,
                     SelafinTypeDef eTypeP);
-    ~OGRSelafinLayer();
+    ~OGRSelafinLayer() override;
 
-    OGRSpatialReference *GetSpatialRef() override
+    const OGRSpatialReference *GetSpatialRef() const override
     {
         return poSpatialRef;
     }
@@ -117,20 +101,15 @@ class OGRSelafinLayer final : public OGRLayer
     void ResetReading() override;
     OGRErr SetNextByIndex(GIntBig nIndex) override;
 
-    OGRFeatureDefn *GetLayerDefn() override
+    const OGRFeatureDefn *GetLayerDefn() const override
     {
         return poFeatureDefn;
     }
 
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     GIntBig GetFeatureCount(int bForce = TRUE) override;
-    OGRErr GetExtent(OGREnvelope *psExtent, int bForce = TRUE) override;
-
-    virtual OGRErr GetExtent(int iGeomField, OGREnvelope *psExtent,
-                             int bForce) override
-    {
-        return OGRLayer::GetExtent(iGeomField, psExtent, bForce);
-    }
+    OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
+                      bool bForce) override;
 
     OGRErr ISetFeature(OGRFeature *poFeature) override;
     OGRErr ICreateFeature(OGRFeature *poFeature) override;
@@ -152,7 +131,7 @@ class OGRSelafinLayer final : public OGRLayer
 /*                           OGRSelafinDataSource                       */
 /************************************************************************/
 
-class OGRSelafinDataSource final : public OGRDataSource
+class OGRSelafinDataSource final : public GDALDataset
 {
   private:
     char *pszName;
@@ -166,28 +145,23 @@ class OGRSelafinDataSource final : public OGRDataSource
 
   public:
     OGRSelafinDataSource();
-    virtual ~OGRSelafinDataSource();
+    ~OGRSelafinDataSource() override;
     int Open(const char *pszFilename, int bUpdate, int bCreate);
     int OpenTable(const char *pszFilename);
 
-    const char *GetName() override
-    {
-        return pszName;
-    }
-
-    int GetLayerCount() override
+    int GetLayerCount() const override
     {
         return nLayers;
     }
 
-    OGRLayer *GetLayer(int) override;
+    const OGRLayer *GetLayer(int) const override;
 
     OGRLayer *ICreateLayer(const char *pszName,
                            const OGRGeomFieldDefn *poGeomFieldDefn,
                            CSLConstList papszOptions) override;
 
-    virtual OGRErr DeleteLayer(int) override;
-    int TestCapability(const char *) override;
+    OGRErr DeleteLayer(int) override;
+    int TestCapability(const char *) const override;
 
     void SetDefaultSelafinName(const char *pszNameIn)
     {

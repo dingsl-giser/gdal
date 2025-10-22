@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  gdaldem testing
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2009-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
@@ -326,11 +309,11 @@ def test_gdaldem_color_relief(gdaldem_path, n43_colorrelief_tif):
     ds = gdal.Open(n43_colorrelief_tif)
     assert ds is not None
 
-    assert ds.GetRasterBand(1).Checksum() == 55009, "Bad checksum"
+    assert ds.GetRasterBand(1).Checksum() == 55066, "Bad checksum"
 
-    assert ds.GetRasterBand(2).Checksum() == 37543, "Bad checksum"
+    assert ds.GetRasterBand(2).Checksum() == 37594, "Bad checksum"
 
-    assert ds.GetRasterBand(3).Checksum() == 47711, "Bad checksum"
+    assert ds.GetRasterBand(3).Checksum() == 47768, "Bad checksum"
 
     src_gt = src_ds.GetGeoTransform()
     dst_gt = ds.GetGeoTransform()
@@ -359,11 +342,11 @@ def test_gdaldem_color_relief_cpt(gdaldem_path, tmp_path):
     ds = gdal.Open(output_tif)
     assert ds is not None
 
-    assert ds.GetRasterBand(1).Checksum() == 55009, "Bad checksum"
+    assert ds.GetRasterBand(1).Checksum() == 55066, "Bad checksum"
 
-    assert ds.GetRasterBand(2).Checksum() == 37543, "Bad checksum"
+    assert ds.GetRasterBand(2).Checksum() == 37594, "Bad checksum"
 
-    assert ds.GetRasterBand(3).Checksum() == 47711, "Bad checksum"
+    assert ds.GetRasterBand(3).Checksum() == 47768, "Bad checksum"
 
     src_gt = src_ds.GetGeoTransform()
     dst_gt = ds.GetGeoTransform()
@@ -381,6 +364,10 @@ def test_gdaldem_color_relief_cpt(gdaldem_path, tmp_path):
 # Test gdaldem color relief to VRT
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdaldem_color_relief_vrt(gdaldem_path, n43_colorrelief_tif, tmp_path):
 
     output_vrt = str(tmp_path / "n43_colorrelief.vrt")
@@ -432,11 +419,11 @@ def test_gdaldem_color_relief_from_float32(gdaldem_path, n43_float32_tif, tmp_pa
     ds = gdal.Open(output_tif)
     assert ds is not None
 
-    assert ds.GetRasterBand(1).Checksum() == 55009, "Bad checksum"
+    assert ds.GetRasterBand(1).Checksum() == 55066, "Bad checksum"
 
-    assert ds.GetRasterBand(2).Checksum() == 37543, "Bad checksum"
+    assert ds.GetRasterBand(2).Checksum() == 37594, "Bad checksum"
 
-    assert ds.GetRasterBand(3).Checksum() == 47711, "Bad checksum"
+    assert ds.GetRasterBand(3).Checksum() == 47768, "Bad checksum"
 
     ds = None
 
@@ -456,11 +443,11 @@ def test_gdaldem_color_relief_png(gdaldem_path, tmp_path):
     ds = gdal.Open(output_png)
     assert ds is not None
 
-    assert ds.GetRasterBand(1).Checksum() == 55009, "Bad checksum"
+    assert ds.GetRasterBand(1).Checksum() == 55066, "Bad checksum"
 
-    assert ds.GetRasterBand(2).Checksum() == 37543, "Bad checksum"
+    assert ds.GetRasterBand(2).Checksum() == 37594, "Bad checksum"
 
-    assert ds.GetRasterBand(3).Checksum() == 47711, "Bad checksum"
+    assert ds.GetRasterBand(3).Checksum() == 47768, "Bad checksum"
 
     ds = None
 
@@ -482,11 +469,11 @@ def test_gdaldem_color_relief_from_float32_to_png(
     ds = gdal.Open(output_png)
     assert ds is not None
 
-    assert ds.GetRasterBand(1).Checksum() == 55009, "Bad checksum"
+    assert ds.GetRasterBand(1).Checksum() == 55066, "Bad checksum"
 
-    assert ds.GetRasterBand(2).Checksum() == 37543, "Bad checksum"
+    assert ds.GetRasterBand(2).Checksum() == 37594, "Bad checksum"
 
-    assert ds.GetRasterBand(3).Checksum() == 47711, "Bad checksum"
+    assert ds.GetRasterBand(3).Checksum() == 47768, "Bad checksum"
 
     ds = None
 
@@ -518,6 +505,10 @@ def test_gdaldem_color_relief_nearest_color_entry(gdaldem_path, tmp_path):
 # Test gdaldem color relief with -nearest_color_entry and -of VRT
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 def test_gdaldem_color_relief_nearest_color_entry_vrt(gdaldem_path, tmp_path):
 
     output_vrt = str(tmp_path / "n43_colorrelief_nearest.vrt")
@@ -584,6 +575,10 @@ NODATA_value nan
 # Test gdaldem color relief with entries with repeated DEM values in the color table (#6422)
 
 
+@pytest.mark.skipif(
+    not gdaltest.vrt_has_open_support(),
+    reason="VRT driver open missing",
+)
 @pytest.mark.require_driver("AAIGRID")
 def test_gdaldem_color_relief_repeated_entry(gdaldem_path, tmp_path):
 

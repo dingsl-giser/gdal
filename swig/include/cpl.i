@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     cpl.i
  * Project:  GDAL Python Interface
@@ -9,23 +8,7 @@
  ******************************************************************************
  * Copyright (c) 2005, Kevin Ruland
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 %include constraints.i
@@ -144,6 +127,8 @@ void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, CPLErrorNum err_no, const c
     CPLErrorHandler pfnHandler = NULL;
     if( pszCallbackName == NULL || EQUAL(pszCallbackName,"CPLQuietErrorHandler") )
       pfnHandler = CPLQuietErrorHandler;
+    else if( EQUAL(pszCallbackName,"CPLQuietWarningsErrorHandler") )
+      pfnHandler = CPLQuietWarningsErrorHandler;
     else if( EQUAL(pszCallbackName,"CPLDefaultErrorHandler") )
       pfnHandler = CPLDefaultErrorHandler;
     else if( EQUAL(pszCallbackName,"CPLLoggingErrorHandler") )
@@ -192,6 +177,7 @@ void CPL_STDCALL PyCPLErrorHandler(CPLErr eErrClass, CPLErrorNum err_no, const c
 %rename (RmdirRecursive) VSIRmdirRecursive;
 %rename (AbortPendingUploads) VSIAbortPendingUploads;
 %rename (Rename) VSIRename;
+%rename (Move) wrapper_VSIMove;
 %rename (GetActualURL) VSIGetActualURL;
 %rename (GetSignedURL) wrapper_VSIGetSignedURL;
 %rename (GetFileSystemsPrefixes) VSIGetFileSystemsPrefixes;
@@ -258,14 +244,10 @@ retStringAndCPLFree* EscapeString(const char* str, int scheme) {
 %clear (int len, unsigned char *bin_string);
 #elif defined(SWIGCSHARP)
 %inline %{
-retStringAndCPLFree* EscapeString(int len, char *bin_string , int scheme) {
-    return CPLEscapeString((const char*)bin_string, len, scheme);
-}
-%}
-
 retStringAndCPLFree* EscapeString(int len, char *bin_string , int scheme=CPLES_SQL) {
     return CPLEscapeString(bin_string, len, scheme);
 }
+%}
 #elif defined(SWIGPYTHON)
 
 %feature( "kwargs" ) wrapper_EscapeString;
@@ -507,7 +489,7 @@ const char *wrapper_CPLGetThreadLocalConfigOption( const char * pszKey, const ch
 
 
 %rename(GetConfigOptions) wrapper_GetConfigOptions;
-#if defined(SWIGPYTHON) || defined(SWIGJAVA)
+#if defined(SWIGPYTHON) || defined(SWIGJAVA) || defined(SWIGCSHARP)
 %apply (char **dictAndCSLDestroy) { char ** };
 #else
 %apply (char **) { char ** };
@@ -519,7 +501,7 @@ char** wrapper_GetConfigOptions() {
 
     papszOpts = CSLMerge(papszOpts, papszTLOpts);
 
-    CPLFree(papszTLOpts);
+    CSLDestroy(papszTLOpts);
 
     return papszOpts;
 };
@@ -586,7 +568,7 @@ GByte *CPLHexToBinary( const char *pszHex, int *pnBytes );
 #endif
 
 %apply Pointer NONNULL {const char * pszFilename};
-/* Added in GDAL 1.7.0 */
+
 
 #if defined(SWIGPYTHON)
 
@@ -639,7 +621,6 @@ VSI_RETVAL wrapper_VSIFileFromMemBuffer( const char* utf8_path, int nBytes, cons
 #endif
 #endif
 
-/* Added in GDAL 1.7.0 */
 VSI_RETVAL VSIUnlink(const char * utf8_path );
 
 %rename (UnlinkBatch) wrapper_VSIUnlinkBatch;
@@ -664,7 +645,6 @@ bool wrapper_VSIUnlinkBatch(char** files)
 }
 %clear (char **files);
 
-/* Added in GDAL 1.7.0 */
 /* Thread support is necessary for binding languages with threaded GC */
 /* even if the user doesn't explicitly use threads */
 %inline {
@@ -674,19 +654,31 @@ int wrapper_HasThreadSupport()
 }
 }
 
-/* Added for GDAL 1.8 */
+%rename (GetCurrentThreadCount) CPLGetCurrentThreadCount();
+int CPLGetCurrentThreadCount();
+
 VSI_RETVAL VSIMkdir(const char *utf8_path, int mode );
 VSI_RETVAL VSIRmdir(const char *utf8_path );
 
-/* Added for GDAL 2.3 */
 VSI_RETVAL VSIMkdirRecursive(const char *utf8_path, int mode );
 VSI_RETVAL VSIRmdirRecursive(const char *utf8_path );
 
-%apply (const char* utf8_path) {(const char* pszOld)};
-%apply (const char* utf8_path) {(const char* pszNew)};
-VSI_RETVAL VSIRename(const char * pszOld, const char *pszNew );
-%clear (const char* pszOld);
-%clear (const char* pszNew);
+%apply (const char* utf8_path) {(const char* old_path)};
+%apply (const char* utf8_path) {(const char* new_path)};
+VSI_RETVAL VSIRename(const char * old_path, const char *new_path );
+#if !defined(SWIGJAVA)
+%feature( "kwargs" ) wrapper_VSIMove;
+#endif
+%inline {
+VSI_RETVAL wrapper_VSIMove(const char * old_path, const char *new_path, char** options = NULL,
+                           GDALProgressFunc callback=NULL,
+                           void* callback_data=NULL)
+{
+    return VSIMove(old_path, new_path, options, callback, callback_data);
+}
+}
+%clear (const char* old_path);
+%clear (const char* new_path);
 
 #if defined(SWIGPYTHON)
 %rename (Sync) wrapper_VSISync;
@@ -758,6 +750,14 @@ void CopyFileRestartable(const char* pszSource,
 
 }
 
+%rename (MoveFile) wrapper_MoveFile;
+%inline {
+int wrapper_MoveFile(const char* pszSource, const char* pszTarget)
+{
+    return CPLMoveFile(pszTarget, pszSource);
+}
+}
+
 %clear (const char* pszSource);
 %clear (const char* pszTarget);
 
@@ -776,9 +776,7 @@ char** VSIGetFileSystemsPrefixes();
 
 const char* VSIGetFileSystemOptions(const char * utf8_path);
 
-
-/* Added for GDAL 1.8
-
+/*
    We do not bother renaming the VSI*L api as this wrapping is not
    considered "official", or available for use by application code.
    It is just for some testing stuff.
@@ -859,7 +857,7 @@ int wrapper_VSIStatL( const char * utf8_path, StatBuf *psStatBufOut, int nFlags 
 #endif
 
 %rename (GetFileMetadata) VSIGetFileMetadata;
-#if defined(SWIGPYTHON)
+#if defined(SWIGPYTHON) || defined(SWIGCSHARP)
 %apply (char **dictAndCSLDestroy) { char ** };
 #else
 %apply (char **) { char ** };
@@ -1012,7 +1010,7 @@ void MultipartUploadGetCapabilities(
 }
 
 %inline {
-char* MultipartUploadStart(const char *pszFilename, char** options = NULL)
+retStringAndCPLFree* MultipartUploadStart(const char *pszFilename, char** options = NULL)
 {
     return VSIMultipartUploadStart(pszFilename, options);
 }
@@ -1021,7 +1019,7 @@ char* MultipartUploadStart(const char *pszFilename, char** options = NULL)
 %apply (size_t nLen, char *pBuf ) { (size_t nDataLength, const char *pData)};
 
 %inline {
-char* MultipartUploadAddPart(const char *pszFilename,
+retStringAndCPLFree* MultipartUploadAddPart(const char *pszFilename,
                              const char *pszUploadId,
                              int nPartNumber,
                              GUIntBig nFileOffset,

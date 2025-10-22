@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Name:     typemaps_python.i
  * Project:  GDAL Python Interface
@@ -1544,6 +1543,7 @@ static PyObject* CSLToList( char** stringarray, bool *pbErr )
 
 OPTIONAL_POD(int,i);
 OPTIONAL_POD(GIntBig,L);
+OPTIONAL_POD(double, d);
 
 /*
  * Typedef const char * <- Any object.
@@ -1692,11 +1692,11 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
 
   if( psXMLTree != NULL && psXMLTree->psNext != NULL )
   {
-	CPLXMLNode *psFirst = psXMLTree;
+    CPLXMLNode *psFirst = psXMLTree;
 
-	/* create a "pseudo" root if we have multiple elements */
+    /* create a "pseudo" root if we have multiple elements */
         psXMLTree = CPLCreateXMLNode( NULL, CXT_Element, "" );
-	psXMLTree->psChild = psFirst;
+    psXMLTree->psChild = psFirst;
         bFakeRoot = TRUE;
   }
 
@@ -1715,7 +1715,7 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
 }
 
 /* ==================================================================== */
-/*	Support function for progress callbacks to python.                  */
+/* Support function for progress callbacks to python.                   */
 /* ==================================================================== */
 
 /*  The following scary, scary, voodoo -- hobu                          */
@@ -1821,6 +1821,8 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
     {
         if( pszCallbackName == NULL || EQUAL(pszCallbackName,"CPLQuietErrorHandler") )
             $1 = CPLQuietErrorHandler;
+        else if( EQUAL(pszCallbackName,"CPLQuietWarningsErrorHandler") )
+            $1 = CPLQuietWarningsErrorHandler;
         else if( EQUAL(pszCallbackName,"CPLDefaultErrorHandler") )
             $1 = CPLDefaultErrorHandler;
         else if( EQUAL(pszCallbackName,"CPLLoggingErrorHandler") )
@@ -1853,7 +1855,7 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
 {
     /* %typemap(out) ( GUInt32 )  */
 
-	$1 = 0;
+    $1 = 0;
 
 }
 
@@ -1861,7 +1863,7 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
 {
     /* %typemap(out) ( GUInt32 )  */
 
-	$result = PyLong_FromUnsignedLong($1);
+    $result = PyLong_FromUnsignedLong($1);
 
 }
 
@@ -1870,8 +1872,8 @@ static PyObject *XMLTreeToPyList( CPLXMLNode *psTree )
     /* %typemap(in) ( GUInt32 )  */
 
     if (PyLong_Check($input) || PyInt_Check($input)) {
-		$1 = PyLong_AsUnsignedLong($input);
-	}
+        $1 = PyLong_AsUnsignedLong($input);
+    }
 
 }
 
@@ -2467,6 +2469,41 @@ DecomposeSequenceOf4DCoordinates( PyObject *seq, int nCount, double *x, double *
     VSIFree(*$3);
 }
 
+%typemap(in) (GDALDataType eType)
+{
+    if (PyInt_Check($input))
+    {
+        $1 = static_cast<GDALDataType>(PyInt_AsLong($input));
+    }
+    else
+    {
+        PyObject* gdal_array = PyImport_ImportModule("osgeo.gdal_array");
+        if (gdal_array)
+        {
+            PyObject* dict = PyModule_GetDict(gdal_array);
+            PyObject* fn = PyDict_GetItemString(dict, "NumericTypeCodeToGDALTypeCode");
+            PyObject* type_code = PyObject_CallFunctionObjArgs(fn, $input, NULL);
+
+            Py_DECREF(gdal_array);
+            if (type_code && PyInt_Check(type_code))
+            {
+                $1 = static_cast<GDALDataType>(PyInt_AsLong(type_code));
+                Py_DECREF(type_code);
+            }
+            else
+            {
+                Py_XDECREF(type_code);
+                PyErr_SetString(PyExc_RuntimeError, "type must be a GDAL data type code or NumPy type");
+                SWIG_fail;
+            }
+        }
+        else
+        {
+            PyErr_SetString(PyExc_RuntimeError, "gdal_array module is not available; type must be a specified as a GDAL data type code");
+            SWIG_fail;
+        }
+    }
+}
 
 %typemap(in) (const char *utf8_path) (int bToFree = 0)
 {
@@ -2579,6 +2616,11 @@ DecomposeSequenceOf4DCoordinates( PyObject *seq, int nCount, double *x, double *
   {
     buf->format = (char*) "I";
     buf->itemsize = 4;
+  }
+  else if( *($3) == GDT_Float16 )
+  {
+    buf->format = (char*) "f";
+    buf->itemsize = 2;
   }
   else if( *($3) == GDT_Float32 )
   {
@@ -2749,7 +2791,8 @@ DecomposeSequenceOf4DCoordinates( PyObject *seq, int nCount, double *x, double *
                                     (*$1)[i]->dfEastLongitudeDeg,
                                     (*$1)[i]->dfNorthLatitudeDeg,
                                     (*$1)[i]->pszAreaName,
-                                    (*$1)[i]->pszProjectionMethod );
+                                    (*$1)[i]->pszProjectionMethod,
+                                    (*$1)[i]->pszCelestialBodyName );
 
     PyTuple_SetItem(dict, i,
        SWIG_NewPointerObj((void*)o,SWIGTYPE_p_OSRCRSInfo,1) );
@@ -3550,6 +3593,52 @@ OBJECT_LIST_INPUT(GDALEDTComponentHS)
 %typemap(freearg) (int iLength, double *pdfData)
 {
   /* %typemap(freearg) (int iLength, double *pdfData) */
+  CPLFree($2);
+}
+
+/***************************************************
+ * Typemap for RasterAttributeTable.ReadValuesIOAsBoolean()
+ ***************************************************/
+
+%typemap(in,numinputs=1) (int iLength, bool *pbData) (int iLength)
+{
+  /* %typemap(in,numinputs=1) (int iLength, bool *pbData) (int iLength) */
+  if ( !PyArg_Parse($input,"i",&iLength) ) {
+    PyErr_SetString(PyExc_TypeError, "not a integer");
+    SWIG_fail;
+  }
+  if( iLength <= 0 )
+  {
+      PyErr_SetString(PyExc_TypeError, "invalid length");
+      SWIG_fail;
+  }
+  $1 = iLength;
+  $2 = (bool*)VSICalloc(iLength, sizeof(bool));
+  if( !$2 )
+  {
+      PyErr_SetString(PyExc_MemoryError, "cannot allocate temporary buffer");
+      SWIG_fail;
+  }
+}
+
+%typemap(argout) (int iLength, bool *pbData)
+{
+  /* %typemap(argout) (int iLength, bool *pbData) */
+  Py_DECREF($result);
+  PyObject *out = PyList_New( $1 );
+  if( !out ) {
+      SWIG_fail;
+  }
+  for( int i=0; i<$1; i++ ) {
+    PyObject *val = PyBool_FromLong( ($2)[i] );
+    PyList_SetItem( out, i, val );
+  }
+  $result = out;
+}
+
+%typemap(freearg) (int iLength, bool *pbData)
+{
+  /* %typemap(freearg) (int iLength, bool *pbData) */
   CPLFree($2);
 }
 

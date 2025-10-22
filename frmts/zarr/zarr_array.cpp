@@ -7,29 +7,14 @@
  ******************************************************************************
  * Copyright (c) 2021, Even Rouault <even dot rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #include "zarr.h"
 #include "ucs4_utf8.hpp"
 
 #include "cpl_float.h"
+#include "cpl_multiproc.h"
 
 #include "netcdf_cf_constants.h"  // for CF_UNITS, etc
 
@@ -341,12 +326,10 @@ bool ZarrArray::FillBlockSize(
         size_t nBlockSize = oDataType.GetSize();
         for (size_t i = 0; i < nDims; ++i)
         {
-            anBlockSize[i] = static_cast<GUInt64>(CPLAtoGIntBig(aszTokens[i]));
-            if (anBlockSize[i] == 0)
+            const auto v = static_cast<GUInt64>(CPLAtoGIntBig(aszTokens[i]));
+            if (v > 0)
             {
-                CPLError(CE_Failure, CPLE_AppDefined,
-                         "Values in BLOCKSIZE should be > 0");
-                return false;
+                anBlockSize[i] = v;
             }
             if (anBlockSize[i] >
                 std::numeric_limits<size_t>::max() / nBlockSize)
@@ -884,7 +867,7 @@ bool ZarrArray::IAdviseReadCommon(const GUInt64 *arrayStartIdx,
     std::vector<uint64_t> anIndicesMax(nDims);
 
     // Compute min and max tile indices in each dimension, and the total
-    // nomber of tiles this represents.
+    // number of tiles this represents.
     nReqTiles = 1;
     for (size_t i = 0; i < nDims; ++i)
     {
@@ -1512,7 +1495,7 @@ lbl_next_depth:
 }
 
 /************************************************************************/
-/*                           ZarrArray::IRead()                         */
+/*                           ZarrArray::IWrite()                        */
 /************************************************************************/
 
 bool ZarrArray::IWrite(const GUInt64 *arrayStartIdx, const size_t *count,
@@ -2649,10 +2632,11 @@ void ZarrArray::ParentRenamed(const std::string &osNewParentFullName)
     // The parent necessarily exist, since it notified us
     CPLAssert(poParent);
 
-    m_osFilename =
-        CPLFormFilename(CPLFormFilename(poParent->GetDirectoryName().c_str(),
-                                        m_osName.c_str(), nullptr),
-                        CPLGetFilename(m_osFilename.c_str()), nullptr);
+    m_osFilename = CPLFormFilenameSafe(
+        CPLFormFilenameSafe(poParent->GetDirectoryName().c_str(),
+                            m_osName.c_str(), nullptr)
+            .c_str(),
+        CPLGetFilename(m_osFilename.c_str()), nullptr);
 }
 
 /************************************************************************/
@@ -2684,10 +2668,10 @@ bool ZarrArray::Rename(const std::string &osNewName)
     }
 
     const std::string osRootDirectoryName(
-        CPLGetDirname(CPLGetDirname(m_osFilename.c_str())));
-    const std::string osOldDirectoryName =
-        CPLFormFilename(osRootDirectoryName.c_str(), m_osName.c_str(), nullptr);
-    const std::string osNewDirectoryName = CPLFormFilename(
+        CPLGetDirnameSafe(CPLGetDirnameSafe(m_osFilename.c_str()).c_str()));
+    const std::string osOldDirectoryName = CPLFormFilenameSafe(
+        osRootDirectoryName.c_str(), m_osName.c_str(), nullptr);
+    const std::string osNewDirectoryName = CPLFormFilenameSafe(
         osRootDirectoryName.c_str(), osNewName.c_str(), nullptr);
 
     if (VSIRename(osOldDirectoryName.c_str(), osNewDirectoryName.c_str()) != 0)
@@ -2701,8 +2685,8 @@ bool ZarrArray::Rename(const std::string &osNewName)
                                                  osNewDirectoryName);
 
     m_osFilename =
-        CPLFormFilename(osNewDirectoryName.c_str(),
-                        CPLGetFilename(m_osFilename.c_str()), nullptr);
+        CPLFormFilenameSafe(osNewDirectoryName.c_str(),
+                            CPLGetFilename(m_osFilename.c_str()), nullptr);
 
     if (poParent)
     {
@@ -2740,6 +2724,7 @@ void ZarrArray::ParseSpecialAttributes(
             if (item.IsValid())
             {
                 poSRS = std::make_shared<OGRSpatialReference>();
+                poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
                 if (poSRS->SetFromUserInput(
                         item.ToString().c_str(),
                         OGRSpatialReference::
@@ -2764,6 +2749,7 @@ void ZarrArray::ParseSpecialAttributes(
             if (gridMappingArray)
             {
                 poSRS = std::make_shared<OGRSpatialReference>();
+                poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
                 CPLStringList aosKeyValues;
                 for (const auto &poAttr : gridMappingArray->GetAttributes())
                 {
@@ -2794,6 +2780,40 @@ void ZarrArray::ParseSpecialAttributes(
         }
     }
 
+    // For EOPF Sentinel Zarr Samples Service datasets, read attributes from
+    // the STAC Proj extension attributes to get the CRS.
+    if (!poSRS)
+    {
+        const auto oProjEPSG = oAttributes["proj:epsg"];
+        if (oProjEPSG.GetType() == CPLJSONObject::Type::Integer)
+        {
+            poSRS = std::make_shared<OGRSpatialReference>();
+            poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            if (poSRS->importFromEPSG(oProjEPSG.ToInteger()) != OGRERR_NONE)
+            {
+                poSRS.reset();
+            }
+        }
+        else
+        {
+            const auto oProjWKT2 = oAttributes["proj:wkt2"];
+            if (oProjWKT2.GetType() == CPLJSONObject::Type::String)
+            {
+                poSRS = std::make_shared<OGRSpatialReference>();
+                poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+                if (poSRS->importFromWkt(oProjWKT2.ToString().c_str()) !=
+                    OGRERR_NONE)
+                {
+                    poSRS.reset();
+                }
+            }
+        }
+
+        // There is also a "proj:transform" attribute, but we don't need to
+        // use it since the x and y dimensions are already associated with a
+        // 1-dimensional array with the values.
+    }
+
     if (poSRS)
     {
         int iDimX = 0;
@@ -2814,10 +2834,12 @@ void ZarrArray::ParseSpecialAttributes(
         }
         if (iDimX > 0 && iDimY > 0)
         {
-            if (poSRS->GetDataAxisToSRSAxisMapping() == std::vector<int>{2, 1})
+            const auto &oMapping = poSRS->GetDataAxisToSRSAxisMapping();
+            if (oMapping == std::vector<int>{2, 1} ||
+                oMapping == std::vector<int>{2, 1, 3})
                 poSRS->SetDataAxisToSRSAxisMapping({iDimY, iDimX});
-            else if (poSRS->GetDataAxisToSRSAxisMapping() ==
-                     std::vector<int>{1, 2})
+            else if (oMapping == std::vector<int>{1, 2} ||
+                     oMapping == std::vector<int>{1, 2, 3})
                 poSRS->SetDataAxisToSRSAxisMapping({iDimX, iDimY});
         }
 

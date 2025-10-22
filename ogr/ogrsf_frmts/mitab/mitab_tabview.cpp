@@ -12,28 +12,13 @@
  * Copyright (c) 1999-2002, Daniel Morissette
  * Copyright (c) 2014, Even Rouault <even.rouault at spatialys.com>
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  **********************************************************************/
 
 #include "cpl_port.h"
 #include "mitab.h"
 
+#include <cassert>
 #include <cctype>
 #include <cstddef>
 #include <cstdio>
@@ -381,7 +366,8 @@ int TABView::OpenForWrite(const char *pszFname)
         m_papszTABFnames = CSLAppendPrintf(m_papszTABFnames, "%s%s%d.tab",
                                            pszPath, pszBasename, iFile + 1);
 #ifndef _WIN32
-        /* coverity[var_deref_op] */
+        assert(m_papszTABFnames);
+        assert(m_papszTABFnames[iFile]);
         TABAdjustFilenameExtension(m_papszTABFnames[iFile]);
 #endif
 
@@ -603,10 +589,10 @@ int TABView::WriteTABFile()
         VSIFPrintfL(fp, "Create View %s As\n", pszTable);
         VSIFPrintfL(fp, "Select ");
 
-        OGRFeatureDefn *poDefn = GetLayerDefn();
+        const OGRFeatureDefn *poDefn = GetLayerDefn();
         for (int iField = 0; iField < poDefn->GetFieldCount(); iField++)
         {
-            OGRFieldDefn *poFieldDefn = poDefn->GetFieldDefn(iField);
+            const OGRFieldDefn *poFieldDefn = poDefn->GetFieldDefn(iField);
             if (iField == 0)
                 VSIFPrintfL(fp, "%s", poFieldDefn->GetNameRef());
             else
@@ -858,7 +844,7 @@ OGRErr TABView::CreateFeature(TABFeature *poFeature)
 }
 
 /**********************************************************************
- *                   TABView::GetLayerDefn()
+ *                   TABView::GetLayerDefn() const
  *
  * Returns a reference to the OGRFeatureDefn that will be used to create
  * features in this dataset.
@@ -868,7 +854,7 @@ OGRErr TABView::CreateFeature(TABFeature *poFeature)
  * NULL if the OGRFeatureDefn has not been initialized yet (i.e. no file
  * opened yet)
  **********************************************************************/
-OGRFeatureDefn *TABView::GetLayerDefn()
+const OGRFeatureDefn *TABView::GetLayerDefn() const
 {
     if (m_poRelation)
         return m_poRelation->GetFeatureDefn();
@@ -1025,7 +1011,7 @@ int TABView::GetBounds(double &dXMin, double &dYMin, double &dXMax,
 }
 
 /**********************************************************************
- *                   TABView::GetExtent()
+ *                   TABView::IGetExtent()
  *
  * Fetch extent of the data currently stored in the dataset.
  *
@@ -1034,7 +1020,7 @@ int TABView::GetBounds(double &dXMin, double &dYMin, double &dXMax,
  *
  * Returns OGRERR_NONE/OGRRERR_FAILURE.
  **********************************************************************/
-OGRErr TABView::GetExtent(OGREnvelope *psExtent, int bForce)
+OGRErr TABView::IGetExtent(int iGeomField, OGREnvelope *psExtent, bool bForce)
 {
     if (m_nMainTableIndex == -1)
     {
@@ -1044,7 +1030,8 @@ OGRErr TABView::GetExtent(OGREnvelope *psExtent, int bForce)
         return OGRERR_FAILURE;
     }
 
-    return m_papoTABFiles[m_nMainTableIndex]->GetExtent(psExtent, bForce);
+    return m_papoTABFiles[m_nMainTableIndex]->GetExtent(iGeomField, psExtent,
+                                                        bForce);
 }
 
 /**********************************************************************
@@ -1085,7 +1072,7 @@ int TABView::GetFeatureCountByType(int &numPoints, int &numLines,
  *
  * Returns NULL if the SpatialRef cannot be accessed.
  **********************************************************************/
-OGRSpatialReference *TABView::GetSpatialRef()
+const OGRSpatialReference *TABView::GetSpatialRef() const
 {
     if (m_nMainTableIndex == -1)
     {
@@ -1132,7 +1119,7 @@ int TABView::SetBounds(double dXMin, double dYMin, double dXMax, double dYMax)
 /*                           TestCapability()                           */
 /************************************************************************/
 
-int TABView::TestCapability(const char *pszCap)
+int TABView::TestCapability(const char *pszCap) const
 
 {
     if (EQUAL(pszCap, OLCRandomRead))
@@ -1276,8 +1263,8 @@ int TABRelation::Init(const char *pszViewName, TABFile *poMainTable,
         return -1;
 
     // We'll need the feature Defn later...
-    OGRFeatureDefn *poMainDefn = poMainTable->GetLayerDefn();
-    OGRFeatureDefn *poRelDefn = poRelTable->GetLayerDefn();
+    const OGRFeatureDefn *poMainDefn = poMainTable->GetLayerDefn();
+    const OGRFeatureDefn *poRelDefn = poRelTable->GetLayerDefn();
 
     /*-----------------------------------------------------------------
      * Keep info for later use about source tables, etc.
@@ -1337,7 +1324,7 @@ int TABRelation::Init(const char *pszViewName, TABFile *poMainTable,
 
         for (int i = 0; i < numFields1; i++)
         {
-            OGRFieldDefn *poFieldDefn = poMainDefn->GetFieldDefn(i);
+            const OGRFieldDefn *poFieldDefn = poMainDefn->GetFieldDefn(i);
 
             papszSelectedFields =
                 CSLAddString(papszSelectedFields, poFieldDefn->GetNameRef());
@@ -1345,7 +1332,7 @@ int TABRelation::Init(const char *pszViewName, TABFile *poMainTable,
 
         for (int i = 0; i < numFields2; i++)
         {
-            OGRFieldDefn *poFieldDefn = poRelDefn->GetFieldDefn(i);
+            const OGRFieldDefn *poFieldDefn = poRelDefn->GetFieldDefn(i);
 
             if (CSLFindString(papszSelectedFields, poFieldDefn->GetNameRef()) !=
                 -1)
@@ -1360,7 +1347,7 @@ int TABRelation::Init(const char *pszViewName, TABFile *poMainTable,
      * Create new FeatureDefn and copy selected fields definitions
      * while updating the appropriate field maps.
      *----------------------------------------------------------------*/
-    OGRFieldDefn *poFieldDefn = nullptr;
+    const OGRFieldDefn *poFieldDefn = nullptr;
 
     m_poDefn = new OGRFeatureDefn(pszViewName);
     // Ref count defaults to 0... set it to 1
@@ -1454,8 +1441,8 @@ int TABRelation::CreateRelFields()
     /*-----------------------------------------------------------------
      * Update field maps
      *----------------------------------------------------------------*/
-    OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
-    OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
+    const OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
+    const OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
 
     m_panMainTableFieldMap = static_cast<int *>(CPLRealloc(
         m_panMainTableFieldMap, poMainDefn->GetFieldCount() * sizeof(int)));
@@ -1707,7 +1694,7 @@ int TABRelation::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
                                           bApproxOK) != 0)
             return -1;
 
-        OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
+        const OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
 
         m_panMainTableFieldMap = static_cast<int *>(CPLRealloc(
             m_panMainTableFieldMap, poMainDefn->GetFieldCount() * sizeof(int)));
@@ -1728,7 +1715,7 @@ int TABRelation::AddFieldNative(const char *pszName, TABFieldType eMapInfoType,
                                          bApproxOK) != 0)
             return -1;
 
-        OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
+        const OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
 
         m_panRelTableFieldMap = static_cast<int *>(CPLRealloc(
             m_panRelTableFieldMap, poRelDefn->GetFieldCount() * sizeof(int)));
@@ -1887,8 +1874,8 @@ int TABRelation::WriteFeature(TABFeature *poFeature, int nFeatureId /*=-1*/)
     CPLAssert(m_poMainTable && m_poRelTable);
 
     // We'll need the feature Defn later...
-    OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
-    OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
+    const OGRFeatureDefn *poMainDefn = m_poMainTable->GetLayerDefn();
+    const OGRFeatureDefn *poRelDefn = m_poRelTable->GetLayerDefn();
 
     /*-----------------------------------------------------------------
      * Create one feature for each table

@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test VRTRawRasterBand support.
@@ -11,31 +10,31 @@
 # Copyright (c) 2003, Frank Warmerdam <warmerdam@pobox.com>
 # Copyright (c) 2010-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import os
+import shutil
 
 import gdaltest
 import pytest
 
 from osgeo import gdal
+
+
+def _vrt_has_raw_support():
+    drv = gdal.GetDriverByName("VRT")
+    return (
+        drv is not None
+        and drv.GetMetadataItem("GDAL_VRT_ENABLE_RAWRASTERBAND") == "YES"
+        and gdaltest.vrt_has_open_support()
+    )
+
+
+pytestmark = pytest.mark.skipif(
+    not _vrt_has_raw_support(),
+    reason="VRT driver open missing and/or GDAL_VRT_ENABLE_RAWRASTERBAND disabled",
+)
 
 
 def _xmlsearch(root, nodetype, name):
@@ -63,10 +62,16 @@ def small_raw_vrt(tmp_path):
 
     rawlink_vrt = str(tmp_path / "rawlink.vrt")
 
+    shutil.copyfile("data/small.raw", tmp_path / "small.raw")
+
     driver = gdal.GetDriverByName("VRT")
     ds = driver.Create(rawlink_vrt, 31, 35, 0)
 
-    options = ["subClass=VRTRawRasterBand", "SourceFilename=data/small.raw"]
+    options = [
+        "subClass=VRTRawRasterBand",
+        "SourceFilename=small.raw",
+        "relativeToVRT=1",
+    ]
 
     result = ds.AddBand(gdal.GDT_Byte, options)
     assert result == gdal.CE_None, "AddBand() returned error code"
@@ -112,8 +117,8 @@ def test_vrtrawlink_4(tmp_path, small_raw_vrt):
     # Add a new band pointing to this bogus file.
     options = [
         "subClass=VRTRawRasterBand",
-        f"SourceFilename={rawlink_dat}",
-        "relativeToVRT=0",
+        "SourceFilename=rawlink.dat",
+        "relativeToVRT=1",
         "ImageOffset=                      100",
         "PixelOffset=3",
         "LineOffset=93",
@@ -289,53 +294,150 @@ def test_vrtrawlink_7(tmp_path):
 # Test error case (too much memory allocation)
 
 
-def test_vrtrawlink_8():
+def test_vrtrawlink_8(tmp_vsimem):
 
-    for _ in range(2):
-        with pytest.raises(Exception, match=r".*Image file is too small.*"):
-            gdal.Open(
-                """<VRTDataset rasterXSize="200000" rasterYSize="1">
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "my.vrt",
+        """<VRTDataset rasterXSize="200000" rasterYSize="1">
         <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
-            <SourceFilename relativetoVRT="0">data/small.raw</SourceFilename>
+            <SourceFilename relativetoVRT="1">my.raw</SourceFilename>
             <ImageOffset>0</ImageOffset>
             <PixelOffset>200000</PixelOffset>
             <LineOffset>1</LineOffset>
             <ByteOrder>LSB</ByteOrder>
         </VRTRasterBand>
-        </VRTDataset>"""
-            )
+        </VRTDataset>""",
+    )
+    gdal.FileFromMemBuffer(tmp_vsimem / "my.raw", "foo")
+
+    for _ in range(2):
+        with pytest.raises(Exception, match=r".*Image file is too small.*"):
+            gdal.Open(tmp_vsimem / "my.vrt")
 
 
 ###############################################################################
 # Test error case (non-existing file)
 
 
-def test_vrtrawlink_9():
+def test_vrtrawlink_9(tmp_vsimem):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "my.vrt",
+        """<VRTDataset rasterXSize="200000" rasterYSize="1">
+        <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename relativetoVRT="1">i/do/not/exist</SourceFilename>
+            <ImageOffset>0</ImageOffset>
+            <PixelOffset>200000</PixelOffset>
+            <LineOffset>1</LineOffset>
+            <ByteOrder>LSB</ByteOrder>
+        </VRTRasterBand>
+        </VRTDataset>""",
+    )
 
     with pytest.raises(Exception, match=r".*Unable to open.*"):
-        gdal.Open(
-            """<VRTDataset rasterXSize="1" rasterYSize="1">
-    <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
-        <SourceFilename relativetoVRT="0">i/do/not/exist</SourceFilename>
-    </VRTRasterBand>
-    </VRTDataset>"""
-        )
+        gdal.Open(tmp_vsimem / "my.vrt")
 
 
 ###############################################################################
 # Test error case (invalid byte order)
 
 
-def test_vrtrawlink_10():
+def test_vrtrawlink_10(tmp_vsimem):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "my.vrt",
+        """<VRTDataset rasterXSize="1" rasterYSize="1">
+        <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename relativetoVRT="1">my.raw</SourceFilename>
+            <ByteOrder>invalid</ByteOrder>
+        </VRTRasterBand>
+        </VRTDataset>""",
+    )
+    gdal.FileFromMemBuffer(tmp_vsimem / "my.raw", "foo")
 
     with pytest.raises(Exception, match=r".*ByteOrder.*"):
+        gdal.Open(tmp_vsimem / "my.vrt")
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_vax_order(tmp_vsimem):
+
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "my.vrt",
+        """<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename relativetoVRT="1">data/vicar/vicar_vax_float32.vic</SourceFilename>
+            <ImageOffset>368</ImageOffset>
+            <PixelOffset>4</PixelOffset>
+            <LineOffset>16</LineOffset>
+            <ByteOrder>VAX</ByteOrder>
+        </VRTRasterBand>
+        </VRTDataset>""",
+    )
+    gdal.FileFromMemBuffer(
+        tmp_vsimem / "data/vicar/vicar_vax_float32.vic",
+        open("data/vicar/vicar_vax_float32.vic", "rb").read(),
+    )
+
+    ds = gdal.Open(tmp_vsimem / "my.vrt")
+    assert ds.GetRasterBand(1).Checksum() == 129
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_disabled_open():
+
+    with gdaltest.config_option("GDAL_VRT_ENABLE_RAWRASTERBAND", "NO"):
+        with pytest.raises(
+            Exception, match="VRTRawRasterBand support has been disabled at run-time"
+        ):
+            gdal.Open("data/small.vrt")
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_disabled_add_band():
+
+    with gdaltest.config_option("GDAL_VRT_ENABLE_RAWRASTERBAND", "NO"):
+        driver = gdal.GetDriverByName("VRT")
+        ds = driver.Create("", 31, 35, 0)
+
+        # Add a new band pointing to this bogus file.
+        options = [
+            "subClass=VRTRawRasterBand",
+            "SourceFilename=rawlink7.dat",
+            "relativeToVRT=1",
+            "ImageOffset=100",
+            "PixelOffset=3",
+            "LineOffset=93",
+            "ByteOrder=MSB",
+        ]
+        with pytest.raises(
+            Exception, match="VRTRawRasterBand support has been disabled at run-time"
+        ):
+            ds.AddBand(gdal.GDT_UInt16, options)
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_non_relative_filename():
+
+    with pytest.raises(Exception, match="relativeToVRT flag is not set"):
         gdal.Open(
             """<VRTDataset rasterXSize="1" rasterYSize="1">
-    <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
-        <SourceFilename relativetoVRT="0">data/small.raw</SourceFilename>
-        <ByteOrder>invalid</ByteOrder>
-    </VRTRasterBand>
-    </VRTDataset>"""
+            <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+                <SourceFilename relativetoVRT="0">foo</SourceFilename>
+            </VRTRasterBand>
+            </VRTDataset>"""
         )
 
 
@@ -343,17 +445,177 @@ def test_vrtrawlink_10():
 #
 
 
-def test_vrtrawlink_vax_order():
+def test_vrtrawlink_relative_filename_with_dotdot():
 
-    ds = gdal.Open(
-        """<VRTDataset rasterXSize="4" rasterYSize="3">
+    with gdaltest.config_option(
+        "GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "SIBLING_OR_CHILD_OF_VRT_PATH"
+    ):
+        with pytest.raises(
+            Exception, match="it may not be a sibling or child of the VRT path"
+        ):
+            gdal.Open(
+                """<VRTDataset rasterXSize="1" rasterYSize="1">
+                <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+                    <SourceFilename relativetoVRT="1">foo/../bar</SourceFilename>
+                </VRTRasterBand>
+                </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_relative_filename_with_abspath():
+
+    with gdaltest.config_option(
+        "GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "SIBLING_OR_CHILD_OF_VRT_PATH"
+    ):
+        with pytest.raises(
+            Exception, match="is invalid because it is not relative to the VRT path "
+        ):
+            gdal.Open(
+                """<VRTDataset rasterXSize="1" rasterYSize="1">
+                <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+                    <SourceFilename relativetoVRT="1">/etc/passwd</SourceFilename>
+                </VRTRasterBand>
+                </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_ALL():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ALL"):
+        ds = gdal.Open(
+            """<VRTDataset rasterXSize="4" rasterYSize="3">
         <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
-            <SourceFilename relativetoVRT="0">data/vicar/vicar_vax_float32.vic</SourceFilename>
+            <SourceFilename>data/vicar/vicar_vax_float32.vic</SourceFilename>
             <ImageOffset>368</ImageOffset>
             <PixelOffset>4</PixelOffset>
             <LineOffset>16</LineOffset>
             <ByteOrder>VAX</ByteOrder>
         </VRTRasterBand>
         </VRTDataset>"""
-    )
-    assert ds.GetRasterBand(1).Checksum() == 129
+        )
+        assert ds.GetRasterBand(1).Checksum() == 129
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_ONLY_REMOTE_rejected():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ONLY_REMOTE"):
+        with pytest.raises(Exception, match="is a local file"):
+            gdal.Open(
+                """<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename>data/vicar/vicar_vax_float32.vic</SourceFilename>
+        </VRTRasterBand>
+        </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+@pytest.mark.require_curl()
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_ONLY_REMOTE_accepted():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "ONLY_REMOTE"):
+        ds = gdal.Open(
+            """<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename>/vsicurl/https://raw.githubusercontent.com/OSGeo/gdal/refs/heads/release/3.11/autotest/gdrivers/data/vicar/vicar_vax_float32.vic</SourceFilename>
+            <ImageOffset>368</ImageOffset>
+            <PixelOffset>4</PixelOffset>
+            <LineOffset>16</LineOffset>
+            <ByteOrder>VAX</ByteOrder>
+        </VRTRasterBand>
+        </VRTDataset>"""
+        )
+        assert ds.GetRasterBand(1).Checksum() == 129
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_paths_invalid():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", "invalid"):
+        with pytest.raises(Exception, match="'invalid' is not an absolute path"):
+            gdal.Open(
+                """<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename>data/vicar/vicar_vax_float32.vic</SourceFilename>
+        </VRTRasterBand>
+        </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_path_escape():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", os.getcwd()):
+        with pytest.raises(
+            Exception,
+            match="is invalid because the presence of ../ in it may escape from the allowed path",
+        ):
+            gdal.Open(
+                """<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename>../gdrivers/data/vicar/vicar_vax_float32.vic</SourceFilename>
+        </VRTRasterBand>
+        </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_path_not_contained():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", os.getcwd()):
+        with pytest.raises(
+            Exception,
+            match="'/etc/passwd' is invalid because it is not contained in one of the allowed path",
+        ):
+            gdal.Open(
+                """<VRTDataset rasterXSize="1" rasterYSize="1">
+            <VRTRasterBand dataType="Byte" band="1" subClass="VRTRawRasterBand">
+                <SourceFilename>/etc/passwd</SourceFilename>
+            </VRTRasterBand>
+            </VRTDataset>"""
+            )
+
+
+###############################################################################
+#
+
+
+def test_vrtrawlink_GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE_path_ok():
+
+    with gdaltest.config_option("GDAL_VRT_RAWRASTERBAND_ALLOWED_SOURCE", os.getcwd()):
+        ds = gdal.Open(
+            f"""<VRTDataset rasterXSize="4" rasterYSize="3">
+        <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename>{os.getcwd()}/data/vicar/vicar_vax_float32.vic</SourceFilename>
+            <ImageOffset>368</ImageOffset>
+            <PixelOffset>4</PixelOffset>
+            <LineOffset>16</LineOffset>
+            <ByteOrder>VAX</ByteOrder>
+        </VRTRasterBand>
+        </VRTDataset>"""
+        )
+        assert ds.GetRasterBand(1).Checksum() == 129

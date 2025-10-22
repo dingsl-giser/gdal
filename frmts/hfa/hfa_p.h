@@ -1,5 +1,4 @@
 /******************************************************************************
- * $Id$
  *
  * Project:  Erdas Imagine (.img) Translator
  * Purpose:  Private class declarations for the HFA classes used to read
@@ -10,23 +9,7 @@
  ******************************************************************************
  * Copyright (c) 1999, Intergraph Corporation
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef HFA_P_H_INCLUDED
@@ -148,7 +131,7 @@ const char *const *HFAGetUnitMap();
 /*                               HFABand                                */
 /************************************************************************/
 
-class HFABand
+class HFABand final
 {
     int nBlocks;
 
@@ -177,6 +160,8 @@ class HFABand
     void NullBlock(void *);
 
     CPLString osOverName;
+
+    CPL_DISALLOW_COPY_ASSIGN(HFABand)
 
   public:
     HFABand(HFAInfo_t *, HFAEntry *);
@@ -230,7 +215,7 @@ class HFABand
 /*      have a subclass, and are just handled generically with this     */
 /*      class.                                                          */
 /************************************************************************/
-class HFAEntry
+class HFAEntry final
 {
     bool bDirty;
     GUInt32 nFilePos;
@@ -268,6 +253,8 @@ class HFAEntry
                                          const char *pszType, int nRecLevel,
                                          int *pbErrorDetected);
 
+    CPL_DISALLOW_COPY_ASSIGN(HFAEntry)
+
   public:
     static HFAEntry *New(HFAInfo_t *psHFA, GUInt32 nPos, HFAEntry *poParent,
                          HFAEntry *poPrev) CPL_WARN_UNUSED_RESULT;
@@ -279,7 +266,7 @@ class HFAEntry
                          const char *pszTypeName,
                          HFAEntry *poParent) CPL_WARN_UNUSED_RESULT;
 
-    virtual ~HFAEntry();
+    ~HFAEntry();
 
     static HFAEntry *BuildEntryFromMIFObject(HFAEntry *poContainer,
                                              const char *pszMIFObjectPath)
@@ -358,7 +345,7 @@ class HFAEntry
 /*      A field in a HFAType in the dictionary.                         */
 /************************************************************************/
 
-class HFAField
+class HFAField final
 {
   public:
     int nBytes;
@@ -463,6 +450,8 @@ class HFADictionary
     int nTypes;
     int nTypesMax;
     HFAType **papoTypes;
+
+    CPL_DISALLOW_COPY_ASSIGN(HFADictionary)
 
   public:
     // TODO(schwehr): Make these members private.

@@ -1,6 +1,5 @@
 #!/usr/bin/env pytest
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test non-driver specific multidimensional support
@@ -9,29 +8,14 @@
 ###############################################################################
 # Copyright (c) 2021, Even Rouault <even.rouault@spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import array
 import itertools
 import json
 import math
+import struct
 
 import gdaltest
 import pytest
@@ -46,26 +30,37 @@ def module_disable_exceptions():
         yield
 
 
-def test_multidim_asarray_epsg_4326():
+@pytest.mark.parametrize("obj_name", ["dataset", "band"])
+def test_multidim_asarray_epsg_4326(obj_name):
 
     ds = gdal.Open("../gdrivers/data/small_world.tif")
+
+    obj = ds if obj_name == "dataset" else ds.GetRasterBand(1)
+
     srs_ds = ds.GetSpatialRef()
     assert srs_ds.GetDataAxisToSRSAxisMapping() == [2, 1]
-    band = ds.GetRasterBand(1)
 
-    ar = band.AsMDArray()
+    ar = (
+        obj.AsMDArray(["DIM_ORDER=BAND,Y,X"])
+        if obj_name == "dataset"
+        else obj.AsMDArray()
+    )
+    ixdim = 2 if obj_name == "dataset" else 1
+    iydim = 1 if obj_name == "dataset" else 0
     assert ar
     dims = ar.GetDimensions()
-    assert len(dims) == 2
-    assert dims[0].GetSize() == ds.RasterYSize
-    assert dims[1].GetSize() == ds.RasterXSize
+    assert len(dims) == (3 if obj_name == "dataset" else 2)
+    assert dims[iydim].GetSize() == ds.RasterYSize
+    assert dims[ixdim].GetSize() == ds.RasterXSize
     srs_ar = ar.GetSpatialRef()
-    assert srs_ar.GetDataAxisToSRSAxisMapping() == [1, 2]
+    assert (
+        srs_ar.GetDataAxisToSRSAxisMapping() == [2, 3]
+        if obj_name == "dataset"
+        else [1, 2]
+    )
 
-    assert ar.Read() == ds.GetRasterBand(1).ReadRaster()
+    assert ar.Read() == obj.ReadRaster()
 
-    ixdim = 1
-    iydim = 0
     ds2 = ar.AsClassicDataset(ixdim, iydim)
     assert ds2.RasterYSize == ds.RasterYSize
     assert ds2.RasterXSize == ds.RasterXSize
@@ -73,29 +68,36 @@ def test_multidim_asarray_epsg_4326():
     assert srs_ds2.GetDataAxisToSRSAxisMapping() == [2, 1]
     assert srs_ds2.IsSame(srs_ds)
 
-    assert ds2.ReadRaster() == ds.GetRasterBand(1).ReadRaster()
+    assert ds2.ReadRaster() == obj.ReadRaster()
 
 
-def test_multidim_asarray_epsg_26711():
+@pytest.mark.parametrize("obj_name", ["dataset", "band"])
+def test_multidim_asarray_epsg_26711(obj_name):
 
     ds = gdal.Open("data/byte.tif")
+
+    obj = ds if obj_name == "dataset" else ds.GetRasterBand(1)
+
     srs_ds = ds.GetSpatialRef()
     assert srs_ds.GetDataAxisToSRSAxisMapping() == [1, 2]
-    band = ds.GetRasterBand(1)
 
-    ar = band.AsMDArray()
+    ar = obj.AsMDArray()
+    ixdim = 2 if obj_name == "dataset" else 1
+    iydim = 1 if obj_name == "dataset" else 0
     assert ar
     dims = ar.GetDimensions()
-    assert len(dims) == 2
-    assert dims[0].GetSize() == ds.RasterYSize
-    assert dims[1].GetSize() == ds.RasterXSize
+    assert len(dims) == (3 if obj_name == "dataset" else 2)
+    assert dims[iydim].GetSize() == ds.RasterYSize
+    assert dims[ixdim].GetSize() == ds.RasterXSize
     srs_ar = ar.GetSpatialRef()
-    assert srs_ar.GetDataAxisToSRSAxisMapping() == [2, 1]
+    assert (
+        srs_ar.GetDataAxisToSRSAxisMapping() == [3, 2]
+        if obj_name == "dataset"
+        else [2, 1]
+    )
 
-    assert ar.Read() == ds.GetRasterBand(1).ReadRaster()
+    assert ar.Read() == obj.ReadRaster()
 
-    ixdim = 1
-    iydim = 0
     ds2 = ar.AsClassicDataset(ixdim, iydim)
     assert ds2.RasterYSize == ds.RasterYSize
     assert ds2.RasterXSize == ds.RasterXSize
@@ -103,7 +105,58 @@ def test_multidim_asarray_epsg_26711():
     assert srs_ds2.GetDataAxisToSRSAxisMapping() == [1, 2]
     assert srs_ds2.IsSame(srs_ds)
 
-    assert ds2.ReadRaster() == ds.GetRasterBand(1).ReadRaster()
+    assert ds2.ReadRaster() == obj.ReadRaster()
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_getview_with_indexing_var():
+
+    ds = gdal.Open("data/byte.tif")
+    gt = ds.GetGeoTransform()
+
+    ar = ds.GetRasterBand(1).AsMDArray()
+    view = ar[:, :]
+    assert view.AsClassicDataset(1, 0).GetGeoTransform() == gt
+
+    ar = ds.GetRasterBand(1).AsMDArray()
+    view = ar[11:20, :]
+    assert view.AsClassicDataset(1, 0).GetGeoTransform() == (
+        gt[0],
+        gt[1],
+        gt[2],
+        gt[3] + 11 * gt[5],
+        gt[4],
+        gt[5],
+    )
+
+    out_ds = gdal.MultiDimTranslate(
+        "", ds, format="MEM", arraySpecs=["name=Band1,view=[:,11:20,:]"]
+    )
+    assert out_ds.GetRootGroup().OpenMDArray("Band1").AsClassicDataset(
+        2, 1
+    ).GetGeoTransform() == (
+        gt[0],
+        gt[1],
+        gt[2],
+        gt[3] + 11 * gt[5],
+        gt[4],
+        gt[5],
+    )
+
+    tmp_ds = gdal.MultiDimTranslate("", ds, format="MEM")
+    out_ds = gdal.MultiDimTranslate(
+        "", tmp_ds, format="MEM", arraySpecs=["name=Band1,view=[0,11:20,:]"]
+    )
+    assert out_ds.GetRootGroup().OpenMDArray("Band1").AsClassicDataset(
+        1, 0
+    ).GetGeoTransform() == (
+        gt[0],
+        gt[1],
+        gt[2],
+        gt[3] + 11 * gt[5],
+        gt[4],
+        gt[5],
+    )
 
 
 @pytest.mark.parametrize(
@@ -621,7 +674,27 @@ def test_multidim_getgridded():
 
 
 @gdaltest.enable_exceptions()
-def test_multidim_asclassicsubdataset_band_metadata():
+def test_multidim_asclassicdataset_single_dim():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+
+    dim = rg.CreateDimension("dim", None, None, 2)
+    ar = rg.CreateMDArray("ar", [dim], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    ar.Write(array.array("d", [10.5, 20]))
+
+    assert ar.AsClassicDataset(0, 0).ReadRaster() == array.array("d", [10.5, 20])
+
+    with pytest.raises(Exception, match="Invalid iXDim and/or iYDim"):
+        ar.AsClassicDataset(0, 1)
+
+    with pytest.raises(Exception, match="Invalid iXDim and/or iYDim"):
+        ar.AsClassicDataset(1, 0)
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_asclassicdataset_band_metadata():
 
     drv = gdal.GetDriverByName("MEM")
     mem_ds = drv.CreateMultiDimensional("myds")
@@ -669,7 +742,19 @@ def test_multidim_asclassicsubdataset_band_metadata():
         ar.AsClassicDataset(2, 1, rg, ["BAND_METADATA=false"])
 
     band_metadata = [{"item_name": "name"}]
-    with pytest.raises(Exception, match=r"BAND_METADATA\[0\]\[\"array\"\] is missing"):
+    with pytest.raises(
+        Exception,
+        match=r"BAND_METADATA\[0\]\[\"array\"\] or BAND_METADATA\[0\]\[\"attribute\"\] is missing",
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = [{"array": "foo", "attribute": "bar"}]
+    with pytest.raises(
+        Exception,
+        match=r"BAND_METADATA\[0\]\[\"array\"\] and BAND_METADATA\[0\]\[\"attribute\"\] are mutually exclusive",
+    ):
         ds = ar.AsClassicDataset(
             2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
         )
@@ -740,7 +825,7 @@ def test_multidim_asclassicsubdataset_band_metadata():
         )
 
     band_metadata = [{"array": "/aux_var", "item_name": "AUX_VAR", "item_value": "%f"}]
-    with pytest.raises(Exception, match="Data type of other array is not numeric"):
+    with pytest.raises(Exception, match="Data type of aux_var array is not numeric"):
         ds = ar.AsClassicDataset(
             2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
         )
@@ -811,6 +896,344 @@ def test_multidim_asclassicsubdataset_band_metadata():
         "OTHER": "20",
         "OTHER_STRING_ATTR": "string_attr_value",
         "AUX_VAR": "bar",
+    }
+
+    band_metadata = [{"attribute": "foo", "item_name": "name"}]
+    with pytest.raises(Exception, match="Attribute foo cannot be found"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = [{"attribute": "/foo", "item_name": "name"}]
+    with pytest.raises(Exception, match="Attribute /foo cannot be found"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    ar.CreateAttribute(
+        "2D_attr", [2, 3], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = [{"attribute": "2D_attr", "item_name": "name"}]
+    with pytest.raises(Exception, match="Attribute 2D_attr is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = [{"attribute": "/ar/2D_attr", "item_name": "name"}]
+    with pytest.raises(Exception, match="Attribute /ar/2D_attr is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    rg.CreateAttribute(
+        "2D_attr_on_rg", [2, 3], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = [{"attribute": "/2D_attr_on_rg", "item_name": "name"}]
+    with pytest.raises(Exception, match="Attribute /2D_attr_on_rg is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    subg = rg.CreateGroup("subgroup")
+    subg.CreateAttribute(
+        "2D_attr_on_subg", [2, 3], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = [{"attribute": "/subgroup/2D_attr_on_subg", "item_name": "name"}]
+    with pytest.raises(
+        Exception, match="Attribute /subgroup/2D_attr_on_subg is not a 1D array"
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    ar.CreateAttribute(
+        "non_matching_attr", [100], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = [{"attribute": "non_matching_attr", "item_name": "name"}]
+    with pytest.raises(
+        Exception,
+        match="No dimension of ar has the same size as attribute non_matching_attr",
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    dimOther2 = rg.CreateDimension("other2", None, None, 2)
+    ar2 = rg.CreateMDArray(
+        "ar2",
+        [dimOther2, dimOther, dimY, dimX],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float64),
+    )
+    ar2.CreateAttribute(
+        "attr", [dimOther.GetSize()], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    units = ar2.CreateAttribute("units", [], gdal.ExtendedDataType.CreateString())
+    units.Write("my_units")
+    band_metadata = [{"attribute": "attr", "item_name": "name"}]
+    with pytest.raises(
+        Exception,
+        match="Several dimensions of ar2 have the same size as attribute attr. Cannot infer which one to bind to!",
+    ):
+        ds = ar2.AsClassicDataset(
+            3, 2, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    attr = ar.CreateAttribute(
+        "attr", [dimOther.GetSize()], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    attr.Write([123, 456])
+
+    band_metadata = [
+        {
+            "attribute": "attr",
+            "item_name": "val_attr",
+            "item_value": "%.0f ${/ar2/units}",
+        }
+    ]
+    ds = ar.AsClassicDataset(2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)])
+    assert ds.GetRasterBand(1).GetMetadata() == {
+        "DIM_other_INDEX": "0",
+        "DIM_other_VALUE": "10.5",
+        "val_attr": "123 my_units",
+    }
+    assert ds.GetRasterBand(2).GetMetadata() == {
+        "DIM_other_INDEX": "1",
+        "DIM_other_VALUE": "20",
+        "val_attr": "456 my_units",
+    }
+
+    band_metadata = [
+        {
+            "attribute": "attr",
+            "item_name": "name",
+            "item_value": "%.0f ${/i/do/not/exist}",
+        }
+    ]
+    with pytest.raises(Exception, match="/i/do/not/exist is not an attribute"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_METADATA=" + json.dumps(band_metadata)]
+        )
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_asclassicdataset_band_imagery_metadata():
+
+    drv = gdal.GetDriverByName("MEM")
+    mem_ds = drv.CreateMultiDimensional("myds")
+    rg = mem_ds.GetRootGroup()
+
+    dimOther = rg.CreateDimension("other", None, None, 2)
+
+    other = rg.CreateMDArray(
+        "other", [dimOther], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    other.Write(array.array("d", [10.5, 20]))
+
+    fwhm = rg.CreateMDArray(
+        "fwhm", [dimOther], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    fwhm.Write(array.array("d", [3.5, 4.5]))
+
+    string_attr = other.CreateAttribute(
+        "string_attr", [], gdal.ExtendedDataType.CreateString()
+    )
+    assert string_attr.Write("nm") == gdal.CE_None
+
+    dimX = rg.CreateDimension("X", None, None, 2)
+    X = rg.CreateMDArray("X", [dimX], gdal.ExtendedDataType.Create(gdal.GDT_Float64))
+    X.Write(array.array("d", [10, 20]))
+    dimX.SetIndexingVariable(X)
+    dimY = rg.CreateDimension("Y", None, None, 2)
+
+    ar = rg.CreateMDArray(
+        "ar", [dimOther, dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    with pytest.raises(
+        Exception,
+        match="Root group should be provided when BAND_IMAGERY_METADATA is set",
+    ):
+        ar.AsClassicDataset(2, 1, None, ["BAND_IMAGERY_METADATA={}"])
+
+    with pytest.raises(
+        Exception, match="Invalid JSON content for BAND_IMAGERY_METADATA"
+    ):
+        ar.AsClassicDataset(2, 1, rg, ["BAND_IMAGERY_METADATA=invalid"])
+
+    with pytest.raises(
+        Exception, match="Value of BAND_IMAGERY_METADATA should be an object"
+    ):
+        ar.AsClassicDataset(2, 1, rg, ["BAND_IMAGERY_METADATA=false"])
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {}}
+    with pytest.raises(
+        Exception,
+        match=r'BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["array"\] or BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["attribute"\] is missing',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "foo", "attribute": "bar"}}
+    with pytest.raises(
+        Exception,
+        match=r'BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["array"\] and BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["attribute"\] are mutually exclusive',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/i/do/not/exist"}}
+    with pytest.raises(Exception, match="Array /i/do/not/exist cannot be found"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/ar"}}
+    with pytest.raises(Exception, match="Array /ar is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/X"}}
+    with pytest.raises(
+        Exception,
+        match='Dimension "X" of array "/X" is not a non-X/Y dimension of array "ar"',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/other", "unit": "${invalid"}}
+    with pytest.raises(
+        Exception,
+        match=r'Value of BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["unit"\] = \${invalid is invalid',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/other", "unit": "${invalid}"}}
+    with pytest.raises(
+        Exception,
+        match=r'Value of BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["unit"\] = \${invalid} is invalid: invalid is not an attribute of \/other',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"array": "/other", "unit": "unhandled"}}
+    with pytest.raises(
+        Exception,
+        match=r'Unhandled value for BAND_IMAGERY_METADATA\["CENTRAL_WAVELENGTH_UM"\]\["unit"\] = unhandled',
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"ignored": {}}
+    with gdal.quiet_errors():
+        ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {
+        "CENTRAL_WAVELENGTH_UM": {"array": "/other", "unit": "${string_attr}"},
+        "FWHM_UM": {"array": "/fwhm"},
+    }
+    ds = ar.AsClassicDataset(
+        2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+    )
+    assert ds.GetRasterBand(1).GetMetadata("IMAGERY") == {
+        "CENTRAL_WAVELENGTH_UM": "0.0105",
+        "FWHM_UM": "3.5",
+    }
+    assert ds.GetRasterBand(2).GetMetadata("IMAGERY") == {
+        "CENTRAL_WAVELENGTH_UM": "0.02",
+        "FWHM_UM": "4.5",
+    }
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "i_do_not_exist"}}
+    with pytest.raises(Exception, match="Attribute i_do_not_exist cannot be found"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "/i/do/not/exist"}}
+    with pytest.raises(Exception, match="Attribute /i/do/not/exist cannot be found"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    ar.CreateAttribute(
+        "2D_attr", [2, 3], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "2D_attr"}}
+    with pytest.raises(Exception, match="Attribute 2D_attr is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "/ar/2D_attr"}}
+    with pytest.raises(Exception, match="Attribute /ar/2D_attr is not a 1D array"):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    ar.CreateAttribute(
+        "non_matching_attr", [100], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "non_matching_attr"}}
+    with pytest.raises(
+        Exception,
+        match="No dimension of ar has the same size as attribute non_matching_attr",
+    ):
+        ds = ar.AsClassicDataset(
+            2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    dimOther2 = rg.CreateDimension("other2", None, None, 2)
+    ar2 = rg.CreateMDArray(
+        "ar2",
+        [dimOther2, dimOther, dimY, dimX],
+        gdal.ExtendedDataType.Create(gdal.GDT_Float64),
+    )
+    ar2.CreateAttribute(
+        "attr", [dimOther.GetSize()], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    units = ar2.CreateAttribute("units", [], gdal.ExtendedDataType.CreateString())
+    units.Write("micrometer")
+
+    band_metadata = {"CENTRAL_WAVELENGTH_UM": {"attribute": "attr"}}
+    with pytest.raises(
+        Exception,
+        match="Several dimensions of ar2 have the same size as attribute attr. Cannot infer which one to bind to!",
+    ):
+        ds = ar2.AsClassicDataset(
+            3, 2, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+        )
+
+    attr = ar.CreateAttribute(
+        "attr", [dimOther.GetSize()], gdal.ExtendedDataType.Create(gdal.GDT_Float64)
+    )
+    attr.Write([123, 456])
+    band_metadata = {
+        "CENTRAL_WAVELENGTH_UM": {"attribute": "attr", "unit": "${/ar2/units}"}
+    }
+    ds = ar.AsClassicDataset(
+        2, 1, rg, ["BAND_IMAGERY_METADATA=" + json.dumps(band_metadata)]
+    )
+    assert ds.GetRasterBand(1).GetMetadata("IMAGERY") == {
+        "CENTRAL_WAVELENGTH_UM": "123",
+    }
+    assert ds.GetRasterBand(2).GetMetadata("IMAGERY") == {
+        "CENTRAL_WAVELENGTH_UM": "456",
     }
 
 
@@ -1075,6 +1498,7 @@ def test_multidim_CreateRasterAttributeTableFromMDArrays():
     icol = 1
     assert rat.GetValueAsInt(-1, icol) == 0
     assert rat.GetValueAsInt(0, icol) == 1
+    assert rat.GetValueAsBoolean(0, icol)
     assert rat.GetValueAsInt(1, icol) == 2
     assert rat.GetValueAsInt(2, icol) == 0
 
@@ -1090,6 +1514,17 @@ def test_multidim_CreateRasterAttributeTableFromMDArrays():
     with pytest.raises(Exception, match="Invalid iField"):
         rat.ReadValuesIOAsInteger(rat.GetColumnCount(), 0, 1)
 
+    with pytest.raises(Exception, match="Invalid iStartRow/iLength"):
+        rat.ReadValuesIOAsBoolean(icol, -1, 1)
+    with pytest.raises(Exception, match="Invalid iStartRow/iLength"):
+        rat.ReadValuesIOAsBoolean(icol, 0, rat.GetRowCount() + 1)
+    with pytest.raises(Exception, match="invalid length"):
+        rat.ReadValuesIOAsBoolean(icol, 0, -1)
+    with pytest.raises(Exception, match="Invalid iField"):
+        rat.ReadValuesIOAsBoolean(-1, 0, 1)
+    with pytest.raises(Exception, match="Invalid iField"):
+        rat.ReadValuesIOAsBoolean(rat.GetColumnCount(), 0, 1)
+
     ar_string.Write(["foo", "bar"])
 
     icol = 2
@@ -1097,6 +1532,8 @@ def test_multidim_CreateRasterAttributeTableFromMDArrays():
     assert rat.GetValueAsString(0, icol) == "foo"
     assert rat.GetValueAsString(1, icol) == "bar"
     assert rat.GetValueAsString(2, icol) is None
+    assert rat.GetValueAsDateTime(0, icol) is None
+    assert rat.GetValueAsWKBGeometry(0, icol) == b""
 
     assert rat.ReadValuesIOAsString(icol, 0, 2) == ["foo", "bar"]
     with pytest.raises(Exception, match="Invalid iStartRow/iLength"):
@@ -1125,6 +1562,21 @@ def test_multidim_CreateRasterAttributeTableFromMDArrays():
         match=r"GDALRasterAttributeTableFromMDArrays::SetValue\(\): not supported",
     ):
         rat.SetValueAsDouble(0, 0, 0.5)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterAttributeTableFromMDArrays::SetValue\(\): not supported",
+    ):
+        rat.SetValueAsBoolean(0, 0, False)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterAttributeTableFromMDArrays::SetValue\(\): not supported",
+    ):
+        rat.SetValueAsDateTime(0, 0, None)
+    with pytest.raises(
+        Exception,
+        match=r"GDALRasterAttributeTableFromMDArrays::SetValue\(\): not supported",
+    ):
+        rat.SetValueAsWKBGeometry(0, 0, b"")
     assert rat.ChangesAreWrittenToFile() == False
     with pytest.raises(
         Exception,
@@ -1333,3 +1785,172 @@ def test_multidim_GetMeshGrid():
         assert np.all(xv == ret[0].ReadAsArray())
         assert np.all(yv == ret[1].ReadAsArray())
         assert np.all(zv == np.array(ret[2].Read()).reshape(zv.shape))
+
+
+def test_multidim_dataset_as_mdarray():
+
+    drv = gdal.GetDriverByName("MEM")
+
+    def get_array(options=[]):
+        ds = drv.Create("my_ds", 10, 5, 2, gdal.GDT_UInt16)
+        ds.SetGeoTransform([2, 0.1, 0, 49, 0, -0.1])
+        ds.SetMetadataItem("FOO", "BAR")
+        sr = osr.SpatialReference()
+        sr.ImportFromEPSG(32631)
+        ds.SetSpatialRef(sr)
+
+        band = ds.GetRasterBand(1)
+        band.SetUnitType("foo")
+        band.SetNoDataValue(2)
+        band.SetOffset(1.5)
+        band.SetScale(2.5)
+        band.WriteRaster(0, 0, 10, 5, struct.pack("H", 1), 1, 1)
+        band.WriteRaster(0, 1, 1, 1, struct.pack("H", 2))
+        band.WriteRaster(1, 0, 1, 1, struct.pack("H", 3))
+
+        band = ds.GetRasterBand(2)
+        band.SetUnitType("foo")
+        band.SetNoDataValue(2)
+        band.SetOffset(1.5)
+        band.SetScale(2.5)
+        band.WriteRaster(0, 0, 10, 5, struct.pack("H", 4), 1, 1)
+        band.WriteRaster(0, 1, 1, 1, struct.pack("H", 5))
+        band.WriteRaster(1, 0, 1, 1, struct.pack("H", 6))
+
+        return (ds.AsMDArray(options), ds.ReadRaster())
+
+    ar, expected_data = get_array()
+    assert ar
+    assert ar.GetView("[...]")
+    assert ar.GetBlockSize() == [1, 1, 10]
+    assert ar.GetDimensionCount() == 3
+    dims = ar.GetDimensions()
+    assert dims[0].GetName() == "Band"
+    assert dims[0].GetSize() == 2
+    var_band = dims[0].GetIndexingVariable()
+    assert var_band
+    assert var_band.GetDimensions()[0].GetSize() == 2
+    assert var_band.Read() == ["Band 1", "Band 2"]
+
+    assert dims[1].GetName() == "Y"
+    assert dims[1].GetSize() == 5
+    var_y = dims[1].GetIndexingVariable()
+    assert var_y
+    assert var_y.GetDimensions()[0].GetSize() == 5
+    assert struct.unpack("d" * 5, var_y.Read()) == (48.95, 48.85, 48.75, 48.65, 48.55)
+
+    assert dims[2].GetName() == "X"
+    assert dims[2].GetSize() == 10
+    var_x = dims[2].GetIndexingVariable()
+    assert var_x
+    assert var_x.GetDimensions()[0].GetSize() == 10
+    assert struct.unpack("d" * 10, var_x.Read()) == (
+        2.05,
+        2.15,
+        2.25,
+        2.35,
+        2.45,
+        2.55,
+        2.65,
+        2.75,
+        2.85,
+        2.95,
+    )
+
+    assert ar.GetDataType().GetClass() == gdal.GEDTC_NUMERIC
+    assert ar.GetDataType().GetNumericDataType() == gdal.GDT_UInt16
+    assert ar.Read() == expected_data
+    assert struct.unpack(
+        "H" * 8,
+        ar.Read(array_start_idx=[1, 1, 0], count=[2, 2, 2], array_step=[-1, -1, 1]),
+    ) == (5, 4, 4, 6, 2, 1, 1, 3)
+    assert ar.Write(expected_data) == gdal.CE_None
+    assert ar.Read() == expected_data
+    assert ar.GetUnit() == "foo"
+    assert ar.GetNoDataValueAsDouble() == 2
+    assert ar.GetOffset() == 1.5
+    assert ar.GetScale() == 2.5
+    assert ar.GetSpatialRef() is not None
+    assert len(ar.GetAttributes()) == 1
+    attr = ar.GetAttribute("FOO")
+    assert attr
+    assert attr.Read() == "BAR"
+    del ar
+
+    ar, _ = get_array(["DIM_ORDER=Y,X,Band"])
+    assert ar.GetBlockSize() == [1, 10, 1]
+    del ar
+
+    def get_array(options=[]):
+        ds = drv.Create("my_ds", 10, 5, 2)
+        band = ds.GetRasterBand(1)
+        band.SetDescription("FirstBand")
+        band.SetMetadataItem("ITEM", "5.4")
+        band.SetUnitType("foo")
+        band.SetNoDataValue(2)
+        band.SetOffset(1.5)
+        band.SetScale(2.5)
+        band.SetColorInterpretation(gdal.GCI_RedBand)
+        return (ds.AsMDArray(options), ds.ReadRaster())
+
+    ar, expected_data = get_array()
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert var_band.Read() == ["FirstBand", "Band 2"]
+    assert ar.GetSpatialRef() is None
+    assert ar.GetUnit() == ""
+    assert ar.GetNoDataValueAsRaw() is None
+    assert ar.GetOffset() is None
+    assert ar.GetScale() is None
+    del ar
+
+    ar, _ = get_array(options=["BAND_INDEXING_VAR_ITEM={None}"])
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert var_band is None
+    del ar
+
+    ar, _ = get_array(options=["BAND_INDEXING_VAR_ITEM={Index}"])
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert struct.unpack("i" * 2, var_band.Read()) == (1, 2)
+    del ar
+
+    ar, _ = get_array(options=["BAND_INDEXING_VAR_ITEM={ColorInterpretation}"])
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert var_band.Read() == ["Red", "Undefined"]
+    del ar
+
+    ar, _ = get_array(options=["BAND_INDEXING_VAR_ITEM=ITEM"])
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert var_band.Read() == ["5.4", ""]
+    del ar
+
+    ar, _ = get_array(
+        options=["BAND_INDEXING_VAR_ITEM=ITEM", "BAND_INDEXING_VAR_TYPE=Integer"]
+    )
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert struct.unpack("i" * 2, var_band.Read()) == (5, 0)
+    del ar
+
+    ar, _ = get_array(
+        options=["BAND_INDEXING_VAR_ITEM=ITEM", "BAND_INDEXING_VAR_TYPE=Real"]
+    )
+    var_band = ar.GetDimensions()[0].GetIndexingVariable()
+    assert struct.unpack("d" * 2, var_band.Read()) == (5.4, 0)
+    del ar
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_dataset_as_mdarray_errors():
+
+    with pytest.raises(Exception, match="Degenerated array"):
+        with gdal.GetDriverByName("MEM").Create("", 0, 0, 0) as ds:
+            ds.AsMDArray()
+
+    with pytest.raises(Exception, match="Non-uniform data type amongst bands"):
+        with gdal.GetDriverByName("MEM").Create("", 1, 1, 0) as ds:
+            ds.AddBand(gdal.GDT_Byte)
+            ds.AddBand(gdal.GDT_UInt16)
+            ds.AsMDArray()
+
+    with pytest.raises(Exception, match="Illegal value for DIM_ORDER option"):
+        with gdal.GetDriverByName("MEM").Create("", 1, 1, 1) as ds:
+            ds.AsMDArray(["DIM_ORDER=invalid"])

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR
 # Purpose:  Test compliance of GeoParquet file
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2023, Even Rouault <even.rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import json
@@ -56,7 +39,7 @@ map_ogr_geom_type_to_geoparquet = {
 map_remote_resources = {}
 
 
-class GeoParquetValidator(object):
+class GeoParquetValidator:
     def __init__(self, filename, check_data=False, local_schema=None):
         self.filename = filename
         self.check_data = check_data
@@ -98,16 +81,11 @@ class GeoParquetValidator(object):
                 self._check_counterclockwise(subgeom, row)
 
     def _validate(self, schema, instance):
+        from importlib.metadata import version
+
         import jsonschema
 
-        if sys.version_info >= (3, 8):
-            from importlib.metadata import version
-
-            jsonschema_version = version("jsonschema")
-        else:
-            from pkg_resources import get_distribution
-
-            jsonschema_version = get_distribution("jsonschema").version
+        jsonschema_version = version("jsonschema")
 
         def versiontuple(v):
             return tuple(map(int, (v.split("."))))
@@ -121,11 +99,13 @@ class GeoParquetValidator(object):
             def retrieve_remote_file(uri: str):
                 if not uri.startswith("http://") and not uri.startswith("https://"):
                     raise Exception(f"Cannot retrieve {uri}")
-                import urllib
+                import urllib.request
 
                 global map_remote_resources
                 if uri not in map_remote_resources:
-                    response = urllib.request.urlopen(uri).read()
+                    response = urllib.request.urlopen(
+                        urllib.request.Request(uri, headers={"User-Agent": "GDAL"})
+                    ).read()
                     map_remote_resources[uri] = response
                 else:
                     response = map_remote_resources[uri]
@@ -147,9 +127,7 @@ class GeoParquetValidator(object):
             return self._error("Parquet driver not available")
 
         try:
-            import jsonschema
-
-            jsonschema.validate
+            import jsonschema  # noqa: F401
         except ImportError:
             return self._error(
                 "jsonschema Python module not available. Try 'pip install jsonschema'"
@@ -195,10 +173,14 @@ class GeoParquetValidator(object):
             schema_url = f"https://github.com/opengeospatial/geoparquet/releases/download/v{version}/schema.json"
 
             if schema_url not in geoparquet_schemas:
-                import urllib
+                import urllib.request
 
                 try:
-                    response = urllib.request.urlopen(schema_url).read()
+                    response = urllib.request.urlopen(
+                        urllib.request.Request(
+                            schema_url, headers={"User-Agent": "GDAL"}
+                        )
+                    ).read()
                 except Exception as e:
                     return self._error(
                         f"Cannot download GeoParquet JSON schema from {schema_url}. Exception = {repr(e)}"

@@ -10,23 +10,7 @@
  *
  *  Copyright 2020 Esri
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this softwareand associated documentation files(the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and /or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions :
- *
- * The above copyright noticeand this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
 #include "gdal_priv.h"
@@ -36,6 +20,7 @@
 #include "cpl_json.h"
 #include "gdal_proxy.h"
 #include "gdal_utils.h"
+#include "cpl_vsi_virtual.h"
 
 using namespace std;
 
@@ -130,38 +115,24 @@ static inline GUInt32 u32lat(void *data)
 
 struct Bundle
 {
-    Bundle() : fh(nullptr), isV2(true), isTpkx(false)
-    {
-    }
-
-    ~Bundle()
-    {
-        if (fh)
-            VSIFCloseL(fh);
-        fh = nullptr;
-    }
-
     void Init(const char *filename)
     {
-        if (fh)
-            VSIFCloseL(fh);
         name = filename;
-        fh = VSIFOpenL(name.c_str(), "rb");
+        fh.reset(VSIFOpenL(name.c_str(), "rb"));
         if (nullptr == fh)
             return;
         GByte header[64] = {0};
         // Check a few header locations, then read the index
-        VSIFReadL(header, 1, 64, fh);
+        fh->Read(header, 1, 64);
         index.resize(BSZ * BSZ);
         if (3 != u32lat(header) || 5 != u32lat(header + 12) ||
             40 != u32lat(header + 32) || 0 != u32lat(header + 36) ||
             (!isTpkx &&
              BSZ * BSZ != u32lat(header + 4)) || /* skip this check for tpkx */
             BSZ * BSZ * 8 != u32lat(header + 60) ||
-            index.size() != VSIFReadL(index.data(), 8, index.size(), fh))
+            index.size() != fh->Read(index.data(), 8, index.size()))
         {
-            VSIFCloseL(fh);
-            fh = nullptr;
+            fh.reset();
         }
 
 #if !CPL_IS_LSB
@@ -171,11 +142,11 @@ struct Bundle
 #endif
     }
 
-    std::vector<GUInt64> index;
-    VSILFILE *fh;
-    bool isV2;
-    bool isTpkx;
-    CPLString name;
+    std::vector<GUInt64> index{};
+    VSIVirtualHandleUniquePtr fh{};
+    bool isV2 = false;
+    bool isTpkx = false;
+    CPLString name{};
     const size_t BSZ = 128;
 };
 
@@ -186,48 +157,46 @@ class ECDataset final : public GDALDataset
   public:
     ECDataset();
 
-    virtual ~ECDataset()
+    CPLErr GetGeoTransform(GDALGeoTransform &gt) const override
     {
-    }
-
-    CPLErr GetGeoTransform(double *gt) override
-    {
-        memcpy(gt, GeoTransform, sizeof(GeoTransform));
+        gt = m_gt;
         return CE_None;
     }
 
-    virtual const OGRSpatialReference *GetSpatialRef() const override
-    {
-        return &oSRS;
-    }
+    const OGRSpatialReference *GetSpatialRef() const override;
 
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo);
     static GDALDataset *Open(GDALOpenInfo *poOpenInfo,
                              const char *pszDescription);
 
   protected:
-    double GeoTransform[6];
-    CPLString dname;
-    int isV2;  // V2 bundle format
-    int BSZ;   // Bundle size in tiles
-    int TSZ;   // Tile size in pixels
-    std::vector<Bundle> bundles;
+    GDALGeoTransform m_gt{};
+    CPLString dname{};
+    int isV2{};  // V2 bundle format
+    int BSZ{};   // Bundle size in tiles
+    int TSZ{};   // Tile size in pixels
+    std::vector<Bundle> bundles{};
 
     Bundle &GetBundle(const char *fname);
 
   private:
     CPLErr Initialize(CPLXMLNode *CacheInfo);
     CPLErr InitializeFromJSON(const CPLJSONObject &oRoot);
-    CPLString compression;
-    std::vector<double> resolutions;
+    CPLString compression{};
+    std::vector<double> resolutions{};
     int m_nMinLOD = 0;
-    OGRSpatialReference oSRS;
-    std::vector<GByte> tilebuffer;  // Last read tile, decompressed
-    std::vector<GByte> filebuffer;  // raw tile buffer
+    OGRSpatialReference oSRS{};
+    std::vector<GByte> tilebuffer{};  // Last read tile, decompressed
+    std::vector<GByte> filebuffer{};  // raw tile buffer
 
     OGREnvelope m_sInitialExtent{};
     OGREnvelope m_sFullExtent{};
 };
+
+const OGRSpatialReference *ECDataset::GetSpatialRef() const
+{
+    return &oSRS;
+}
 
 class ECBand final : public GDALRasterBand
 {
@@ -235,39 +204,37 @@ class ECBand final : public GDALRasterBand
 
   public:
     ECBand(ECDataset *parent, int b, int level = 0);
-    virtual ~ECBand();
+    ~ECBand() override;
 
-    virtual CPLErr IReadBlock(int xblk, int yblk, void *buffer) override;
+    CPLErr IReadBlock(int xblk, int yblk, void *buffer) override;
 
-    virtual GDALColorInterp GetColorInterpretation() override
+    GDALColorInterp GetColorInterpretation() override
     {
         return ci;
     }
 
-    virtual int GetOverviewCount() override
+    int GetOverviewCount() override
     {
         return static_cast<int>(overviews.size());
     }
 
-    virtual GDALRasterBand *GetOverview(int n) override
+    GDALRasterBand *GetOverview(int n) override
     {
         return (n >= 0 && n < GetOverviewCount()) ? overviews[n] : nullptr;
     }
 
   protected:
   private:
-    int lvl;
-    GDALColorInterp ci;
+    int lvl{};
+    GDALColorInterp ci{};
 
     // Image image;
     void AddOverviews();
-    std::vector<ECBand *> overviews;
+    std::vector<ECBand *> overviews{};
 };
 
 ECDataset::ECDataset() : isV2(true), BSZ(128), TSZ(256)
 {
-    double gt[6] = {0, 1, 0, 0, 0, 1};
-    memcpy(GeoTransform, gt, sizeof(gt));
 }
 
 CPLErr ECDataset::Initialize(CPLXMLNode *CacheInfo)
@@ -313,16 +280,15 @@ CPLErr ECDataset::Initialize(CPLXMLNode *CacheInfo)
 
         // resolution is the smallest figure
         res = resolutions[0];
-        double gt[6] = {0, 1, 0, 0, 0, 1};
-        gt[0] = CPLAtof(CPLGetXMLValue(TCI, "TileOrigin.X", "-180"));
-        gt[3] = CPLAtof(CPLGetXMLValue(TCI, "TileOrigin.Y", "90"));
-        gt[1] = res;
-        gt[5] = -res;
-        memcpy(GeoTransform, gt, sizeof(gt));
+        m_gt = GDALGeoTransform();
+        m_gt[0] = CPLAtof(CPLGetXMLValue(TCI, "TileOrigin.X", "-180"));
+        m_gt[3] = CPLAtof(CPLGetXMLValue(TCI, "TileOrigin.Y", "90"));
+        m_gt[1] = res;
+        m_gt[5] = -res;
 
         // Assume symmetric coverage, check custom end
-        double maxx = -gt[0];
-        double miny = -gt[3];
+        double maxx = -m_gt[0];
+        double miny = -m_gt[3];
         const char *pszmaxx = CPLGetXMLValue(TCI, "TileEnd.X", nullptr);
         const char *pszminy = CPLGetXMLValue(TCI, "TileEnd.Y", nullptr);
         if (pszmaxx && pszminy)
@@ -331,8 +297,8 @@ CPLErr ECDataset::Initialize(CPLXMLNode *CacheInfo)
             miny = CPLAtof(pszminy);
         }
 
-        double dxsz = (maxx - gt[0]) / res;
-        double dysz = (gt[3] - miny) / res;
+        double dxsz = (maxx - m_gt[0]) / res;
+        double dysz = (m_gt[3] - miny) / res;
         if (dxsz < 1 || dxsz > INT32_MAX || dysz < 1 || dysz > INT32_MAX)
             throw CPLString("Too many levels, resulting raster size exceeds "
                             "the GDAL limit");
@@ -465,19 +431,18 @@ CPLErr ECDataset::InitializeFromJSON(const CPLJSONObject &oRoot)
 
         // resolution is the smallest figure
         res = resolutions[0];
-        double gt[6] = {0, 1, 0, 0, 0, 1};
-        gt[0] = oRoot.GetDouble("tileInfo/origin/x");
-        gt[3] = oRoot.GetDouble("tileInfo/origin/y");
-        gt[1] = res;
-        gt[5] = -res;
-        memcpy(GeoTransform, gt, sizeof(gt));
+        m_gt = GDALGeoTransform();
+        m_gt[0] = oRoot.GetDouble("tileInfo/origin/x");
+        m_gt[3] = oRoot.GetDouble("tileInfo/origin/y");
+        m_gt[1] = res;
+        m_gt[5] = -res;
 
         // Assume symmetric coverage
-        double maxx = -gt[0];
-        double miny = -gt[3];
+        double maxx = -m_gt[0];
+        double miny = -m_gt[3];
 
-        double dxsz = (maxx - gt[0]) / res;
-        double dysz = (gt[3] - miny) / res;
+        double dxsz = (maxx - m_gt[0]) / res;
+        double dysz = (m_gt[3] - miny) / res;
         if (dxsz < 1 || dxsz > INT32_MAX || dysz < 1 || dysz > INT32_MAX)
             throw CPLString("Too many levels, resulting raster size exceeds "
                             "the GDAL limit");
@@ -569,11 +534,10 @@ class ESRICProxyRasterBand final : public GDALProxyRasterBand
   private:
     GDALRasterBand *m_poUnderlyingBand = nullptr;
 
+    CPL_DISALLOW_COPY_ASSIGN(ESRICProxyRasterBand)
+
   protected:
-    GDALRasterBand *RefUnderlyingRasterBand(bool /*bForceOpen*/) const override
-    {
-        return m_poUnderlyingBand;
-    }
+    GDALRasterBand *RefUnderlyingRasterBand(bool /*bForceOpen*/) const override;
 
   public:
     explicit ESRICProxyRasterBand(GDALRasterBand *poUnderlyingBand)
@@ -587,21 +551,28 @@ class ESRICProxyRasterBand final : public GDALProxyRasterBand
     }
 };
 
+GDALRasterBand *
+ESRICProxyRasterBand::RefUnderlyingRasterBand(bool /*bForceOpen*/) const
+{
+    return m_poUnderlyingBand;
+}
+
 class ESRICProxyDataset final : public GDALProxyDataset
 {
   private:
+    // m_poSrcDS must be placed before m_poUnderlyingDS for proper destruction
+    // as m_poUnderlyingDS references m_poSrcDS
+    std::unique_ptr<GDALDataset> m_poSrcDS{};
     std::unique_ptr<GDALDataset> m_poUnderlyingDS{};
     CPLStringList m_aosFileList{};
 
   protected:
-    GDALDataset *RefUnderlyingDataset() const override
-    {
-        return m_poUnderlyingDS.get();
-    }
+    GDALDataset *RefUnderlyingDataset() const override;
 
   public:
-    ESRICProxyDataset(GDALDataset *poUnderlyingDS, const char *pszDescription)
-        : m_poUnderlyingDS(poUnderlyingDS)
+    ESRICProxyDataset(GDALDataset *poSrcDS, GDALDataset *poUnderlyingDS,
+                      const char *pszDescription)
+        : m_poSrcDS(poSrcDS), m_poUnderlyingDS(poUnderlyingDS)
     {
         nRasterXSize = poUnderlyingDS->GetRasterXSize();
         nRasterYSize = poUnderlyingDS->GetRasterYSize();
@@ -621,6 +592,11 @@ class ESRICProxyDataset final : public GDALProxyDataset
         return CSLDuplicate(m_aosFileList.List());
     }
 };
+
+GDALDataset *ESRICProxyDataset::RefUnderlyingDataset() const
+{
+    return m_poUnderlyingDS.get();
+}
 
 GDALDataset *ECDataset::Open(GDALOpenInfo *poOpenInfo)
 {
@@ -645,8 +621,7 @@ GDALDataset *ECDataset::Open(GDALOpenInfo *poOpenInfo,
             return nullptr;
         }
         auto ds = new ECDataset();
-        ds->dname.Printf("%s/_alllayers",
-                         CPLGetDirname(poOpenInfo->pszFilename));
+        ds->dname = CPLGetDirnameSafe(poOpenInfo->pszFilename) + "/_alllayers";
         CPLErr error = ds->Initialize(CacheInfo);
         CPLDestroyXMLNode(config);
         if (CE_None != error)
@@ -696,7 +671,8 @@ GDALDataset *ECDataset::Open(GDALOpenInfo *poOpenInfo,
             tileBundlesPath.erase(0, 2);
         }
 
-        ds->dname.Printf("%s/%s", CPLGetDirname(poOpenInfo->pszFilename),
+        ds->dname.Printf("%s/%s",
+                         CPLGetDirnameSafe(poOpenInfo->pszFilename).c_str(),
                          tileBundlesPath.c_str());
         CPLErr error = ds->InitializeFromJSON(oRoot);
         if (CE_None != error)
@@ -760,15 +736,15 @@ GDALDataset *ECDataset::Open(GDALOpenInfo *poOpenInfo,
             aosOptions.AddString(CPLSPrintf("BLOCKYSIZE=%d", ds->TSZ));
             auto psOptions =
                 GDALTranslateOptionsNew(aosOptions.List(), nullptr);
-            auto hDS = GDALTranslate("", GDALDataset::ToHandle(ds.release()),
+            auto hDS = GDALTranslate("", GDALDataset::ToHandle(ds.get()),
                                      psOptions, nullptr);
             GDALTranslateOptionsFree(psOptions);
             if (!hDS)
             {
                 return nullptr;
             }
-            return new ESRICProxyDataset(GDALDataset::FromHandle(hDS),
-                                         pszDescription);
+            return new ESRICProxyDataset(
+                ds.release(), GDALDataset::FromHandle(hDS), pszDescription);
         }
         return ds.release();
     }
@@ -796,8 +772,13 @@ Bundle &ECDataset::GetBundle(const char *fname)
         }
     }
     // No empties, eject one
-    // coverity[dont_call]
-    Bundle &bundle = bundles[rand() % bundles.size()];
+    Bundle &bundle = bundles[
+#ifndef __COVERITY__
+        rand() % bundles.size()
+#else
+        0
+#endif
+    ];
     bundle.Init(fname);
     return bundle;
 }
@@ -842,7 +823,7 @@ ECBand::ECBand(ECDataset *parent, int b, int level)
 
 void ECBand::AddOverviews()
 {
-    auto parent = reinterpret_cast<ECDataset *>(poDS);
+    auto parent = cpl::down_cast<ECDataset *>(poDS);
     for (size_t i = 1; i < parent->resolutions.size(); i++)
     {
         ECBand *ovl = new ECBand(parent, nBand, int(i));
@@ -854,7 +835,7 @@ void ECBand::AddOverviews()
 
 CPLErr ECBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pData)
 {
-    auto parent = reinterpret_cast<ECDataset *>(poDS);
+    auto parent = cpl::down_cast<ECDataset *>(poDS);
     auto &buffer = parent->tilebuffer;
     auto TSZ = parent->TSZ;
     auto BSZ = parent->BSZ;
@@ -887,8 +868,8 @@ CPLErr ECBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pData)
     }
     auto &fbuffer = parent->filebuffer;
     fbuffer.resize(size_t(size));
-    VSIFSeekL(bundle.fh, offset, SEEK_SET);
-    if (size != VSIFReadL(fbuffer.data(), size_t(1), size_t(size), bundle.fh))
+    bundle.fh->Seek(offset, SEEK_SET);
+    if (size != bundle.fh->Read(fbuffer.data(), size_t(1), size_t(size)))
     {
         CPLError(CE_Failure, CPLE_FileIO,
                  "Error reading tile, reading " CPL_FRMT_GUIB
@@ -896,9 +877,7 @@ CPLErr ECBand::IReadBlock(int nBlockXOff, int nBlockYOff, void *pData)
                  GUInt64(size), GUInt64(offset));
         return CE_Failure;
     }
-    CPLString magic;
-    // Should use some sort of unique
-    magic.Printf("/vsimem/esric_%p.tmp", this);
+    const CPLString magic(VSIMemGenerateHiddenFilename("esric.tmp"));
     auto mfh = VSIFileFromMemBuffer(magic.c_str(), fbuffer.data(), size, false);
     VSIFCloseL(mfh);
     // Can't open a raster by handle?

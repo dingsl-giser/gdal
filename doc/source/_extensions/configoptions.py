@@ -104,7 +104,14 @@ class Option:
         elif len(self.choices) == 1:
             text += f"={self.choices[0]}: "
         else:
-            text += f'=[{"/".join(self.choices)}]: '
+            # Insert Unicode zero-width space around separating forward slash,
+            # so that all browsers produce line breaks.
+            # Cf https://github.com/OSGeo/gdal/issues/10778
+            zero_width_space = "\u200b"
+            concatenated_choices = f"{zero_width_space}/{zero_width_space}".join(
+                self.choices
+            )
+            text += f"=[{concatenated_choices}]: "
 
         para += nodes.strong(text, text)
 
@@ -126,7 +133,7 @@ class Option:
                 logger = logging.getLogger(__name__)
                 logger.warning(
                     f"Option {self.option_name} :since: should be a sequence of integers and periods (got {self.since_ver})",
-                    location=self.env.docname,
+                    location=app.env.docname,
                 )
 
         if caveats:
@@ -256,6 +263,10 @@ class ConfigOption(BaseConfigOption):
 
 class CreationOption(BaseConfigOption):
     opt_type = "co"
+
+
+class OverviewCreationOption(BaseConfigOption):
+    opt_type = "oco"
 
 
 class DatasetCreationOption(BaseConfigOption):
@@ -599,6 +610,7 @@ def log_options(app, env):
 option_classes = {
     "config": ConfigOption,
     "co": CreationOption,
+    "oco": OverviewCreationOption,
     "dsco": DatasetCreationOption,
     "lco": LayerCreationOption,
     "oo": OpenOption,

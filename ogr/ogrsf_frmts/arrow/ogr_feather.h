@@ -7,23 +7,7 @@
  ******************************************************************************
  * Copyright (c) 2022, Planet Labs
  *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
+ * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
 #ifndef OGR_FEATHER_H
@@ -84,7 +68,7 @@ class OGRFeatherLayer final : public OGRArrowLayer
 
     CPLStringList m_aosFeatherMetadata{};
 
-    virtual std::string GetDriverUCName() const override
+    std::string GetDriverUCName() const override
     {
         return ARROW_DRIVER_NAME_UC;
     }
@@ -101,7 +85,7 @@ class OGRFeatherLayer final : public OGRArrowLayer
 
     OGRFeature *GetNextRawFeature();
 
-    virtual bool CanRunNonForcedGetExtent() override;
+    bool CanRunNonForcedGetExtent() override;
 
     bool
     CanPostFilterArrowArray(const struct ArrowSchema *schema) const override;
@@ -121,7 +105,7 @@ class OGRFeatherLayer final : public OGRArrowLayer
                         &poRecordBatchStreamReader);
 
     void ResetReading() override;
-    int TestCapability(const char *pszCap) override;
+    int TestCapability(const char *pszCap) const override;
     GIntBig GetFeatureCount(int bForce) override;
     const char *GetMetadataItem(const char *pszName,
                                 const char *pszDomain = "") override;
@@ -143,7 +127,7 @@ class OGRFeatherDataset final : public OGRArrowDataset
     explicit OGRFeatherDataset(
         const std::shared_ptr<arrow::MemoryPool> &poMemoryPool);
 
-    int TestCapability(const char *) override;
+    int TestCapability(const char *) const override;
 };
 
 /************************************************************************/
@@ -161,20 +145,20 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
     std::shared_ptr<arrow::ipc::RecordBatchWriter> m_poFileWriter{};
     std::shared_ptr<arrow::KeyValueMetadata> m_poFooterKeyValueMetadata{};
 
-    virtual bool IsFileWriterCreated() const override
+    bool IsFileWriterCreated() const override
     {
         return m_poFileWriter != nullptr;
     }
 
-    virtual void CreateWriter() override;
-    virtual bool CloseFileWriter() override;
+    void CreateWriter() override;
+    bool CloseFileWriter() override;
 
-    virtual void CreateSchema() override;
-    virtual void PerformStepsBeforeFinalFlushGroup() override;
+    void CreateSchema() override;
+    void PerformStepsBeforeFinalFlushGroup() override;
 
-    virtual bool FlushGroup() override;
+    bool FlushGroup() override;
 
-    virtual std::string GetDriverUCName() const override
+    std::string GetDriverUCName() const override
     {
         return ARROW_DRIVER_NAME_UC;
     }
@@ -182,18 +166,19 @@ class OGRFeatherWriterLayer final : public OGRArrowWriterLayer
     virtual bool
     IsSupportedGeometryType(OGRwkbGeometryType eGType) const override;
 
-    virtual bool IsSRSRequired() const override
+    bool IsSRSRequired() const override
     {
         return true;
     }
+
+    friend class OGRFeatherWriterDataset;
+    bool Close();
 
   public:
     OGRFeatherWriterLayer(
         GDALDataset *poDS, arrow::MemoryPool *poMemoryPool,
         const std::shared_ptr<arrow::io::OutputStream> &poOutputStream,
         const char *pszLayerName);
-
-    ~OGRFeatherWriterLayer() override;
 
     bool SetOptions(const std::string &osFilename, CSLConstList papszOptions,
                     const OGRSpatialReference *poSpatialRef,
@@ -225,14 +210,18 @@ class OGRFeatherWriterDataset final : public GDALPamDataset
         const char *pszFilename,
         const std::shared_ptr<arrow::io::OutputStream> &poOutputStream);
 
+    ~OGRFeatherWriterDataset() override;
+
+    CPLErr Close() override;
+
     arrow::MemoryPool *GetMemoryPool() const
     {
         return m_poMemoryPool.get();
     }
 
-    int GetLayerCount() override;
-    OGRLayer *GetLayer(int idx) override;
-    int TestCapability(const char *pszCap) override;
+    int GetLayerCount() const override;
+    const OGRLayer *GetLayer(int idx) const override;
+    int TestCapability(const char *pszCap) const override;
     std::vector<std::string> GetFieldDomainNames(
         CSLConstList /*papszOptions*/ = nullptr) const override;
     const OGRFieldDomain *

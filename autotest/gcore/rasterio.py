@@ -1,7 +1,6 @@
 #!/usr/bin/env pytest
 # -*- coding: utf-8 -*-
 ###############################################################################
-# $Id$
 #
 # Project:  GDAL/OGR Test Suite
 # Purpose:  Test default implementation of GDALRasterBand::IRasterIO
@@ -10,23 +9,7 @@
 ###############################################################################
 # Copyright (c) 2008-2013, Even Rouault <even dot rouault at spatialys.com>
 #
-# Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the "Software"),
-# to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-# and/or sell copies of the Software, and to permit persons to whom the
-# Software is furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included
-# in all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-# OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+# SPDX-License-Identifier: MIT
 ###############################################################################
 
 import math
@@ -37,14 +20,6 @@ import gdaltest
 import pytest
 
 from osgeo import gdal
-
-
-###############################################################################
-@pytest.fixture(autouse=True, scope="module")
-def module_disable_exceptions():
-    with gdaltest.disable_exceptions():
-        yield
-
 
 ###############################################################################
 # Test writing a 1x1 buffer to a 10x6 raster and read it back
@@ -233,6 +208,7 @@ def test_rasterio_4():
 # Test error cases of ReadRaster()
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_5():
 
     ds = gdal.Open("data/byte.tif")
@@ -300,6 +276,7 @@ def test_rasterio_5():
 # Test error cases of WriteRaster()
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_6():
 
     ds = gdal.GetDriverByName("MEM").Create("", 2, 2)
@@ -732,6 +709,7 @@ def test_rasterio_9():
 
 def test_rasterio_overview_subpixel_resampling():
 
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     temp_path = "/vsimem/rasterio_ovr.tif"
@@ -773,6 +751,7 @@ def test_rasterio_overview_subpixel_resampling():
 # Test error when getting a block
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_10():
     ds = gdal.Open("data/byte_truncated.tif")
 
@@ -796,6 +775,8 @@ def test_rasterio_10():
 
 
 def test_rasterio_11():
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 3)
@@ -832,6 +813,8 @@ def rasterio_12_progress_callback(pct, message, user_data):
 
 
 def test_rasterio_12():
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 3, 4)
@@ -884,29 +867,162 @@ def test_rasterio_12():
 # Test cubic resampling with masking
 
 
-def test_rasterio_13():
+@pytest.mark.parametrize(
+    "dt",
+    [
+        "Byte",
+        "Int8",
+        "Int16",
+        "UInt16",
+        "Int32",
+        "UInt32",
+        "Int64",
+        "UInt64",
+        "Float32",
+        "Float64",
+    ],
+)
+def test_rasterio_13(dt):
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
-    for dt in [gdal.GDT_Byte, gdal.GDT_UInt16, gdal.GDT_UInt32]:
+    dt = gdal.GetDataTypeByName(dt)
+    mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 3, 1, dt)
+    mem_ds.GetRasterBand(1).SetNoDataValue(0)
+    if dt == gdal.GDT_Int8:
+        x = (1 << 7) - 1
+    elif dt == gdal.GDT_Byte:
+        x = (1 << 8) - 1
+    elif dt == gdal.GDT_Int16:
+        x = (1 << 15) - 1
+    elif dt == gdal.GDT_UInt16:
+        x = (1 << 16) - 1
+    elif dt == gdal.GDT_Int32:
+        x = (1 << 31) - 1
+    elif dt == gdal.GDT_UInt32:
+        x = (1 << 32) - 1
+    elif dt == gdal.GDT_Int64:
+        x = (1 << 63) - 1024
+    elif dt == gdal.GDT_UInt64:
+        x = (1 << 64) - 2048
+    elif dt == gdal.GDT_Float32:
+        x = 1.5
+    else:
+        x = 1.23456
+    mem_ds.GetRasterBand(1).WriteArray(
+        numpy.array([[0, 0, 0, 0], [0, x, 0, 0], [0, 0, 0, 0]])
+    )
 
-        mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 3, 1, dt)
-        mem_ds.GetRasterBand(1).SetNoDataValue(0)
-        mem_ds.GetRasterBand(1).WriteArray(
-            numpy.array([[0, 0, 0, 0], [0, 255, 0, 0], [0, 0, 0, 0]])
-        )
+    ar_ds = mem_ds.ReadAsArray(
+        0, 0, 4, 3, buf_xsize=8, buf_ysize=3, resample_alg=gdal.GRIORA_Cubic
+    )
 
-        ar_ds = mem_ds.ReadAsArray(
-            0, 0, 4, 3, buf_xsize=8, buf_ysize=3, resample_alg=gdal.GRIORA_Cubic
-        )
+    expected_ar = numpy.array(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, x, x, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+    )
+    assert numpy.array_equal(ar_ds, expected_ar)
 
-        expected_ar = numpy.array(
-            [
-                [0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 255, 255, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0],
-            ]
-        )
-        assert numpy.array_equal(ar_ds, expected_ar), (ar_ds, dt)
+
+###############################################################################
+# Test nearest and mode resampling
+
+
+@pytest.mark.parametrize(
+    "dt",
+    [
+        "Byte",
+        "Int8",
+        "Int16",
+        "UInt16",
+        "Int32",
+        "UInt32",
+        "Int64",
+        "UInt64",
+        "Float16",
+        "Float32",
+        "Float64",
+        "CInt16",
+        "CInt32",
+        "CFloat16",
+        "CFloat32",
+        "CFloat64",
+    ],
+)
+@pytest.mark.parametrize(
+    "resample_alg", [gdal.GRIORA_NearestNeighbour, gdal.GRIORA_Mode]
+)
+@pytest.mark.parametrize("use_nan", [True, False])
+def test_rasterio_nearest_or_mode(dt, resample_alg, use_nan):
+    numpy = pytest.importorskip("numpy")
+    gdal_array = gdaltest.importorskip_gdal_array()
+
+    dt = gdal.GetDataTypeByName(dt)
+    mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 4, 1, dt)
+    if dt == gdal.GDT_Int8:
+        x = (1 << 7) - 1
+    elif dt == gdal.GDT_Byte:
+        x = (1 << 8) - 1
+    elif dt == gdal.GDT_Int16 or dt == gdal.GDT_CInt16:
+        x = (1 << 15) - 1
+    elif dt == gdal.GDT_UInt16:
+        x = (1 << 16) - 1
+    elif dt == gdal.GDT_Int32 or dt == gdal.GDT_CInt32:
+        x = (1 << 31) - 1
+    elif dt == gdal.GDT_UInt32:
+        x = (1 << 32) - 1
+    elif dt == gdal.GDT_Int64:
+        x = (1 << 63) - 1
+    elif dt == gdal.GDT_UInt64:
+        x = (1 << 64) - 1
+    elif dt in (
+        gdal.GDT_Float16,
+        gdal.GDT_Float32,
+        gdal.GDT_CFloat16,
+        gdal.GDT_CFloat32,
+    ):
+        x = float("nan") if use_nan else 1.5
+    else:
+        x = float("nan") if use_nan else 1.234567890123
+
+    if gdal.DataTypeIsComplex(dt):
+        val = complex(x, x)
+    else:
+        val = x
+
+    dtype = gdal_array.flip_code(dt)
+    mem_ds.GetRasterBand(1).WriteArray(numpy.full((4, 4), val, dtype=dtype))
+
+    ar_ds = mem_ds.ReadAsArray(
+        0, 0, 4, 4, buf_xsize=1, buf_ysize=1, resample_alg=resample_alg
+    )
+
+    expected_ar = numpy.array([[val]]).astype(dtype)
+    if math.isnan(x):
+        if gdal.DataTypeIsComplex(dt):
+            assert math.isnan(ar_ds[0][0].real) and math.isnan(ar_ds[0][0].imag)
+        else:
+            assert math.isnan(ar_ds[0][0])
+    else:
+        assert numpy.array_equal(ar_ds, expected_ar)
+
+    resample_alg_mapping = {
+        gdal.GRIORA_NearestNeighbour: "NEAR",
+        gdal.GRIORA_Mode: "MODE",
+    }
+    mem_ds.BuildOverviews(resample_alg_mapping[resample_alg], [4])
+    ar_ds = mem_ds.GetRasterBand(1).GetOverview(0).ReadAsArray()
+    if math.isnan(x):
+        if gdal.DataTypeIsComplex(dt):
+            assert math.isnan(ar_ds[0][0].real) and math.isnan(ar_ds[0][0].imag)
+        else:
+            assert math.isnan(ar_ds[0][0])
+    else:
+        assert numpy.array_equal(ar_ds, expected_ar)
 
 
 ###############################################################################
@@ -1104,6 +1220,8 @@ cellsize     0
 
 
 def test_rasterio_nodata():
+
+    gdaltest.importorskip_gdal_array()
     pytest.importorskip("numpy")
 
     ndv = 123
@@ -1265,15 +1383,13 @@ nodata_value 0
         buf_xsize=1, buf_ysize=1, resample_alg=gdal.GRIORA_Lanczos
     )
     data_ar = struct.unpack("f" * 1, data)
-    expected_ar = (1.401298464324817e-45,)
-    assert data_ar == expected_ar
+    assert data_ar[0] in (1.401298464324817e-45, -6.109459224184994e-18)
 
     data = ds.GetRasterBand(1).ReadRaster(
         buf_xsize=1, buf_ysize=1, resample_alg=gdal.GRIORA_Average
     )
     data_ar = struct.unpack("f" * 1, data)
-    expected_ar = (1.401298464324817e-45,)
-    assert data_ar == expected_ar
+    assert data_ar[0] in (1.401298464324817e-45, -6.109459224184994e-18)
 
     gdal.Unlink("/vsimem/in.asc")
 
@@ -1311,6 +1427,8 @@ nodata_value 0
 
 
 def test_rasterio_dataset_readarray_cint16():
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     mem_ds = gdal.GetDriverByName("MEM").Create("", 1, 1, 2, gdal.GDT_CInt16)
@@ -1323,6 +1441,7 @@ def test_rasterio_dataset_readarray_cint16():
     assert got[1] == numpy.array([[3 + 4j]])
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_rasterband_write_on_readonly():
 
     ds = gdal.Open("data/byte.tif")
@@ -1332,6 +1451,7 @@ def test_rasterio_rasterband_write_on_readonly():
     assert err != 0
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_dataset_write_on_readonly():
 
     ds = gdal.Open("data/byte.tif")
@@ -1384,6 +1504,8 @@ def test_rasterio_floating_point_window_no_resampling():
 
 def test_rasterio_floating_point_window_no_resampling_numpy():
     # Same as above but using ReadAsArray() instead of ReadRaster()
+
+    gdaltest.importorskip_gdal_array()
     numpy = pytest.importorskip("numpy")
 
     ds = gdal.Translate(
@@ -1436,14 +1558,39 @@ def test_rasterio_average_halfsize_downsampling_byte():
     v15 = 1
     v16 = 1
     m4 = (v13 + v14 + v15 + v16 + 2) >> 2
-    ds = gdal.GetDriverByName("MEM").Create("", 18, 4, 1, gdal.GDT_Byte)
+
+    v17 = 100
+    v18 = 80
+    v19 = 90
+    v20 = 110
+    m5 = (v17 + v18 + v19 + v20 + 2) >> 2
+
+    v21 = 40
+    v22 = 50
+    v23 = 30
+    v24 = 60
+    m6 = (v21 + v22 + v23 + v24 + 2) >> 2
+
+    v25 = 150
+    v26 = 170
+    v27 = 160
+    v28 = 180
+    m7 = (v25 + v26 + v27 + v28 + 2) >> 2
+
+    v29 = 200
+    v30 = 190
+    v31 = 210
+    v32 = 220
+    m8 = (v29 + v30 + v31 + v32 + 2) >> 2
+
+    ds = gdal.GetDriverByName("MEM").Create("", 64 + 2, 4, 1, gdal.GDT_Byte)
     ds.WriteRaster(
         0,
         0,
-        18,
+        64 + 2,
         4,
         struct.pack(
-            "B" * 18 * 4,
+            "B" * (64 + 2) * 4,
             v1,
             v2,
             v5,
@@ -1460,8 +1607,57 @@ def test_rasterio_average_halfsize_downsampling_byte():
             v14,
             v1,
             v2,
+            v17,
+            v18,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v17,
+            v18,
             v5,
             v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v1,
+            v2,
+            v17,
+            v18,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v17,
+            v18,
+            v1,
+            v2,
+            v5,
+            v6,
+            ###
             v3,
             v4,
             v7,
@@ -1478,8 +1674,57 @@ def test_rasterio_average_halfsize_downsampling_byte():
             v16,
             v3,
             v4,
+            v19,
+            v20,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v19,
+            v20,
             v7,
             v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v3,
+            v4,
+            v19,
+            v20,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v19,
+            v20,
+            v3,
+            v4,
+            v7,
+            v8,
+            ###
             v1,
             v2,
             v5,
@@ -1496,8 +1741,57 @@ def test_rasterio_average_halfsize_downsampling_byte():
             v14,
             v1,
             v2,
+            v17,
+            v18,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v17,
+            v18,
             v5,
             v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v1,
+            v2,
+            v17,
+            v18,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v21,
+            v22,
+            v25,
+            v26,
+            v29,
+            v30,
+            v17,
+            v18,
+            v1,
+            v2,
+            v5,
+            v6,
+            ###
             v3,
             v4,
             v7,
@@ -1512,17 +1806,65 @@ def test_rasterio_average_halfsize_downsampling_byte():
             v12,
             v15,
             v16,
+            v3,
+            v4,
+            v19,
+            v20,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v19,
+            v20,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v3,
+            v4,
+            v19,
+            v20,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v23,
+            v24,
+            v27,
+            v28,
+            v31,
+            v32,
+            v19,
+            v20,
             v3,
             v4,
             v7,
             v8,
         ),
     )
-    # Ask for at least 8 output pixels in width to trigger SSE2 optim
+    # Ask for at least 32 output pixels in width to trigger AVX2 optim
     data = ds.GetRasterBand(1).ReadRaster(
-        0, 0, 18, 4, 9, 2, resample_alg=gdal.GRIORA_Average
+        0, 0, 64 + 2, 4, 32 + 1, 2, resample_alg=gdal.GRIORA_Average
     )
-    assert struct.unpack("B" * 9 * 2, data) == (
+    assert struct.unpack("B" * (32 + 1) * 2, data) == (
         m1,
         m2,
         m3,
@@ -1531,7 +1873,32 @@ def test_rasterio_average_halfsize_downsampling_byte():
         m3,
         m4,
         m1,
+        m5,
+        m6,
+        m7,
+        m8,
+        m6,
+        m7,
+        m8,
+        m5,
         m2,
+        m3,
+        m4,
+        m2,
+        m3,
+        m4,
+        m1,
+        m5,
+        m6,
+        m7,
+        m8,
+        m6,
+        m7,
+        m8,
+        m5,
+        m1,
+        m2,
+        ###
         m1,
         m2,
         m3,
@@ -1539,6 +1906,30 @@ def test_rasterio_average_halfsize_downsampling_byte():
         m2,
         m3,
         m4,
+        m1,
+        m5,
+        m6,
+        m7,
+        m8,
+        m6,
+        m7,
+        m8,
+        m5,
+        m2,
+        m3,
+        m4,
+        m2,
+        m3,
+        m4,
+        m1,
+        m5,
+        m6,
+        m7,
+        m8,
+        m6,
+        m7,
+        m8,
+        m5,
         m1,
         m2,
     )
@@ -1577,14 +1968,30 @@ def test_rasterio_average_halfsize_downsampling_uint16():
     v15 = 1
     v16 = 1
     m4 = (v13 + v14 + v15 + v16 + 2) >> 2
-    ds = gdal.GetDriverByName("MEM").Create("", 18, 4, 1, gdal.GDT_UInt16)
+    ds = gdal.GetDriverByName("MEM").Create("", 36, 4, 1, gdal.GDT_UInt16)
     ds.WriteRaster(
         0,
         0,
-        18,
+        36,
         4,
         struct.pack(
-            "H" * 18 * 4,
+            "H" * 36 * 4,
+            v1,
+            v2,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v1,
+            v2,
             v1,
             v2,
             v5,
@@ -1603,6 +2010,25 @@ def test_rasterio_average_halfsize_downsampling_uint16():
             v2,
             v5,
             v6,
+            v1,
+            v2,
+            #
+            v3,
+            v4,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v3,
+            v4,
             v3,
             v4,
             v7,
@@ -1621,6 +2047,25 @@ def test_rasterio_average_halfsize_downsampling_uint16():
             v4,
             v7,
             v8,
+            v3,
+            v4,
+            #
+            v1,
+            v2,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v5,
+            v6,
+            v9,
+            v10,
+            v13,
+            v14,
+            v1,
+            v2,
             v1,
             v2,
             v5,
@@ -1639,6 +2084,25 @@ def test_rasterio_average_halfsize_downsampling_uint16():
             v2,
             v5,
             v6,
+            v1,
+            v2,
+            #
+            v3,
+            v4,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v7,
+            v8,
+            v11,
+            v12,
+            v15,
+            v16,
+            v3,
+            v4,
             v3,
             v4,
             v7,
@@ -1657,12 +2121,22 @@ def test_rasterio_average_halfsize_downsampling_uint16():
             v4,
             v7,
             v8,
+            v3,
+            v4,
         ),
     )  # Ask for at least 8 output pixels in width to trigger SSE2 optim
     data = ds.GetRasterBand(1).ReadRaster(
-        0, 0, 18, 4, 9, 2, resample_alg=gdal.GRIORA_Average
+        0, 0, 36, 4, 18, 2, resample_alg=gdal.GRIORA_Average
     )
-    assert struct.unpack("H" * 9 * 2, data) == (
+    assert struct.unpack("H" * 18 * 2, data) == (
+        m1,
+        m2,
+        m3,
+        m4,
+        m2,
+        m3,
+        m4,
+        m1,
         m1,
         m2,
         m3,
@@ -1673,6 +2147,16 @@ def test_rasterio_average_halfsize_downsampling_uint16():
         m1,
         m2,
         m1,
+        #
+        m1,
+        m2,
+        m3,
+        m4,
+        m2,
+        m3,
+        m4,
+        m1,
+        m1,
         m2,
         m3,
         m4,
@@ -1681,6 +2165,7 @@ def test_rasterio_average_halfsize_downsampling_uint16():
         m4,
         m1,
         m2,
+        m1,
     )
 
     ds.BuildOverviews("AVERAGE", [2])
@@ -2904,6 +3389,7 @@ def test_rasterio_writeraster_from_memoryview():
 # Test ReadRaster() in an existing buffer
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_readraster_in_existing_buffer():
 
     ds = gdal.GetDriverByName("MEM").Create("", 2, 1)
@@ -2940,6 +3426,7 @@ def test_rasterio_readraster_in_existing_buffer():
 # Test ReadBlock() in an existing buffer
 
 
+@gdaltest.disable_exceptions()
 def test_rasterio_readblock_in_existing_buffer():
 
     ds = gdal.GetDriverByName("MEM").Create("", 2, 1)
@@ -2966,6 +3453,7 @@ def test_rasterio_readblock_in_existing_buffer():
 # Test ReadRaster() in an existing buffer and alignment issues
 
 
+@gdaltest.disable_exceptions()
 @pytest.mark.parametrize(
     "datatype",
     [
@@ -3051,6 +3539,8 @@ def test_rasterio_gdal_rasterio_resampling():
 
 
 def test_rasterio_numpy_datatypes_for_xoff():
+
+    gdaltest.importorskip_gdal_array()
     np = pytest.importorskip("numpy")
 
     ds = gdal.Open("data/byte.tif")
@@ -3140,7 +3630,7 @@ def test_rasterio_float64(resample_alg):
 
 
 ###############################################################################
-# Test rms downsampling by a factor of 2 on exact boundaries, with float data type
+# Test downsampling with constant value, with non factor of two downsampling
 
 
 @pytest.mark.parametrize(
@@ -3149,6 +3639,8 @@ def test_rasterio_float64(resample_alg):
         gdal.GRIORA_NearestNeighbour,
         gdal.GRIORA_Bilinear,
         gdal.GRIORA_Cubic,
+        gdal.GRIORA_CubicSpline,
+        gdal.GRIORA_Lanczos,
         gdal.GRIORA_Mode,
         gdal.GRIORA_Average,
         gdal.GRIORA_RMS,
@@ -3160,7 +3652,29 @@ def test_rasterio_float64(resample_alg):
         (gdal.GDT_Byte, "B", 255),
         (gdal.GDT_UInt16, "H", 65535),
         (gdal.GDT_Float32, "f", 1.5),
-        (gdal.GDT_Float64, "d", 1.5e100),
+        (gdal.GDT_Float32, "f", struct.unpack("<f", b"\x00\x00\x80\x00")[0]),  # FLT_MIN
+        (gdal.GDT_Float32, "f", struct.unpack("<f", b"\xff\xff\x7f\x7f")[0]),  # FLT_MAX
+        (gdal.GDT_Float32, "f", float("inf")),
+        (
+            gdal.GDT_Float32,
+            "f",
+            -struct.unpack("<f", b"\x00\x00\x80\x00")[0],
+        ),  # -FLT_MIN
+        (
+            gdal.GDT_Float32,
+            "f",
+            -struct.unpack("<f", b"\xff\xff\x7f\x7f")[0],
+        ),  # -FLT_MAX
+        (gdal.GDT_Float32, "f", -float("inf")),
+        (gdal.GDT_Float32, "f", float("nan")),
+        (gdal.GDT_Float64, "d", 1.5),
+        (gdal.GDT_Float64, "d", sys.float_info.min),
+        (gdal.GDT_Float64, "d", sys.float_info.max),
+        (gdal.GDT_Float64, "d", float("inf")),
+        (gdal.GDT_Float64, "d", -sys.float_info.min),
+        (gdal.GDT_Float64, "d", -sys.float_info.max),
+        (gdal.GDT_Float64, "d", -float("inf")),
+        (gdal.GDT_Float64, "d", float("nan")),
     ],
 )
 def test_rasterio_constant_value(resample_alg, dt, struct_type, val):
@@ -3174,9 +3688,96 @@ def test_rasterio_constant_value(resample_alg, dt, struct_type, val):
         struct.pack(struct_type * (3 * 3), val, val, val, val, val, val, val, val, val),
     )
     data = ds.GetRasterBand(1).ReadRaster(0, 0, 3, 3, 2, 2, resample_alg=resample_alg)
-    assert struct.unpack(struct_type * (2 * 2), data) == pytest.approx(
-        (val, val, val, val), rel=1e-14
+
+    if resample_alg == gdal.GRIORA_RMS:
+        val = abs(val)
+
+    if math.isnan(val):
+        for v in struct.unpack(struct_type * (2 * 2), data):
+            assert math.isnan(v)
+    else:
+        if abs(val) < 1e-10:
+            for x in struct.unpack(struct_type * (2 * 2), data):
+                assert abs(x) > 0 and abs(x) < 2 * abs(val)
+        assert struct.unpack(struct_type * (2 * 2), data) == pytest.approx(
+            (val,) * (2 * 2), rel=1e-7 if dt == gdal.GDT_Float32 else 1e-14
+        )
+
+
+###############################################################################
+# Test downsampling with constant value, with factor of two downsampling
+
+
+@pytest.mark.parametrize(
+    "resample_alg",
+    [
+        gdal.GRIORA_NearestNeighbour,
+        gdal.GRIORA_Bilinear,
+        gdal.GRIORA_Cubic,
+        gdal.GRIORA_CubicSpline,
+        gdal.GRIORA_Lanczos,
+        gdal.GRIORA_Mode,
+        gdal.GRIORA_Average,
+        gdal.GRIORA_RMS,
+    ],
+)
+@pytest.mark.parametrize(
+    "dt,struct_type,val",
+    [
+        (gdal.GDT_Byte, "B", 255),
+        (gdal.GDT_UInt16, "H", 65535),
+        (gdal.GDT_Float32, "f", 1.5),
+        (gdal.GDT_Float32, "f", struct.unpack("<f", b"\x00\x00\x80\x00")[0]),  # FLT_MIN
+        (gdal.GDT_Float32, "f", struct.unpack("<f", b"\xff\xff\x7f\x7f")[0]),  # FLT_MAX
+        (gdal.GDT_Float32, "f", float("inf")),
+        (gdal.GDT_Float32, "f", float("nan")),
+        (
+            gdal.GDT_Float32,
+            "f",
+            -struct.unpack("<f", b"\x00\x00\x80\x00")[0],
+        ),  # -FLT_MIN
+        (
+            gdal.GDT_Float32,
+            "f",
+            -struct.unpack("<f", b"\xff\xff\x7f\x7f")[0],
+        ),  # -FLT_MAX
+        (gdal.GDT_Float32, "f", -float("inf")),
+        (gdal.GDT_Float64, "d", 1.5),
+        (gdal.GDT_Float64, "d", sys.float_info.min),
+        (gdal.GDT_Float64, "d", sys.float_info.max),
+        (gdal.GDT_Float64, "d", float("inf")),
+        (gdal.GDT_Float64, "d", -sys.float_info.min),
+        (gdal.GDT_Float64, "d", -sys.float_info.max),
+        (gdal.GDT_Float64, "d", -float("inf")),
+        (gdal.GDT_Float64, "d", float("nan")),
+    ],
+)
+def test_rasterio_constant_value_factor_of_two(resample_alg, dt, struct_type, val):
+
+    ds = gdal.GetDriverByName("MEM").Create("", 18, 8, 1, dt)
+    ds.WriteRaster(
+        0,
+        0,
+        18,
+        8,
+        struct.pack(struct_type, val) * (18 * 8),
     )
+    data = ds.GetRasterBand(1).ReadRaster(0, 0, 18, 8, 9, 4, resample_alg=resample_alg)
+
+    if resample_alg == gdal.GRIORA_RMS:
+        val = abs(val)
+
+    if math.isnan(val):
+        for v in struct.unpack(struct_type * (9 * 4), data):
+            assert math.isnan(v)
+    else:
+        if abs(val) < 1e-10:
+            for x in struct.unpack(struct_type * (9 * 4), data):
+                assert abs(x) > 0 and abs(x) < 2 * abs(val)
+
+        assert struct.unpack(struct_type * (9 * 4), data) == pytest.approx(
+            (val,) * (9 * 4), rel=1e-7 if dt == gdal.GDT_Float32 else 1e-14
+        )
 
 
 ###############################################################################
@@ -3194,11 +3795,11 @@ def test_rasterio_overview_selection():
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 101, 101)[0] == 1
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 100, 100)[0] == 1
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 99, 99)[0] == 1
-    assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 60, 60)[0] == 1
+    assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 60, 60)[0] == 2
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 59, 59)[0] == 2
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 50, 50)[0] == 2
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 49, 49)[0] == 2
-    assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 30, 30)[0] == 2
+    assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 30, 30)[0] == 3
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 29, 29)[0] == 3
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 25, 25)[0] == 3
     assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 24, 24)[0] == 3
@@ -3282,3 +3883,18 @@ def test_rasterio_overview_selection():
         assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 29, 29)[0] == 2
         assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 25, 25)[0] == 3
         assert ds.GetRasterBand(1).ReadRaster(0, 0, 100, 100, 24, 24)[0] == 3
+
+
+###############################################################################
+# Check robustness to GDT_Unknown
+
+
+def test_rasterio_gdt_unknown():
+
+    with gdal.GetDriverByName("MEM").Create("", 1, 1) as ds:
+        # Caught at the SWIG level
+        with pytest.raises(Exception, match="Illegal value for data type"):
+            ds.ReadRaster(buf_type=gdal.GDT_Unknown)
+        # Caught at the SWIG level
+        with pytest.raises(Exception, match="Illegal value for data type"):
+            ds.GetRasterBand(1).ReadRaster(buf_type=gdal.GDT_Unknown)
