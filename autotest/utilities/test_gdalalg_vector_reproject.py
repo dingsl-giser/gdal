@@ -11,10 +11,11 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
+import gdaltest
 import ogrtest
 import pytest
 
-from osgeo import gdal, ogr
+from osgeo import gdal, ogr, osr
 
 
 def get_reproject_alg():
@@ -78,8 +79,8 @@ def test_gdalalg_vector_reproject_active_layer():
 
     assert alg.ParseCommandLineArguments(
         [
-            "--src-crs=EPSG:4326",
-            "--dst-crs=EPSG:32631",
+            "--input-crs=EPSG:4326",
+            "--output-crs=EPSG:32631",
             "--of",
             "MEM",
             "--output",
@@ -110,3 +111,101 @@ def test_gdalalg_vector_reproject_complete_dst_crs():
     )
     assert "4326\\ --" in out
     assert "2193\\ --" not in out  # NZGD2000
+
+
+###############################################################################
+# Test from a polar projected CRS to geographic
+
+
+@pytest.mark.require_geos
+@pytest.mark.parametrize(
+    "input_wkt,expected_wkt",
+    [
+        (
+            "POLYGON((0 100000,100000 0,0 -100000,-100000 0,0 100000),(0 50000,50000 0,0 -50000,-50000 0,0 50000))",
+            (
+                "POLYGON ((90.0 89.089200825091,0.0 89.089200825091,-90 89.089200825091,-180 89.0892008251069,-180 89.5445935108883,-90 89.5445935108803,0.0 89.5445935108803,90.0 89.5445935108803,180.0 89.5445935108883,180.0 89.0892008251069,90.0 89.089200825091))",
+                # Below is with GEOS 3.15
+                "POLYGON ((180.0 89.0892008251069,90.0 89.089200825091,0.0 89.089200825091,-90 89.089200825091,-180 89.0892008251069,-180 89.5445935108883,-90 89.5445935108803,0.0 89.5445935108803,90.0 89.5445935108803,180.0 89.5445935108883,180.0 89.0892008251069))",
+            ),
+        ),
+        (
+            "POLYGON((50000 -100000,100000 -100000,100000 100000,-100000 100000,-100000 50000,50000 50000,50000 -100000))",
+            (
+                "MULTIPOLYGON (((135.0 88.7119614804959,45.0 88.7119614804959,26.565051177078 88.9817007095479,135.0 89.3559612202261,180.0 89.5445935108803,180.0 89.089200825091,135.0 88.7119614804959)),((-116.565051177078 88.9817007095479,-135 88.7119614804959,-180 89.089200825091,-180 89.5445935108803,-116.565051177078 88.9817007095479)))",
+                # Below is with GEOS 3.15
+                "MULTIPOLYGON (((180.0 89.089200825091,135.0 88.7119614804959,45.0 88.7119614804959,26.565051177078 88.9817007095479,135.0 89.3559612202261,180.0 89.5445935108803,180.0 89.089200825091)),((-180 89.5445935108803,-116.565051177078 88.9817007095479,-135 88.7119614804959,-180 89.089200825091,-180 89.5445935108803)))",
+            ),
+        ),
+    ],
+)
+def test_gdalalg_vector_reproject_polar_projected_to_geographic(
+    input_wkt, expected_wkt
+):
+
+    srs_3996 = osr.SpatialReference()
+    srs_3996.ImportFromEPSG(3996)
+    srs_3996.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    ds = gdal.GetDriverByName("MEM").CreateVector("")
+    lyr = ds.CreateLayer("test", srs=srs_3996)
+    f = ogr.Feature(lyr.GetLayerDefn())
+    f.SetGeometry(ogr.CreateGeometryFromWkt(input_wkt))
+    lyr.CreateFeature(f)
+
+    with gdal.Run(
+        "vector",
+        "reproject",
+        input=ds,
+        output="",
+        output_format="MEM",
+        dst_crs="EPSG:4326",
+    ) as alg:
+        out_ds = alg.Output()
+        out_lyr = out_ds.GetLayer(0)
+        out_f = out_lyr.GetNextFeature()
+        out_g = out_f.GetGeometryRef()
+        for wkt in expected_wkt:
+            try:
+                ogrtest.check_feature_geometry(out_g, wkt)
+                return
+            except Exception:
+                pass
+        assert False, f"Got {out_g.ExportToIsoWkt()}, expected {expected_wkt}"
+
+
+@pytest.mark.require_driver("OSM")
+@pytest.mark.require_driver("GDALG")
+def test_gdalalg_vector_reproject_test_ogrsf(tmp_path):
+
+    import test_cli_utilities
+
+    if test_cli_utilities.get_test_ogrsf_path() is None:
+        pytest.skip()
+
+    gdalg_filename = tmp_path / "tmp.gdalg.json"
+    open(gdalg_filename, "wb").write(
+        b'{"type": "gdal_streamed_alg","command_line": "gdal vector reproject ../ogr/data/osm/test.pbf --active-layer point --dst-crs EPSG:3857 --output-format=stream dummy_dataset_name","relative_paths_relative_to_this_file":false}'
+    )
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + f" -ro {gdalg_filename}"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+    assert "FAILURE" not in ret
+
+
+def test_gdalalg_vector_reproject_on_aspatial_layer():
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_lyr = src_ds.CreateLayer("the_layer", geom_type=ogr.wkbNone)
+    src_lyr.CreateFeature(ogr.Feature(src_lyr.GetLayerDefn()))
+
+    with gdal.alg.vector.reproject(
+        input=src_ds, output="", output_format="MEM", output_crs="EPSG:4326"
+    ) as alg:
+        ds = alg.Output()
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 1

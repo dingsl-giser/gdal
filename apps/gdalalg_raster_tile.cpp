@@ -71,6 +71,10 @@
 constexpr const char PROGRESS_MARKER[] = {'!', '.', 'x'};
 constexpr const char END_MARKER[] = {'?', 'E', '?', 'N', '?', 'D', '?'};
 
+constexpr const char ERROR_START_MARKER[] = {'%', 'E', '%', 'R', '%', 'R',
+                                             '%', '_', '%', 'S', '%', 'T',
+                                             '%', 'A', '%', 'R', '%', 'T'};
+
 constexpr const char *STOP_MARKER = "STOP\n";
 
 namespace
@@ -86,7 +90,7 @@ struct BandMetadata
 }  // namespace
 
 /************************************************************************/
-/*                       GetThresholdMinTilesPerJob()                   */
+/*                     GetThresholdMinTilesPerJob()                     */
 /************************************************************************/
 
 static int GetThresholdMinThreadsForSpawn()
@@ -101,7 +105,7 @@ static int GetThresholdMinThreadsForSpawn()
 }
 
 /************************************************************************/
-/*                        GetThresholdMinTilesPerJob()                  */
+/*                     GetThresholdMinTilesPerJob()                     */
 /************************************************************************/
 
 static int GetThresholdMinTilesPerJob()
@@ -116,7 +120,7 @@ static int GetThresholdMinTilesPerJob()
 }
 
 /************************************************************************/
-/*           GDALRasterTileAlgorithm::GDALRasterTileAlgorithm()         */
+/*          GDALRasterTileAlgorithm::GDALRasterTileAlgorithm()          */
 /************************************************************************/
 
 GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
@@ -157,7 +161,15 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
         .SetMinValueIncluded(0)
         .SetHidden();  // Used in spawn mode
 
-    AddRasterInputArgs(false, !standaloneStep);
+    if (standaloneStep)
+    {
+        AddRasterInputArgs(/* openForMixedRasterVector = */ false,
+                           /* hiddenForCLI = */ false);
+    }
+    else
+    {
+        AddRasterHiddenInputDatasetArg();
+    }
 
     m_format = "PNG";
     AddOutputFormatArg(&m_format)
@@ -176,7 +188,7 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
 
     std::vector<std::string> tilingSchemes{"raster"};
     for (const std::string &scheme :
-         gdal::TileMatrixSet::listPredefinedTileMatrixSets())
+         gdal::TileMatrixSet::listPredefinedTileMatrixSets(/* hidden = */ true))
     {
         auto poTMS = gdal::TileMatrixSet::parse(scheme.c_str());
         OGRSpatialReference oSRS_TMS;
@@ -196,7 +208,7 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
         .SetHiddenChoices(
             "GoogleMapsCompatible",  // equivalent of WebMercatorQuad
             "mercator",              // gdal2tiles equivalent of WebMercatorQuad
-            "geodetic"  // gdal2tiles (not totally) equivalent of WorldCRS84Quad
+            "GlobalGeodeticOriginLat270"  // gdal2tiles geodetic without --tmscompatible
         );
 
     AddArg("min-zoom", 0, _("Minimum zoom level"), &m_minZoomLevel)
@@ -246,7 +258,8 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
            &m_noalpha)
         .SetMutualExclusionGroup("alpha");
     auto &dstNoDataArg =
-        AddArg("dst-nodata", 0, _("Destination nodata value"), &m_dstNoData);
+        AddArg("output-nodata", 0, _("Output nodata value"), &m_dstNoData)
+            .AddHiddenAlias("dst-nodata");
     AddArg("skip-blank", 0, _("Do not generate blank tiles"), &m_skipBlank);
 
     {
@@ -364,7 +377,7 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
             {
                 ReportError(
                     CE_Failure, CPLE_IllegalArg,
-                    "'add-alpha' and 'dst-nodata' are mutually exclusive");
+                    "'add-alpha' and 'output-nodata' are mutually exclusive");
                 return false;
             }
 
@@ -396,7 +409,7 @@ GDALRasterTileAlgorithm::GDALRasterTileAlgorithm(bool standaloneStep)
 }
 
 /************************************************************************/
-/*                          GetTileIndices()                            */
+/*                           GetTileIndices()                           */
 /************************************************************************/
 
 static bool GetTileIndices(gdal::TileMatrixSet::TileMatrix &tileMatrix,
@@ -470,7 +483,7 @@ static bool GetTileIndices(gdal::TileMatrixSet::TileMatrix &tileMatrix,
 }
 
 /************************************************************************/
-/*                           GetFileY()                                 */
+/*                              GetFileY()                              */
 /************************************************************************/
 
 static int GetFileY(int iY, const gdal::TileMatrixSet::TileMatrix &tileMatrix,
@@ -480,7 +493,7 @@ static int GetFileY(int iY, const gdal::TileMatrixSet::TileMatrix &tileMatrix,
 }
 
 /************************************************************************/
-/*                          GenerateTile()                              */
+/*                            GenerateTile()                            */
 /************************************************************************/
 
 // Cf http://www.libpng.org/pub/png/spec/1.2/PNG-Filters.html
@@ -703,7 +716,7 @@ static bool GenerateTile(
     constexpr int EXTRA_BYTE_PER_ROW = 1;  // for filter type
     constexpr int EXTRA_ROWS = 2;          // for paethBuffer and paethBufferTmp
     if (!bAuxXML && EQUAL(pszExtension, "png") &&
-        eWorkingDataType == GDT_Byte && poColorTable == nullptr &&
+        eWorkingDataType == GDT_UInt8 && poColorTable == nullptr &&
         pdfDstNoData == nullptr && W <= INT_MAX / nBands &&
         nBands * W <= INT_MAX - EXTRA_BYTE_PER_ROW &&
         H <= INT_MAX - EXTRA_ROWS &&
@@ -1392,14 +1405,14 @@ static bool GenerateTile(
     }
 
     GDALGeoTransform gt;
-    gt[0] =
+    gt.xorig =
         tileMatrix.mTopLeftX + iX * tileMatrix.mResX * tileMatrix.mTileWidth;
-    gt[1] = tileMatrix.mResX;
-    gt[2] = 0;
-    gt[3] =
+    gt.xscale = tileMatrix.mResX;
+    gt.xrot = 0;
+    gt.yorig =
         tileMatrix.mTopLeftY - iY * tileMatrix.mResY * tileMatrix.mTileHeight;
-    gt[4] = 0;
-    gt[5] = -tileMatrix.mResY;
+    gt.yrot = 0;
+    gt.yscale = -tileMatrix.mResY;
     memDS->SetGeoTransform(gt);
 
     memDS->SetSpatialRef(&oSRS_TMS);
@@ -1447,7 +1460,7 @@ static bool GenerateTile(
 }
 
 /************************************************************************/
-/*                    GenerateOverviewTile()                            */
+/*                        GenerateOverviewTile()                        */
 /************************************************************************/
 
 static bool
@@ -1763,7 +1776,7 @@ namespace
 {
 
 /************************************************************************/
-/*                     FakeMaxZoomRasterBand                            */
+/*                        FakeMaxZoomRasterBand                         */
 /************************************************************************/
 
 class FakeMaxZoomRasterBand : public GDALRasterBand
@@ -1838,7 +1851,7 @@ class FakeMaxZoomRasterBand : public GDALRasterBand
 };
 
 /************************************************************************/
-/*                       FakeMaxZoomDataset                             */
+/*                          FakeMaxZoomDataset                          */
 /************************************************************************/
 
 // This class is used to create a fake output dataset for GDALWarpOperation.
@@ -1899,7 +1912,7 @@ class FakeMaxZoomDataset : public GDALDataset
 };
 
 /************************************************************************/
-/*                          MosaicRasterBand                            */
+/*                           MosaicRasterBand                           */
 /************************************************************************/
 
 class MosaicRasterBand : public GDALRasterBand
@@ -1961,7 +1974,7 @@ class MosaicRasterBand : public GDALRasterBand
 };
 
 /************************************************************************/
-/*                         MosaicDataset                                */
+/*                            MosaicDataset                             */
 /************************************************************************/
 
 // This class is to expose the tiles of a given level as a mosaic that
@@ -2014,12 +2027,12 @@ class MosaicDataset : public GDALDataset
     {
         nRasterXSize = (nTileMaxX - nTileMinX + 1) * oTM.mTileWidth;
         nRasterYSize = (nTileMaxY - nTileMinY + 1) * oTM.mTileHeight;
-        m_gt[0] = oTM.mTopLeftX + nTileMinX * oTM.mResX * oTM.mTileWidth;
-        m_gt[1] = oTM.mResX;
-        m_gt[2] = 0;
-        m_gt[3] = oTM.mTopLeftY - nTileMinY * oTM.mResY * oTM.mTileHeight;
-        m_gt[4] = 0;
-        m_gt[5] = -oTM.mResY;
+        m_gt.xorig = oTM.mTopLeftX + nTileMinX * oTM.mResX * oTM.mTileWidth;
+        m_gt.xscale = oTM.mResX;
+        m_gt.xrot = 0;
+        m_gt.yorig = oTM.mTopLeftY - nTileMinY * oTM.mResY * oTM.mTileHeight;
+        m_gt.yrot = 0;
+        m_gt.yscale = -oTM.mResY;
         for (int i = 1; i <= nBandsIn; ++i)
         {
             const GDALColorInterp eColorInterp =
@@ -2064,7 +2077,7 @@ class MosaicDataset : public GDALDataset
 };
 
 /************************************************************************/
-/*                   MosaicRasterBand::IReadBlock()                     */
+/*                    MosaicRasterBand::IReadBlock()                    */
 /************************************************************************/
 
 CPLErr MosaicRasterBand::IReadBlock(int nXBlock, int nYBlock, void *pData)
@@ -2137,7 +2150,7 @@ static void ApplySubstitutions(CPLString &s,
 }
 
 /************************************************************************/
-/*                           GenerateLeaflet()                          */
+/*                          GenerateLeaflet()                           */
 /************************************************************************/
 
 static void GenerateLeaflet(const std::string &osDirectory,
@@ -2227,7 +2240,7 @@ GenerateMapML(const std::string &osDirectory, const std::string &mapmlTemplate,
         else
             substs["TILING_SCHEME"] = tms.identifier();
 
-        substs["URL"] = osURL.empty() ? "./" : osURL;
+        substs["URL"] = osURL.empty() ? "./" : osURL + "/";
         substs["MINTILEX"] = CPLSPrintf("%d", nMinTileX);
         substs["MINTILEY"] = CPLSPrintf("%d", nMinTileY);
         substs["MAXTILEX"] = CPLSPrintf("%d", nMaxTileX);
@@ -2443,8 +2456,8 @@ GenerateSTAC(const std::string &osDirectory, const std::string &osTitle,
         std::move(oTilesTileMatrixLink);
     oProperties["tiles:tile_matrix_links"] = std::move(oTilesTileMatrixLinks);
 
-    const char *pszAuthName = oSRS.GetAuthorityName(nullptr);
-    const char *pszAuthCode = oSRS.GetAuthorityCode(nullptr);
+    const char *pszAuthName = oSRS.GetAuthorityName();
+    const char *pszAuthCode = oSRS.GetAuthorityCode();
     if (pszAuthName && pszAuthCode)
     {
         oProperties["proj:code"] =
@@ -2540,7 +2553,7 @@ GenerateSTAC(const std::string &osDirectory, const std::string &osTitle,
         {GDT_Int16, "int16"},
         {GDT_Int32, "int32"},
         {GDT_Int64, "int64"},
-        {GDT_Byte, "uint8"},
+        {GDT_UInt8, "uint8"},
         {GDT_UInt16, "uint16"},
         {GDT_UInt32, "uint32"},
         {GDT_UInt64, "uint64"},
@@ -2613,7 +2626,7 @@ GenerateSTAC(const std::string &osDirectory, const std::string &osTitle,
 }
 
 /************************************************************************/
-/*                           GenerateOpenLayers()                       */
+/*                         GenerateOpenLayers()                         */
 /************************************************************************/
 
 static void GenerateOpenLayers(
@@ -2892,8 +2905,8 @@ static void GenerateOpenLayers(
     }
     else if (!oSRS_TMS.IsEmpty() && tms.identifier() != "GoogleMapsCompatible")
     {
-        const char *pszAuthName = oSRS_TMS.GetAuthorityName(nullptr);
-        const char *pszAuthCode = oSRS_TMS.GetAuthorityCode(nullptr);
+        const char *pszAuthName = oSRS_TMS.GetAuthorityName();
+        const char *pszAuthCode = oSRS_TMS.GetAuthorityCode();
         if (pszAuthName && pszAuthCode && EQUAL(pszAuthName, "EPSG"))
         {
             substs["epsg_code"] = pszAuthCode;
@@ -2944,7 +2957,7 @@ static void GenerateOpenLayers(
 }
 
 /************************************************************************/
-/*                           GetTileBoundingBox()                       */
+/*                         GetTileBoundingBox()                         */
 /************************************************************************/
 
 static void GetTileBoundingBox(int nTileX, int nTileY, int nTileZ,
@@ -2986,7 +2999,7 @@ static void GetTileBoundingBox(int nTileX, int nTileY, int nTileZ,
 }
 
 /************************************************************************/
-/*                           GenerateKML()                              */
+/*                            GenerateKML()                             */
 /************************************************************************/
 
 namespace
@@ -3210,7 +3223,7 @@ namespace
 {
 
 /************************************************************************/
-/*                            ResourceManager                           */
+/*                           ResourceManager                            */
 /************************************************************************/
 
 // Generic cache managing resources
@@ -3261,7 +3274,7 @@ template <class Resource> class ResourceManager /* non final */
 };
 
 /************************************************************************/
-/*                         PerThreadMaxZoomResources                    */
+/*                      PerThreadMaxZoomResources                       */
 /************************************************************************/
 
 // Per-thread resources for generation of tiles at full resolution
@@ -3285,7 +3298,7 @@ struct PerThreadMaxZoomResources
 };
 
 /************************************************************************/
-/*                      PerThreadMaxZoomResourceManager                 */
+/*                   PerThreadMaxZoomResourceManager                    */
 /************************************************************************/
 
 // Manage a cache of PerThreadMaxZoomResources instances
@@ -3359,7 +3372,7 @@ class PerThreadMaxZoomResourceManager final
 };
 
 /************************************************************************/
-/*                       PerThreadLowerZoomResources                    */
+/*                     PerThreadLowerZoomResources                      */
 /************************************************************************/
 
 // Per-thread resources for generation of tiles at zoom level < max
@@ -3369,7 +3382,7 @@ struct PerThreadLowerZoomResources
 };
 
 /************************************************************************/
-/*                   PerThreadLowerZoomResourceManager                  */
+/*                  PerThreadLowerZoomResourceManager                   */
 /************************************************************************/
 
 // Manage a cache of PerThreadLowerZoomResources instances
@@ -3397,7 +3410,7 @@ class PerThreadLowerZoomResourceManager final
 }  // namespace
 
 /************************************************************************/
-/*            GDALRasterTileAlgorithm::ValidateOutputFormat()           */
+/*           GDALRasterTileAlgorithm::ValidateOutputFormat()            */
 /************************************************************************/
 
 bool GDALRasterTileAlgorithm::ValidateOutputFormat(GDALDataType eSrcDT) const
@@ -3410,7 +3423,7 @@ bool GDALRasterTileAlgorithm::ValidateOutputFormat(GDALDataType eSrcDT) const
                         "Only up to 4 bands supported for PNG.");
             return false;
         }
-        if (eSrcDT != GDT_Byte && eSrcDT != GDT_UInt16)
+        if (eSrcDT != GDT_UInt8 && eSrcDT != GDT_UInt16)
         {
             ReportError(CE_Failure, CPLE_NotSupported,
                         "Only Byte and UInt16 data types supported for PNG.");
@@ -3428,8 +3441,8 @@ bool GDALRasterTileAlgorithm::ValidateOutputFormat(GDALDataType eSrcDT) const
         }
         const bool bUInt16Supported =
             strstr(m_poDstDriver->GetMetadataItem(GDAL_DMD_CREATIONDATATYPES),
-                   "UInt16");
-        if (eSrcDT != GDT_Byte && !(eSrcDT == GDT_UInt16 && bUInt16Supported))
+                   "UInt16") != nullptr;
+        if (eSrcDT != GDT_UInt8 && !(eSrcDT == GDT_UInt16 && bUInt16Supported))
         {
             ReportError(
                 CE_Failure, CPLE_NotSupported,
@@ -3474,7 +3487,7 @@ bool GDALRasterTileAlgorithm::ValidateOutputFormat(GDALDataType eSrcDT) const
                         "Only 3 or 4 bands supported for WEBP.");
             return false;
         }
-        if (eSrcDT != GDT_Byte)
+        if (eSrcDT != GDT_UInt8)
         {
             ReportError(CE_Failure, CPLE_NotSupported,
                         "Only Byte data type supported for WEBP.");
@@ -3588,7 +3601,7 @@ bool GDALRasterTileAlgorithm::IsCompatibleOfSpawn(const char *&pszErrorMsg)
 }
 
 /************************************************************************/
-/*                      GetProgressForChildProcesses()                  */
+/*                    GetProgressForChildProcesses()                    */
 /************************************************************************/
 
 static void GetProgressForChildProcesses(
@@ -3599,6 +3612,7 @@ static void GetProgressForChildProcesses(
     std::vector<unsigned int> anProgressState(ahSpawnedProcesses.size(), 0);
     std::vector<unsigned int> anEndState(ahSpawnedProcesses.size(), 0);
     std::vector<bool> abFinished(ahSpawnedProcesses.size(), false);
+    std::vector<unsigned int> anStartErrorState(ahSpawnedProcesses.size(), 0);
 
     while (bRet)
     {
@@ -3645,6 +3659,59 @@ static void GetProgressForChildProcesses(
                     ++nFinished;
                 }
             }
+            else if (ch == ERROR_START_MARKER[anStartErrorState[iProcess]])
+            {
+                ++anStartErrorState[iProcess];
+                if (anStartErrorState[iProcess] == sizeof(ERROR_START_MARKER))
+                {
+                    anStartErrorState[iProcess] = 0;
+                    uint32_t nErr = 0;
+                    CPLPipeRead(
+                        CPLSpawnAsyncGetInputFileHandle(hSpawnedProcess), &nErr,
+                        sizeof(nErr));
+                    uint32_t nNum = 0;
+                    CPLPipeRead(
+                        CPLSpawnAsyncGetInputFileHandle(hSpawnedProcess), &nNum,
+                        sizeof(nNum));
+                    uint16_t nMsgLen = 0;
+                    CPLPipeRead(
+                        CPLSpawnAsyncGetInputFileHandle(hSpawnedProcess),
+                        &nMsgLen, sizeof(nMsgLen));
+                    std::string osMsg;
+                    osMsg.resize(nMsgLen);
+                    CPLPipeRead(
+                        CPLSpawnAsyncGetInputFileHandle(hSpawnedProcess),
+                        &osMsg[0], nMsgLen);
+                    if (nErr <= CE_Fatal &&
+                        nNum <= CPLE_ObjectStorageGenericError)
+                    {
+                        bool bDone = false;
+                        if (nErr == CE_Debug)
+                        {
+                            auto nPos = osMsg.find(": ");
+                            if (nPos != std::string::npos)
+                            {
+                                bDone = true;
+                                CPLDebug(
+                                    osMsg.substr(0, nPos).c_str(),
+                                    "subprocess %d: %s",
+                                    static_cast<int>(iProcess),
+                                    osMsg.substr(nPos + strlen(": ")).c_str());
+                            }
+                        }
+                        // cppcheck-suppress knownConditionTrueFalse
+                        if (!bDone)
+                        {
+                            CPLError(nErr == CE_Fatal
+                                         ? CE_Failure
+                                         : static_cast<CPLErr>(nErr),
+                                     static_cast<CPLErrorNum>(nNum),
+                                     "Sub-process %d: %s",
+                                     static_cast<int>(iProcess), osMsg.c_str());
+                        }
+                    }
+                }
+            }
             else
             {
                 CPLErrorOnce(
@@ -3664,7 +3731,7 @@ static void GetProgressForChildProcesses(
 }
 
 /************************************************************************/
-/*                       WaitForSpawnedProcesses()                      */
+/*                      WaitForSpawnedProcesses()                       */
 /************************************************************************/
 
 void GDALRasterTileAlgorithm::WaitForSpawnedProcesses(
@@ -3756,7 +3823,7 @@ int GDALRasterTileAlgorithm::GetMaxChildCount(int nMaxJobCount) const
 }
 
 /************************************************************************/
-/*                           SendConfigOptions()                        */
+/*                         SendConfigOptions()                          */
 /************************************************************************/
 
 static void SendConfigOptions(CPLSpawnedProcess *hSpawnedProcess, bool &bRet)
@@ -3791,7 +3858,7 @@ static void SendConfigOptions(CPLSpawnedProcess *hSpawnedProcess, bool &bRet)
 }
 
 /************************************************************************/
-/*                        GenerateTilesForkMethod()                     */
+/*                      GenerateTilesForkMethod()                       */
 /************************************************************************/
 
 #ifdef FORK_ALLOWED
@@ -3820,13 +3887,14 @@ static int GenerateTilesForkMethod(CPL_FILE_HANDLE in, CPL_FILE_HANDLE out)
     CPLSetConfigOption("GDAL_NUM_THREADS", "1");
     GDALSetCacheMax64(pWorkStructure->nCacheMaxPerProcess);
 
-    GDALRasterTileAlgorithm alg;
+    GDALRasterTileAlgorithmStandalone alg;
     if (pWorkStructure->poMemSrcDS)
     {
         auto *inputArg = alg.GetArg(GDAL_ARG_NAME_INPUT);
-        auto &val = inputArg->Get<std::vector<GDALArgDatasetValue>>();
+        std::vector<GDALArgDatasetValue> val;
         val.resize(1);
         val[0].Set(pWorkStructure->poMemSrcDS);
+        inputArg->Set(std::move(val));
     }
     return alg.ParseCommandLineArguments(pWorkStructure->aosArgv) && alg.Run()
                ? 0
@@ -3836,7 +3904,7 @@ static int GenerateTilesForkMethod(CPL_FILE_HANDLE in, CPL_FILE_HANDLE out)
 #endif  // FORK_ALLOWED
 
 /************************************************************************/
-/*          GDALRasterTileAlgorithm::GenerateBaseTilesSpawnMethod()     */
+/*       GDALRasterTileAlgorithm::GenerateBaseTilesSpawnMethod()        */
 /************************************************************************/
 
 bool GDALRasterTileAlgorithm::GenerateBaseTilesSpawnMethod(
@@ -4011,7 +4079,7 @@ bool GDALRasterTileAlgorithm::GenerateBaseTilesSpawnMethod(
                 m_parallelMethod == "fork" ? nullptr : aosArgv.List(),
                 /* bCreateInputPipe = */ true,
                 /* bCreateOutputPipe = */ true,
-                /* bCreateErrorPipe = */ true, nullptr);
+                /* bCreateErrorPipe = */ false, nullptr);
             if (!hSpawnedProcess)
             {
                 ReportError(CE_Failure, CPLE_AppDefined,
@@ -4076,7 +4144,7 @@ bool GDALRasterTileAlgorithm::GenerateBaseTilesSpawnMethod(
 }
 
 /************************************************************************/
-/*      GDALRasterTileAlgorithm::GenerateOverviewTilesSpawnMethod()     */
+/*     GDALRasterTileAlgorithm::GenerateOverviewTilesSpawnMethod()      */
 /************************************************************************/
 
 bool GDALRasterTileAlgorithm::GenerateOverviewTilesSpawnMethod(
@@ -4334,6 +4402,24 @@ bool GDALRasterTileAlgorithm::RunImpl(GDALProgressFunc pfnProgress,
 }
 
 /************************************************************************/
+/*                        SpawnedErrorHandler()                         */
+/************************************************************************/
+
+static void CPL_STDCALL SpawnedErrorHandler(CPLErr eErr, CPLErrorNum eNum,
+                                            const char *pszMsg)
+{
+    fwrite(ERROR_START_MARKER, sizeof(ERROR_START_MARKER), 1, stdout);
+    uint32_t nErr = eErr;
+    fwrite(&nErr, sizeof(nErr), 1, stdout);
+    uint32_t nNum = eNum;
+    fwrite(&nNum, sizeof(nNum), 1, stdout);
+    uint16_t nLen = static_cast<uint16_t>(strlen(pszMsg));
+    fwrite(&nLen, sizeof(nLen), 1, stdout);
+    fwrite(pszMsg, nLen, 1, stdout);
+    fflush(stdout);
+}
+
+/************************************************************************/
 /*                  GDALRasterTileAlgorithm::RunStep()                  */
 /************************************************************************/
 
@@ -4512,8 +4598,6 @@ bool GDALRasterTileAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
 
     if (m_tilingScheme == "mercator")
         m_tilingScheme = "WebMercatorQuad";
-    else if (m_tilingScheme == "geodetic")
-        m_tilingScheme = "WorldCRS84Quad";
     else if (m_tilingScheme == "raster")
     {
         if (m_tileSize == 0)
@@ -4551,8 +4635,8 @@ bool GDALRasterTileAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
         aosTO.SetNameValue("DST_SRS", oSRS_TMS.exportToWkt().c_str());
     }
 
-    const char *pszAuthName = oSRS_TMS.GetAuthorityName(nullptr);
-    const char *pszAuthCode = oSRS_TMS.GetAuthorityCode(nullptr);
+    const char *pszAuthName = oSRS_TMS.GetAuthorityName();
+    const char *pszAuthCode = oSRS_TMS.GetAuthorityCode();
     const int nEPSGCode =
         (pszAuthName && pszAuthCode && EQUAL(pszAuthName, "EPSG"))
             ? atoi(pszAuthCode)
@@ -5217,8 +5301,14 @@ bool GDALRasterTileAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
 
     std::atomic<bool> bParentAskedForStop = false;
     std::thread threadWaitForParentStop;
+    std::unique_ptr<CPLErrorHandlerPusher> poErrorHandlerPusher;
     if (m_spawned)
     {
+        // Redirect errors to stdout so the parent listens on a single
+        // file descriptor.
+        poErrorHandlerPusher =
+            std::make_unique<CPLErrorHandlerPusher>(SpawnedErrorHandler);
+
         threadWaitForParentStop = std::thread(
             [&bParentAskedForStop]()
             {
@@ -5945,9 +6035,9 @@ bool GDALRasterTileAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
     const auto IsWebViewerEnabled = [this](const char *name)
     {
         return std::find_if(m_webviewers.begin(), m_webviewers.end(),
-                            [name](const std::string &s) {
-                                return s == "all" || s == name;
-                            }) != m_webviewers.end();
+                            [name](const std::string &s)
+                            { return s == "all" || s == name; }) !=
+               m_webviewers.end();
     };
 
     if (m_ovrZoomLevel < 0 && bRet &&
@@ -6075,6 +6165,9 @@ bool GDALRasterTileAlgorithm::RunStep(GDALPipelineStepRunContext &ctxt)
 
     if (m_spawned)
     {
+        // Uninstall he custom error handler, before we close stdout.
+        poErrorHandlerPusher.reset();
+
         fwrite(END_MARKER, sizeof(END_MARKER), 1, stdout);
         fflush(stdout);
         fclose(stdout);

@@ -37,6 +37,10 @@ input source and a method source and generates the output of the operation in th
 
     ogr_layer_algebra is a Python utility, and is only available if GDAL Python bindings are available.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_vector_layer_algebra`.
+
 .. program:: ogr_layer_algebra
 
 .. include:: options/help_and_help_general.rst
@@ -151,3 +155,8 @@ input source and a method source and generates the output of the operation in th
     OGRSpatialReference.SetFromUserInput() call, which includes EPSG Projected,
     Geographic or Compound CRS (i.e. EPSG:4296), a well known text (WKT) CRS definition,
     PROJ.4 declarations, or the name of a .prj file containing a WKT CRS definition.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst

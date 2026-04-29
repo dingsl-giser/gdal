@@ -137,7 +137,8 @@ list(APPEND GDAL_SWIG_COMMON_INTERFACE_FILES
    ${PROJECT_SOURCE_DIR}/swig/include/csharp/ogr_csharp.i
    ${PROJECT_SOURCE_DIR}/swig/include/csharp/osr_csharp.i
    ${PROJECT_SOURCE_DIR}/swig/include/csharp/swig_csharp_extensions.i
-   ${PROJECT_SOURCE_DIR}/swig/include/csharp/typemaps_csharp.i)
+   ${PROJECT_SOURCE_DIR}/swig/include/csharp/typemaps_csharp.i
+   ${PROJECT_SOURCE_DIR}/swig/include/csharp/csharp_strings.i)
 
 # function for csharp wrapper build
 function (gdal_csharp_wrap)
@@ -154,9 +155,10 @@ function (gdal_csharp_wrap)
     COMMAND ${CMAKE_COMMAND} -E make_directory ${_CSHARP_WORKING_DIRECTORY}
     # SWIG command
     COMMAND
-      ${SWIG_EXECUTABLE} -namespace ${_CSHARP_NAMESPACE} -outdir ${_CSHARP_WORKING_DIRECTORY} -DSWIG2_CSHARP -dllimport
-      ${_CSHARP_WRAPPER} -Wall -I${PROJECT_SOURCE_DIR}/swig/include -I${PROJECT_SOURCE_DIR}/swig/include/csharp
-      -I${PROJECT_SOURCE_DIR}/gdal -c++ -csharp -o ${_CSHARP_WRAPPER}.cpp ${_CSHARP_SWIG_INTERFACE}
+      ${SWIG_EXECUTABLE} -namespace ${_CSHARP_NAMESPACE} -outdir ${_CSHARP_WORKING_DIRECTORY} -DSWIG2_CSHARP
+      -DSWIG_CSHARP_NO_STRING_HELPER -dllimport ${_CSHARP_WRAPPER} -Wall -I${PROJECT_SOURCE_DIR}/swig/include 
+      -I${PROJECT_SOURCE_DIR}/swig/include/csharp -I${PROJECT_SOURCE_DIR}/gdal -c++ -csharp -o ${_CSHARP_WRAPPER}.cpp
+      ${_CSHARP_SWIG_INTERFACE}      
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     DEPENDS ${GDAL_SWIG_COMMON_INTERFACE_FILES} ${PROJECT_SOURCE_DIR}/swig/include/csharp/typemaps_csharp.i
             ${_CSHARP_SWIG_INTERFACE})
@@ -703,6 +705,20 @@ if (BUILD_TESTING)
 
     gdal_build_csharp_sample(
       OUTPUT
+      GDALTestUtf8.exe
+      SOURCE
+      ${CMAKE_CURRENT_SOURCE_DIR}/apps/GDALTestUtf8.cs
+      DEPENDS
+      gdal_csharp
+      ogr_csharp
+      osr_csharp
+      SYSTEM_DEPENDS
+      OSGeo.GDAL
+      OSGeo.OGR
+      OSGeo.OSR)
+
+    gdal_build_csharp_sample(
+      OUTPUT
       OGRLayerAlg.exe
       SOURCE
       ${CMAKE_CURRENT_SOURCE_DIR}/apps/OGRLayerAlg.cs
@@ -766,6 +782,7 @@ if (BUILD_TESTING)
               OSGeo.GDAL.Samples.GDALOverviews
               OSGeo.GDAL.Samples.GDALCreateCopy
               OSGeo.GDAL.Samples.GDALGetHistogram
+              OSGeo.GDAL.Samples.GDALTestUtf8
               OSGeo.GDAL.Samples.GDALTest
               OSGeo.GDAL.Samples.OGRLayerAlg
               OSGeo.GDAL.Samples.GDALWarp
@@ -863,4 +880,9 @@ if (BUILD_TESTING)
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       COMMAND ${CSHARP_INTERPRETER} GetCRSInfo/GetCRSInfo${_ex} "EPSG" 20)
     set_property(TEST csharp_getcrsinfo PROPERTY ENVIRONMENT "${TEST_ENV}")
+    add_test(
+      NAME csharp_testutf8
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      COMMAND ${CSHARP_INTERPRETER} GDALTestUtf8/GDALTestUtf8${_ex})
+    set_property(TEST csharp_testutf8 PROPERTY ENVIRONMENT "${TEST_ENV}")
 endif()

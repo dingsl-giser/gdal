@@ -54,7 +54,7 @@ def test_gdalalg_dataset_copy(tmp_vsimem):
         assert ds.GetDriver().GetDescription() == "GTiff"
 
 
-def test_gdalalg_dataset_overwrite_existing_directory(tmp_vsimem):
+def test_gdalalg_dataset_copy_overwrite_existing_directory(tmp_vsimem):
 
     gdal.Mkdir(tmp_vsimem / "my_dir", 0o755)
 
@@ -72,7 +72,7 @@ def test_gdalalg_dataset_overwrite_existing_directory(tmp_vsimem):
 
 
 @pytest.mark.require_driver("OpenFileGDB")
-def test_gdalalg_dataset_overwrite_existing_dataset_directory(tmp_vsimem):
+def test_gdalalg_dataset_copy_overwrite_existing_dataset_directory(tmp_vsimem):
 
     gdal.GetDriverByName("OpenFileGDB").CreateVector(tmp_vsimem / "out.gdb")
 
@@ -80,11 +80,11 @@ def test_gdalalg_dataset_overwrite_existing_dataset_directory(tmp_vsimem):
         "dataset",
         "copy",
         source="../gcore/data/byte.tif",
-        destination=tmp_vsimem / "out.gdb",
+        destination=tmp_vsimem / "out.gdb/byte.tif",
         overwrite=True,
     )
 
-    with gdal.Open(tmp_vsimem / "out.gdb") as ds:
+    with gdal.Open(tmp_vsimem / "out.gdb/byte.tif") as ds:
         assert ds.GetDriver().GetDescription() == "GTiff"
 
 
@@ -111,3 +111,31 @@ def test_gdalalg_dataset_copy_complete():
     out = gdaltest.runexternal(f"{gdal_path} completion gdal dataset copy --format=")
     assert "GTiff " in out
     assert "ESRI\\ Shapefile " in out
+
+
+def test_gdalalg_dataset_copy_shapefile_dir(tmp_vsimem):
+
+    gdal.alg.vector.convert(
+        input="../ogr/data/poly.shp",
+        output=tmp_vsimem / "in_dir",
+        output_format="ESRI Shapefile",
+    )
+    gdal.alg.dataset.copy(
+        source=tmp_vsimem / "in_dir", destination=tmp_vsimem / "out_dir"
+    )
+    assert set(gdal.ReadDir(tmp_vsimem / "out_dir")) == set(
+        ["poly.shp", "poly.dbf", "poly.shx", "poly.prj"]
+    )
+
+
+def test_gdalalg_dataset_copy_shapefile_dir_error(tmp_vsimem):
+
+    gdal.alg.vector.convert(
+        input="../ogr/data/poly.shp",
+        output=tmp_vsimem / "in_dir",
+        output_format="ESRI Shapefile",
+    )
+    with pytest.raises(Exception, match="Cannot create directory"):
+        gdal.alg.dataset.copy(
+            source=tmp_vsimem / "in_dir", destination="/vsisubfile/out_dir"
+        )

@@ -138,6 +138,15 @@ grid using gdalwarp before using gdaldem.
 
         Generate a map of roughness from any GDAL-supported elevation raster.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    - :ref:`gdal_raster_aspect`
+    - :ref:`gdal_raster_color_map`
+    - :ref:`gdal_raster_hillshade`
+    - :ref:`gdal_raster_slope`
+    - :ref:`gdal_raster_tpi`
+    - :ref:`gdal_raster_tri`
+
 The following general options are available:
 
 .. include:: options/help_and_help_general.rst
@@ -167,9 +176,7 @@ The following general options are available:
 
 .. include:: options/co.rst
 
-.. option:: -q
-
-    Suppress progress monitor and other non-error output.
+.. include:: options/quiet.rst
 
 For all algorithms, except color-relief, a nodata value in the target dataset
 will be emitted if at least one pixel set to the nodata value is found in the
@@ -491,6 +498,11 @@ cell, as defined in Wilson et al (2007, Marine Geodesy 30:3-35).
 The value -9999 is used as the output nodata value.
 
 There are no specific options.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 C API
 -----

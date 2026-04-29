@@ -23,6 +23,10 @@ The :program:`ogrinfo` program lists various information about an OGR-supported 
 source to stdout (the terminal). By executing SQL statements it is also possible to
 edit data.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_vector_info`.
+
 .. program:: ogrinfo
 
 .. include:: options/help_and_help_general.rst
@@ -117,6 +121,7 @@ edit data.
     of the native SQL of an RDBMS by passing the ``OGRSQL`` dialect value.
     The :ref:`sql_sqlite_dialect` can be selected with the ``SQLITE``
     and ``INDIRECT_SQLITE`` dialect values, and this can be used with any datasource.
+    Note: -dialect is ignored with -where. Use -sql instead of -where if you want to use -dialect.
 
 .. option:: -spat <xmin> <ymin> <xmax> <ymax>
 
@@ -223,6 +228,11 @@ edit data.
     are provided, all features are reported.
 
 Geometries are reported in OGC WKT format.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 C API
 -----

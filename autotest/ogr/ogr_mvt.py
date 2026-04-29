@@ -387,6 +387,36 @@ def test_ogr_mvt_tileset_json_field():
 ###############################################################################
 
 
+def test_ogr_mvt_add_tile_fields():
+
+    ds = gdal.OpenEx(
+        "data/mvt/point_polygon/1",
+        open_options=["METADATA_FILE=", "ADD_TILE_FIELDS=YES"],
+    )
+
+    lyr = ds.GetLayer(1)
+    defn = lyr.GetLayerDefn()
+
+    assert defn.GetFieldCount() == 5
+
+    expected_tiles = [
+        (1, 0, 0),
+        (1, 0, 1),
+        (1, 1, 0),
+        (1, 1, 1),
+    ]
+
+    for expected_z, expected_x, expected_y in expected_tiles:
+        f = lyr.GetNextFeature()
+        assert f is not None
+        assert f.GetFieldAsInteger("tile_z") == expected_z
+        assert f.GetFieldAsInteger("tile_x") == expected_x
+        assert f.GetFieldAsInteger("tile_y") == expected_y
+
+
+###############################################################################
+
+
 def test_ogr_mvt_open_variants():
 
     expected_geom = "MULTILINESTRING ((215246.671651058 6281289.23636264,332653.947097085 6447616.20991119))"
@@ -956,18 +986,22 @@ def test_ogr_mvt_write_one_layer():
     )
 
     out_f = out_lyr.GetNextFeature()
-    try:
-        # GEOS > 3.8 (not sure which minimum version)
-        ogrtest.check_feature_geometry(
-            out_f,
-            "MULTIPOLYGON (((-508764.860266134 1007745.78091176,-498980.920645632 997961.84129126,-508764.860266134 997961.84129126,-508764.860266134 1007745.78091176)),((508764.860266134 1007745.78091176,508764.860266134 997961.84129126,498980.920645632 997961.84129126,508764.860266134 1007745.78091176)))",
-        )
-    except AssertionError:
-        # Below result with GEOS 3.8
-        ogrtest.check_feature_geometry(
-            out_f,
-            "MULTIPOLYGON (((498980.920645632 997961.84129126,508764.860266134 1007745.78091176,508764.860266134 997961.84129126,498980.920645632 997961.84129126)),((-508764.860266134 997961.84129126,-508764.860266134 1007745.78091176,-498980.920645632 997961.84129126,-508764.860266134 997961.84129126)))",
-        )
+    out_g = out_f.GetGeometryRef()
+    print(out_g)
+
+    ok = False
+    expected_wkt = (
+        "MULTIPOLYGON (((498980.920645632 997961.84129126,508764.860266134 1007745.78091176,508764.860266134 997961.84129126,498980.920645632 997961.84129126)),((-508764.860266134 997961.84129126,-508764.860266134 1007745.78091176,-498980.920645632 997961.84129126,-508764.860266134 997961.84129126)))",  # GEOS <= 3.8
+        "MULTIPOLYGON (((-508764.860266134 1007745.78091176,-498980.920645632 997961.84129126,-508764.860266134 997961.84129126,-508764.860266134 1007745.78091176)),((508764.860266134 1007745.78091176,508764.860266134 997961.84129126,498980.920645632 997961.84129126,508764.860266134 1007745.78091176)))",  # GEOS 3.8 to 3.14
+        "MULTIPOLYGON (((-508764.860266134 997961.84129126,-508764.860266134 1007745.78091176,-498980.920645632 997961.84129126,-508764.860266134 997961.84129126)),((498980.920645632 997961.84129126,508764.860266134 1007745.78091176,508764.860266134 997961.84129126,498980.920645632 997961.84129126))),",  # GEOS 3.15
+    )
+    for wkt in expected_wkt:
+        try:
+            ogrtest.check_feature_geometry(out_f, wkt)
+            ok = True
+        except Exception:
+            pass
+    assert ok, f"Got {out_g.ExportToIsoWkt()}, expected {expected_wkt}"
 
     for _ in range(2):
         out_f = out_lyr.GetNextFeature()
@@ -1097,7 +1131,7 @@ def test_ogr_mvt_write_one_layer():
 
 @pytest.mark.require_driver("SQLite")
 @pytest.mark.require_geos
-def test_ogr_mvt_write_conf():
+def test_ogr_mvt_write_conf(tmp_vsimem):
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
     lyr = src_ds.CreateLayer("mylayer")
@@ -1116,7 +1150,7 @@ def test_ogr_mvt_write_conf():
     }
     with gdaltest.tempfile("/vsimem/conf.json", json.dumps(conf)):
         out_ds = gdal.VectorTranslate(
-            "/vsimem/outmvt",
+            tmp_vsimem / "outmvt",
             src_ds,
             format="MVT",
             datasetCreationOptions=["CONF=/vsimem/conf.json"],
@@ -1124,16 +1158,16 @@ def test_ogr_mvt_write_conf():
     assert out_ds is not None
     out_ds = None
 
-    out_ds = ogr.Open("/vsimem/outmvt/1")
+    out_ds = ogr.Open(tmp_vsimem / "outmvt/1")
     assert out_ds is not None
     out_lyr = out_ds.GetLayerByName("TheLayer")
     assert out_lyr
     out_ds = None
 
-    gdal.RmdirRecursive("/vsimem/outmvt")
+    gdal.RmdirRecursive(tmp_vsimem / "outmvt")
 
     out_ds = gdal.VectorTranslate(
-        "/vsimem/outmvt",
+        tmp_vsimem / "outmvt",
         src_ds,
         format="MVT",
         datasetCreationOptions=["CONF=%s" % json.dumps(conf)],
@@ -1141,7 +1175,7 @@ def test_ogr_mvt_write_conf():
     assert out_ds is not None
     out_ds = None
 
-    out_ds = ogr.Open("/vsimem/outmvt/1")
+    out_ds = ogr.Open(tmp_vsimem / "outmvt/1")
     assert out_ds is not None
     out_lyr = out_ds.GetLayerByName("TheLayer")
     assert out_lyr
@@ -1150,7 +1184,7 @@ def test_ogr_mvt_write_conf():
         out_f, "MULTIPOINT (498980.920645632 997961.84129126)"
     )
 
-    f = gdal.VSIFOpenL("/vsimem/outmvt/metadata.json", "rb")
+    f = gdal.VSIFOpenL(tmp_vsimem / "outmvt/metadata.json", "rb")
     assert f is not None
     data = gdal.VSIFReadL(1, 100000, f).decode("ASCII")
     gdal.VSIFCloseL(f)
@@ -1181,8 +1215,6 @@ def test_ogr_mvt_write_conf():
     }
 
     assert json_json == expected_json_json, data_json["json"]
-
-    gdal.RmdirRecursive("/vsimem/outmvt")
 
 
 ###############################################################################
@@ -1796,3 +1828,56 @@ def test_ogr_mvt_write_custom_tiling_scheme_WorldCRS84Quad(tmp_vsimem, TILING_SC
         ogrtest.check_feature_geometry(
             out_f, "MULTIPOINT ((120.0146484375 39.990234375))"
         )
+
+
+###############################################################################
+# Test reading a uncompressed file with 0-byte padding
+# Scenario of https://github.com/OSGeo/gdal/issues/13268
+
+
+def test_ogr_mvt_read_with_padding():
+
+    ds = ogr.Open("data/mvt/with_padding.mvt")
+    assert ds.GetLayerCount() == 2
+
+
+###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/13305
+
+
+@pytest.mark.require_driver("GeoJSON")
+@pytest.mark.require_geos
+def test_ogr_mvt_winding_order_issue_13305(tmp_vsimem):
+
+    filename = tmp_vsimem / "out"
+    gdal.VectorTranslate(
+        filename,
+        ogr.Open("data/mvt/input_issue_13305.geojson"),
+        format="MVT",
+        layerCreationOptions=["MINZOOM=12", "MAXZOOM=12"],
+    )
+    ds = ogr.Open(filename / "12")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    g = f.GetGeometryRef()
+    assert g.GetGeometryType() == ogr.wkbMultiPolygon
+    assert g.GetGeometryCount() == 1
+    assert g.GetGeometryRef(0).GetGeometryCount() == 122
+    assert g.IsValid()
+
+
+###############################################################################
+# Test bugfix for https://github.com/OSGeo/gdal/issues/13305
+
+
+@pytest.mark.require_geos
+def test_ogr_mvt_autofix_winding_order_issue_13305(tmp_vsimem):
+
+    ds = ogr.Open("data/mvt/issue_13305_bad_winding_order/12")
+    lyr = ds.GetLayer(0)
+    f = lyr.GetNextFeature()
+    g = f.GetGeometryRef()
+    assert g.GetGeometryType() == ogr.wkbMultiPolygon
+    assert g.GetGeometryCount() == 1
+    assert g.GetGeometryRef(0).GetGeometryCount() == 124
+    assert g.IsValid()

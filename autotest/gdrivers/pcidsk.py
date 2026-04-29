@@ -22,6 +22,7 @@ from osgeo import gdal, ogr, osr
 
 pytestmark = pytest.mark.require_driver("PCIDSK")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -88,7 +89,7 @@ def test_pcidsk_5(tmp_path):
     # Create testing file.
 
     pcidsk_ds = gdal.GetDriverByName("PCIDSK").Create(
-        testfile, 400, 600, 1, gdal.GDT_Byte
+        testfile, 400, 600, 1, gdal.GDT_UInt8
     )
 
     # Write out some metadata to the default and non-default domain and
@@ -200,6 +201,36 @@ def test_pcidsk_5(tmp_path):
     assert band.GetColorTable() is None, "color table still exists!"
 
     assert band.GetColorInterpretation() == gdal.GCI_Undefined, "Paletted?"
+
+
+###############################################################################
+# Test reading and writing nodata values
+
+
+def test_pcidsk_6(tmp_path):
+
+    testfile = str(tmp_path / "pcidsk_6.pix")
+
+    # Create testing file.
+
+    pcidsk_ds = gdal.GetDriverByName("PCIDSK").Create(
+        testfile, 400, 600, 1, gdal.GDT_UInt8
+    )
+    pcidsk_ds.SetMetadataItem("NO_DATA_VALUE", "-9999")
+
+    # Close and reopen.
+    pcidsk_ds = None
+    pcidsk_ds = gdal.Open(testfile, gdal.GA_Update)
+
+    band = pcidsk_ds.GetRasterBand(1)
+    no_data_value = band.GetNoDataValue()
+
+    assert no_data_value == -9999
+
+    band.SetNoDataValue(-1234)
+    no_data_value = band.GetNoDataValue()
+
+    assert no_data_value == -1234
 
 
 ###############################################################################

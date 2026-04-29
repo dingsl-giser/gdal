@@ -21,13 +21,14 @@ Description
 -----------
 
 :program:`gdal raster info` lists various information about a GDAL supported
-raster dataset.
+raster dataset, and returns them on the standard output stream when used from the
+command line, or in the ``output`` parameter when used from the API.
 
 The following items will be reported (when known):
 
 -  The format driver used to access the file.
 -  Raster size (in pixels and lines).
--  The coordinate system for the file (in OGC WKT).
+-  The coordinate system for the file (in short form AUTH_NAME:CODE when possible, or otherwise OGC WKT2:2019).
 -  The geotransform associated with the file (rotational coefficients
    are currently not reported).
 -  Corner coordinates in georeferenced, and if possible lat/long based
@@ -50,23 +51,8 @@ step of a pipeline.
 
 The following options are available:
 
-Standard options
-++++++++++++++++
-
-.. option:: -f, --of, --format, --output-format json|text
-
-    Which output format to use. Default is JSON, and starting with GDAL 3.12,
-    text when invoked from command line.
-
-.. option:: --mm, --min-max
-
-    Force computation of the actual min/max values for each band in the
-    dataset.
-
-.. option:: --stats
-
-    Read and display image statistics. Force computation if no
-    statistics are stored in an image.
+Program-Specific Options
+------------------------
 
 .. option:: --approx-stats
 
@@ -75,49 +61,38 @@ Standard options
     based on overviews or a subset of all tiles. Useful if you are in a
     hurry and don't need precise stats.
 
-.. option:: --hist
-
-    Report histogram information for all bands.
-
-Advanced options
-++++++++++++++++
-
-.. include:: gdal_options/oo.rst
-
-.. include:: gdal_options/if.rst
-
-.. option:: --no-gcp
-
-    Suppress ground control points list printing. It may be useful for
-    datasets with huge amount of GCPs, such as L1B AVHRR or HDF4 MODIS
-    which contain thousands of them.
-
-.. option:: --no-md
-
-    Suppress metadata printing. Some datasets may contain a lot of
-    metadata strings.
-
-.. option:: --no-ct
-
-    Suppress printing of color table.
-
-.. option:: --no-rat
-
-    Suppress printing of raster attribute table.
-
-.. option:: --no-fl
-
-    Only display the first file of the file list.
-
 .. option:: --checksum
 
     Force computation of the checksum for each band in the dataset.
+
+.. option:: -f, --of, --format, --output-format json|text
+
+    Which output format to use. Default is JSON, and starting with GDAL 3.12,
+    text when invoked from command line.
+
+.. option:: --crs-format AUTO|WKT2|PROJJSON
+
+    .. versionadded:: 3.13
+
+    Which format to use to report the CRS. In AUTO default mode, if the CRS
+    can be captured with an authority name and code (known of PROJ), only
+    a summary of the CRS, including its name, ID, type and area of use will be
+    reported. Otherwise a full WKT2:2019 definition will be reported.
+
+    .. note::
+
+        :option:`--crs-format` can only be set when :option:`--output-format`
+        is set to ``text``.  The JSON text format includes both WKT2 and PROJJSON.
+
+.. option:: --hist
+
+    Report histogram information for all bands.
 
 .. option:: --list-mdd
 
     List all metadata domains available for the dataset.
 
-.. option:: --mdd <domain>|all
+.. option:: --mdd, --metadata-domain <domain>|all
 
     adds metadata using:
 
@@ -125,8 +100,33 @@ Advanced options
 
     ``all`` Report metadata for all domains.
 
-Esoteric options
-++++++++++++++++
+.. option:: --mm, --min-max
+
+    Force computation of the actual min/max values for each band in the
+    dataset.
+
+.. option:: --no-ct
+
+    Suppress printing of color table.
+
+.. option:: --no-fl
+
+    Only display the first file of the file list.
+
+.. option:: --no-gcp
+
+    Suppress ground control points list printing. It may be useful for
+    datasets with huge amount of GCPs, such as L1B AVHRR or HDF4 MODIS
+    which contain thousands of them.
+
+.. option:: --no-mask
+
+    Suppress band mask printing. Is implied if :option:`--no-nodata` is specified.
+
+.. option:: --no-md
+
+    Suppress metadata printing. Some datasets may contain a lot of
+    metadata strings.
 
 .. option:: --no-nodata
 
@@ -135,9 +135,11 @@ Esoteric options
     Can be useful for example when querying a remove GRIB2 dataset that has an
     index .idx side-car file, together with :option:`--no-md`
 
-.. option:: --no-mask
 
-    Suppress band mask printing. Is implied if :option:`--no-nodata` is specified.
+.. option:: --stats
+
+    Read and display image statistics. Force computation if no
+    statistics are stored in an image.
 
 .. option:: --subdataset <n>
 
@@ -145,17 +147,64 @@ Esoteric options
     a subdataset with specified ``n`` number (starting from 1).
     This is an alternative of giving the full subdataset name.
 
+Standard Options
+----------------
+
+.. collapse:: Details
+
+    .. include:: gdal_options/if.rst
+
+    .. include:: gdal_options/oo.rst
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
+
 Examples
 --------
 
 .. example::
-   :title: Getting information on the file :file:`utmsmall.tif` as JSON output
+   :title: Getting information on the file :file:`utmsmall.tif` as text output
 
    .. command-output:: gdal raster info utmsmall.tif
       :cwd: ../../data
 
 .. example::
-   :title: Getting information on the file :file:`utmsmall.tif` as text output, including statistics
+   :title: Getting information on the file :file:`utmsmall.tif` as JSON output, including statistics
 
-   .. command-output:: gdal raster info --format=text --stats utmsmall.tif
+   .. command-output:: gdal raster info --format=JSON --stats utmsmall.tif
       :cwd: ../../data/with_stats
+
+.. example::
+   :title: Check if a remote GeoTIFF is a COG
+   :id: gdal-raster-info-cog
+
+   Search for ``LAYOUT=COG`` in the ``Image Structure Metadata``. The example below uses |jq| and returns `true` if the remote image
+   is a COG.
+
+   .. tabs::
+
+      .. code-tab:: bash
+
+        $ gdal raster info https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif --of=JSON \
+        | jq '.metadata.IMAGE_STRUCTURE.LAYOUT == "COG"'
+
+      .. code-tab:: ps1
+
+        > gdal raster info https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif --of=JSON `
+        | jq '.metadata.IMAGE_STRUCTURE.LAYOUT == \"COG\"'
+
+.. example::
+   :title: Return the CRS used by the raster using ``jq``
+   :id: gdal-raster-info-crs
+
+   .. tabs::
+
+      .. code-tab:: bash
+
+         gdal raster info in.tif --of json | jq -r '.stac."proj:projjson".id | .authority + ":" + (.code|tostring)'
+
+      .. code-tab:: ps1
+
+         gdal raster info in.tif --of json | jq -r '.stac.\"proj:projjson\".id | .authority + \":\" + (.code|tostring)'

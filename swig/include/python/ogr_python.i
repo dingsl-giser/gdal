@@ -3,7 +3,8 @@
  * python specific code for ogr bindings.
  */
 
-%feature("autodoc");
+// Disable C-style signatures in Python docstrings (see #12177)
+%feature("autodoc", "0");
 
 #ifndef FROM_GDAL_I
 %init %{
@@ -224,7 +225,7 @@ def _WarnIfUserHasNotSpecifiedIfUsingExceptions():
         ----------
         options : list of str or dict, optional
             Options such as ``INCLUDE_FID=NO``, ``MAX_FEATURES_IN_BATCH=<number>``, etc.
-        
+
         Returns
         -------
         object
@@ -499,7 +500,7 @@ def _WarnIfUserHasNotSpecifiedIfUsingExceptions():
 
 %extend OGRFeatureShadow {
 
-  %apply ( const char *utf8_path ) { (const char* value) };
+  %apply ( const char *utf8_string ) { (const char* value) };
   void SetFieldString(int id, const char* value) {
     OGR_F_SetFieldString(self, id, value);
   }
@@ -725,6 +726,10 @@ def _WarnIfUserHasNotSpecifiedIfUsingExceptions():
 
         if isinstance(value, (bytes, bytearray, memoryview)) and self.GetFieldType(fld_index) == OFTBinary:
             self._SetFieldBinary(fld_index, value)
+            return
+
+        if hasattr(value, 'tolist'):
+            self._SetField2(fld_index, value.tolist())
             return
 
         try:

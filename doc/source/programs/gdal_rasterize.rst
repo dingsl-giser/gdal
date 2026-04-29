@@ -26,9 +26,16 @@ in-place.
 On the fly reprojection of vector data to the coordinate system of the
 raster data is supported.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_vector_rasterize`.
+
+
 .. program:: gdal_rasterize
 
 .. include:: options/help_and_help_general.rst
+
+.. include:: options/quiet.rst
 
 .. option:: -b <band>
 
@@ -166,6 +173,8 @@ raster data is supported.
 
     Set output file size in pixels and lines. Note that :option:`-ts` cannot be used with
     :option:`-tr`
+    If one of the two values is set to 0, it will be computed from the other value in order to
+    preserve the aspect ratio.
 
 .. option:: -ot <type>
 
@@ -188,10 +197,6 @@ raster data is supported.
 
     Source dataset open option (format specific)
 
-.. option:: -q
-
-    Suppress progress monitor and other non-error output.
-
 .. option:: <src_datasource>
 
     Any OGR supported readable datasource.
@@ -208,6 +213,11 @@ The program creates a new target raster image when any of the :option:`-of`,
 The resolution or size must be specified using the :option:`-tr` or :option:`-ts` option for all new
 rasters.  The target raster will be overwritten if it already exists and any of
 these creation-related options are used.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 C API
 -----

@@ -11,6 +11,9 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
+import json
+import string
+
 import gdaltest
 import pytest
 
@@ -31,6 +34,8 @@ def circles():
     lyr = ds.CreateLayer(
         "circles", osr.SpatialReference(epsg=32145), geom_type=ogr.wkbPolygon
     )
+    lyr.CreateField(ogr.FieldDefn("a", ogr.OFTString))
+    lyr.CreateField(ogr.FieldDefn("b", ogr.OFTReal))
 
     geoms = []
 
@@ -46,9 +51,11 @@ def circles():
     g.AddPoint(15, 5)
     geoms.append(g.Buffer(5.1))
 
-    for geom in geoms:
+    for i, geom in enumerate(geoms):
         f = ogr.Feature(lyr.GetLayerDefn())
         f.SetGeometry(geom)
+        f["a"] = "V" + string.ascii_lowercase[i]
+        f["b"] = i + 0.2
         lyr.CreateFeature(f)
 
     return ds
@@ -72,6 +79,11 @@ def test_gdalalg_vector_clean_coverage(alg, circles):
 
     areas = [f.GetGeometryRef().GetArea() for f in dst_lyr]
     assert areas == pytest.approx([77.85, 132.67, 80.82], abs=0.01)
+
+    for src_feature, dst_feature in zip(src_lyr, dst_lyr):
+        src_attrs = json.loads(src_feature.ExportToJson())["properties"]
+        dst_attrs = json.loads(dst_feature.ExportToJson())["properties"]
+        assert src_attrs == dst_attrs
 
     assert alg.Finalize()
 
@@ -138,7 +150,8 @@ def test_gdalalg_vector_clean_coverage_bad_snapping_distance(alg, tol):
         alg["snapping-distance"] = tol
 
 
-def test_gdalalg_vector_clean_coverage_active_layer(alg, circles):
+@pytest.mark.parametrize("active_layer", ["bad", "poly2"])
+def test_gdalalg_vector_clean_coverage_active_layer(alg, circles, active_layer):
 
     src_ds = gdal.GetDriverByName("MEM").CreateVector("")
 
@@ -148,27 +161,28 @@ def test_gdalalg_vector_clean_coverage_active_layer(alg, circles):
     alg["input"] = src_ds
     alg["output"] = ""
     alg["output-format"] = "stream"
-    alg["active-layer"] = "bad"
+    alg["active-layer"] = active_layer
 
-    with pytest.raises(RuntimeError, match="layer .* was not found"):
-        alg.Run()
+    if active_layer == "bad":
+        with pytest.raises(RuntimeError, match="layer .* was not found"):
+            alg.Run()
 
-    alg["active-layer"] = "poly2"
-    assert alg.Run()
+    else:
+        assert alg.Run()
 
-    dst_ds = alg["output"].GetDataset()
+        dst_ds = alg["output"].GetDataset()
 
-    assert dst_ds.GetLayerCount() == 2
+        assert dst_ds.GetLayerCount() == 2
 
-    dst_lyr1 = dst_ds.GetLayer(0)
-    dst_lyr2 = dst_ds.GetLayer(1)
-    areas1 = [f.GetGeometryRef().GetArea() for f in dst_lyr1]
-    areas2 = [f.GetGeometryRef().GetArea() for f in dst_lyr2]
+        dst_lyr1 = dst_ds.GetLayer(0)
+        dst_lyr2 = dst_ds.GetLayer(1)
+        areas1 = [f.GetGeometryRef().GetArea() for f in dst_lyr1]
+        areas2 = [f.GetGeometryRef().GetArea() for f in dst_lyr2]
 
-    # overlaps removed in layer 2, so total area is less
-    assert sum(areas1) > sum(areas2)
+        # overlaps removed in layer 2, so total area is less
+        assert sum(areas1) > sum(areas2)
 
-    assert alg.Finalize()
+        assert alg.Finalize()
 
 
 @pytest.mark.parametrize(
@@ -217,3 +231,17 @@ def test_gdalalg_vector_clean_coverage_test_ogrsf(tmp_path):
     assert "INFO" in ret
     assert "ERROR" not in ret
     assert "FAILURE" not in ret
+
+
+def test_gdalalg_vector_clean_coverage_on_aspatial_layer():
+
+    src_ds = gdal.GetDriverByName("MEM").Create("", 0, 0, 0, gdal.GDT_Unknown)
+    src_lyr = src_ds.CreateLayer("the_layer", geom_type=ogr.wkbNone)
+    src_lyr.CreateFeature(ogr.Feature(src_lyr.GetLayerDefn()))
+
+    with gdal.alg.vector.clean_coverage(
+        input=src_ds, output="", output_format="MEM"
+    ) as alg:
+        ds = alg.Output()
+        lyr = ds.GetLayer(0)
+        assert lyr.GetFeatureCount() == 1

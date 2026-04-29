@@ -9,8 +9,6 @@
  * SPDX-License-Identifier: MIT
  ****************************************************************************/
 
-extern "C"
-{
 #include "cpl_atomic_ops.h"
 #include "cpl_conv.h"
 #include "cpl_csv.h"
@@ -23,12 +21,12 @@ extern "C"
 #include "cpl_quad_tree.h"
 #include "cpl_vsi.h"
 #include "gdal_alg.h"
+#include "gdal_mem.h"
 #include "gdal_version.h"
 #include "gdal.h"
 #include "ogr_api.h"
 #include "ogr_core.h"
 #include "ogr_srs_api.h"
-}
 
 int main()
 {

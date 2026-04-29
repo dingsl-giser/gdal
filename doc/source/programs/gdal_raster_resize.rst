@@ -25,21 +25,13 @@ changing the georeferenced extents.
 
 This subcommand is also available as a potential step of :ref:`gdal_raster_pipeline`
 
-Standard options
-++++++++++++++++
+.. GDALG output (on-the-fly / streamed dataset)
+.. --------------------------------------------
 
-.. include:: gdal_options/of_raster_create_copy.rst
+.. include:: gdal_cli_include/gdalg_raster_compatible.rst
 
-.. include:: gdal_options/co.rst
-
-.. include:: gdal_options/overwrite.rst
-
-.. option:: --size <width[%]>,<height[%]>
-
-    Set output raster width and height, expressed in pixels,
-    or percentage if using the ``%`` suffix.
-    If the width or the height is set to 0, the other dimension will be guessed
-    from the computed resolution.
+Program-Specific Options
+------------------------
 
 .. option:: -r, --resampling <RESAMPLING>
 
@@ -57,17 +49,52 @@ Standard options
 
     ``average``: average resampling, computes the weighted average of all non-NODATA contributing pixels.
 
+.. option:: --resolution <xres>,<yres>
 
-.. GDALG output (on-the-fly / streamed dataset)
-.. --------------------------------------------
+    .. versionadded:: 3.12
 
-.. include:: gdal_cli_include/gdalg_raster_compatible.rst
+    Set output file resolution (in target georeferenced units).
+
+    Mutually exclusive with :option:`--size`.
+
+.. option:: --size <width[%]>,<height[%]>
+
+    Set output raster width and height, expressed in pixels,
+    or percentage if using the ``%`` suffix.
+    If the width or the height is set to 0, the other dimension will be guessed
+    from the computed resolution.
+
+    Mutually exclusive with :option:`--resolution`.
+
+
+Standard Options
+----------------
+
+.. collapse:: Details
+
+    .. include:: gdal_options/append_raster.rst
+
+    .. include:: gdal_options/co.rst
+
+    .. include:: gdal_options/if.rst
+
+    .. include:: gdal_options/oo.rst
+
+    .. include:: gdal_options/of_raster_create_copy.rst
+
+    .. include:: gdal_options/overwrite.rst
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Examples
 --------
 
 .. example::
    :title: Resize a dataset to 1000 columns and 500 lines using cubic resampling
+   :id: gdal-raster-resize-cubic
 
    .. code-block:: bash
 

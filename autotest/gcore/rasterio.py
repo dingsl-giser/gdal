@@ -12,6 +12,7 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
+import array
 import math
 import struct
 import sys
@@ -42,7 +43,7 @@ def test_rasterio_1():
         ds.RasterXSize,
         ds.RasterYSize,
         data,
-        buf_type=gdal.GDT_Byte,
+        buf_type=gdal.GDT_UInt8,
         buf_xsize=1,
         buf_ysize=1,
     )
@@ -76,7 +77,7 @@ def test_rasterio_2():
         ds.RasterXSize,
         ds.RasterYSize,
         data,
-        buf_type=gdal.GDT_Byte,
+        buf_type=gdal.GDT_UInt8,
         buf_xsize=5,
         buf_ysize=4,
     )
@@ -122,12 +123,12 @@ def test_rasterio_3():
                                 k + 1,
                                 m + 1,
                                 data[xsize][ysize],
-                                buf_type=gdal.GDT_Byte,
+                                buf_type=gdal.GDT_UInt8,
                                 buf_xsize=xsize + 1,
                                 buf_ysize=ysize + 1,
                             )
                             data2 = ds.ReadRaster(
-                                i, j, k + 1, m + 1, xsize + 1, ysize + 1, gdal.GDT_Byte
+                                i, j, k + 1, m + 1, xsize + 1, ysize + 1, gdal.GDT_UInt8
                             )
                             assert (
                                 data2 == data[xsize][ysize]
@@ -179,12 +180,12 @@ def test_rasterio_4():
                                 k + 1,
                                 m + 1,
                                 data[(xsize + 1) * (ysize + 1) - 1],
-                                buf_type=gdal.GDT_Byte,
+                                buf_type=gdal.GDT_UInt8,
                                 buf_xsize=xsize + 1,
                                 buf_ysize=ysize + 1,
                             )
                             data2 = ds.ReadRaster(
-                                i, j, k + 1, m + 1, xsize + 1, ysize + 1, gdal.GDT_Byte
+                                i, j, k + 1, m + 1, xsize + 1, ysize + 1, gdal.GDT_UInt8
                             )
                             if data2 != data[(xsize + 1) * (ysize + 1) - 1]:
                                 print(i, j, k, m, xsize, ysize)
@@ -486,7 +487,7 @@ def rasterio_9_progress_callback(pct, message, user_data):
     return 1  # 1 to continue, 0 to stop
 
 
-def rasterio_9_checksum(data, buf_xsize, buf_ysize, data_type=gdal.GDT_Byte):
+def rasterio_9_checksum(data, buf_xsize, buf_ysize, data_type=gdal.GDT_UInt8):
     ds = gdal.GetDriverByName("MEM").Create("", buf_xsize, buf_ysize, 1)
     ds.GetRasterBand(1).WriteRaster(
         0, 0, buf_xsize, buf_ysize, data, buf_type=data_type
@@ -516,12 +517,13 @@ def test_rasterio_9():
     assert tab[0] == pytest.approx(1.0, abs=1e-5)
 
     # Same but query with GDT_Float32. Check that we do not get floating-point
-    # values, since the band type is Byte
+    # values, since the band type is Byte and ask to resample in it
     data = ds.GetRasterBand(1).ReadRaster(
         buf_type=gdal.GDT_Float32,
         buf_xsize=10,
         buf_ysize=10,
         resample_alg=gdal.GRIORA_Bilinear,
+        operate_in_buf_type=False,
     )
 
     data_float32_ar = struct.unpack("f" * 10 * 10, data)
@@ -563,7 +565,7 @@ def test_rasterio_9():
     tab = [0, None]
     complex_ds = gdal.GetDriverByName("MEM").Create("", 20, 20, 1, gdal.GDT_CInt16)
     complex_ds.GetRasterBand(1).WriteRaster(
-        0, 0, 20, 20, ds.GetRasterBand(1).ReadRaster(), buf_type=gdal.GDT_Byte
+        0, 0, 20, 20, ds.GetRasterBand(1).ReadRaster(), buf_type=gdal.GDT_UInt8
     )
     data = complex_ds.GetRasterBand(1).ReadRaster(
         buf_xsize=10,
@@ -713,7 +715,7 @@ def test_rasterio_overview_subpixel_resampling():
     numpy = pytest.importorskip("numpy")
 
     temp_path = "/vsimem/rasterio_ovr.tif"
-    ds = gdal.GetDriverByName("GTiff").Create(temp_path, 8, 8, 1, gdal.GDT_Byte)
+    ds = gdal.GetDriverByName("GTiff").Create(temp_path, 8, 8, 1, gdal.GDT_UInt8)
     ds.GetRasterBand(1).WriteArray(
         numpy.array(
             [
@@ -892,7 +894,7 @@ def test_rasterio_13(dt):
     mem_ds.GetRasterBand(1).SetNoDataValue(0)
     if dt == gdal.GDT_Int8:
         x = (1 << 7) - 1
-    elif dt == gdal.GDT_Byte:
+    elif dt == gdal.GDT_UInt8:
         x = (1 << 8) - 1
     elif dt == gdal.GDT_Int16:
         x = (1 << 15) - 1
@@ -965,7 +967,7 @@ def test_rasterio_nearest_or_mode(dt, resample_alg, use_nan):
     mem_ds = gdal.GetDriverByName("MEM").Create("", 4, 4, 1, dt)
     if dt == gdal.GDT_Int8:
         x = (1 << 7) - 1
-    elif dt == gdal.GDT_Byte:
+    elif dt == gdal.GDT_UInt8:
         x = (1 << 8) - 1
     elif dt == gdal.GDT_Int16 or dt == gdal.GDT_CInt16:
         x = (1 << 15) - 1
@@ -1226,7 +1228,7 @@ def test_rasterio_nodata():
 
     ndv = 123
     btype = [
-        gdal.GDT_Byte,
+        gdal.GDT_UInt8,
         gdal.GDT_Int16,
         gdal.GDT_Int32,
         gdal.GDT_Float32,
@@ -1583,7 +1585,7 @@ def test_rasterio_average_halfsize_downsampling_byte():
     v32 = 220
     m8 = (v29 + v30 + v31 + v32 + 2) >> 2
 
-    ds = gdal.GetDriverByName("MEM").Create("", 64 + 2, 4, 1, gdal.GDT_Byte)
+    ds = gdal.GetDriverByName("MEM").Create("", 64 + 2, 4, 1, gdal.GDT_UInt8)
     ds.WriteRaster(
         0,
         0,
@@ -2740,7 +2742,7 @@ def internal_test_rasterio_rms_halfsize_downsampling_byte_content(gdal_dt, struc
 
 def test_rasterio_rms_halfsize_downsampling_byte():
 
-    internal_test_rasterio_rms_halfsize_downsampling_byte_content(gdal.GDT_Byte, "B")
+    internal_test_rasterio_rms_halfsize_downsampling_byte_content(gdal.GDT_UInt8, "B")
 
 
 ###############################################################################
@@ -2750,7 +2752,7 @@ def test_rasterio_rms_halfsize_downsampling_byte():
 
 def test_rasterio_rms_halfsize_downsampling_byte_nodata_not_hit():
 
-    ds = gdal.GetDriverByName("MEM").Create("", 20, 6, 1, gdal.GDT_Byte)
+    ds = gdal.GetDriverByName("MEM").Create("", 20, 6, 1, gdal.GDT_UInt8)
     ds.GetRasterBand(1).SetNoDataValue(180)
     ds.WriteRaster(
         0,
@@ -3649,7 +3651,7 @@ def test_rasterio_float64(resample_alg):
 @pytest.mark.parametrize(
     "dt,struct_type,val",
     [
-        (gdal.GDT_Byte, "B", 255),
+        (gdal.GDT_UInt8, "B", 255),
         (gdal.GDT_UInt16, "H", 65535),
         (gdal.GDT_Float32, "f", 1.5),
         (gdal.GDT_Float32, "f", struct.unpack("<f", b"\x00\x00\x80\x00")[0]),  # FLT_MIN
@@ -3724,7 +3726,7 @@ def test_rasterio_constant_value(resample_alg, dt, struct_type, val):
 @pytest.mark.parametrize(
     "dt,struct_type,val",
     [
-        (gdal.GDT_Byte, "B", 255),
+        (gdal.GDT_UInt8, "B", 255),
         (gdal.GDT_UInt16, "H", 65535),
         (gdal.GDT_Float32, "f", 1.5),
         (gdal.GDT_Float32, "f", struct.unpack("<f", b"\x00\x00\x80\x00")[0]),  # FLT_MIN
@@ -3898,3 +3900,222 @@ def test_rasterio_gdt_unknown():
         # Caught at the SWIG level
         with pytest.raises(Exception, match="Illegal value for data type"):
             ds.GetRasterBand(1).ReadRaster(buf_type=gdal.GDT_Unknown)
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize("operate_in_buf_type", [None, True, False])
+def test_rasterio_resampling_output_type_not_native_type(operate_in_buf_type):
+
+    ds = gdal.GetDriverByName("MEM").Create("", 4, 4, eType=gdal.GDT_UInt8, bands=2)
+    ds.GetRasterBand(1).WriteRaster(
+        0, 0, 4, 4, array.array("B", [i for i in range(16)])
+    )
+    ds.GetRasterBand(2).WriteRaster(
+        0, 0, 4, 4, array.array("B", [i + 16 for i in range(16)])
+    )
+
+    if operate_in_buf_type is None:
+        got = struct.unpack(
+            "d" * 8,
+            ds.ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+            ),
+        )
+    else:
+        got = struct.unpack(
+            "d" * 8,
+            ds.ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+                operate_in_buf_type=operate_in_buf_type,
+            ),
+        )
+
+    if operate_in_buf_type is False:
+        assert got == (5.0, 6.0, 9.0, 10.0, 21.0, 22.0, 25.0, 26.0)
+    else:
+        assert got == pytest.approx(
+            (
+                4.514563083648682,
+                5.708737850189209,
+                9.291261672973633,
+                10.48543643951416,
+                20.514562606811523,
+                21.708738327026367,
+                25.291261672973633,
+                26.485437393188477,
+            )
+        )
+
+    if operate_in_buf_type is None:
+        got = struct.unpack(
+            "d" * 4,
+            ds.GetRasterBand(1).ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+            ),
+        )
+    else:
+        got = struct.unpack(
+            "d" * 4,
+            ds.GetRasterBand(1).ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+                operate_in_buf_type=operate_in_buf_type,
+            ),
+        )
+
+    if operate_in_buf_type is False:
+        assert got == (5.0, 6.0, 9.0, 10.0)
+    else:
+        assert got == pytest.approx(
+            (4.514563083648682, 5.708737850189209, 9.291261672973633, 10.48543643951416)
+        )
+
+    if operate_in_buf_type is None:
+        got = struct.unpack(
+            "d" * 4,
+            ds.GetRasterBand(2).ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+            ),
+        )
+    else:
+        got = struct.unpack(
+            "d" * 4,
+            ds.GetRasterBand(2).ReadRaster(
+                buf_xsize=2,
+                buf_ysize=2,
+                buf_type=gdal.GDT_Float64,
+                resample_alg=gdal.GRIORA_CubicSpline,
+                operate_in_buf_type=operate_in_buf_type,
+            ),
+        )
+
+    if operate_in_buf_type is False:
+        assert got == (21.0, 22.0, 25.0, 26.0)
+    else:
+        assert got == pytest.approx(
+            (
+                20.514562606811523,
+                21.708738327026367,
+                25.291261672973633,
+                26.485437393188477,
+            )
+        )
+
+
+###############################################################################
+
+
+@pytest.mark.parametrize("operate_in_buf_type", [None, True, False])
+def test_rasterio_resampling_output_type_not_native_type_numpy(operate_in_buf_type):
+
+    gdaltest.importorskip_gdal_array()
+    pytest.importorskip("numpy")
+
+    ds = gdal.GetDriverByName("MEM").Create("", 4, 4, eType=gdal.GDT_UInt8, bands=2)
+    ds.GetRasterBand(1).WriteRaster(
+        0, 0, 4, 4, array.array("B", [i for i in range(16)])
+    )
+    ds.GetRasterBand(2).WriteRaster(
+        0, 0, 4, 4, array.array("B", [i + 16 for i in range(16)])
+    )
+
+    if operate_in_buf_type is None:
+        got = ds.ReadAsArray(
+            buf_xsize=2,
+            buf_ysize=2,
+            buf_type=gdal.GDT_Float64,
+            resample_alg=gdal.GRIORA_CubicSpline,
+        )
+    else:
+        got = ds.ReadAsArray(
+            buf_xsize=2,
+            buf_ysize=2,
+            buf_type=gdal.GDT_Float64,
+            resample_alg=gdal.GRIORA_CubicSpline,
+            operate_in_buf_type=operate_in_buf_type,
+        )
+    if operate_in_buf_type is False:
+        assert got[0][0][0] == pytest.approx(5)
+    else:
+        assert got[0][0][0] == pytest.approx(4.514563083648682)
+
+    if operate_in_buf_type is None:
+        got = ds.GetRasterBand(1).ReadAsArray(
+            buf_xsize=2,
+            buf_ysize=2,
+            buf_type=gdal.GDT_Float64,
+            resample_alg=gdal.GRIORA_CubicSpline,
+        )
+    else:
+        got = ds.GetRasterBand(1).ReadAsArray(
+            buf_xsize=2,
+            buf_ysize=2,
+            buf_type=gdal.GDT_Float64,
+            resample_alg=gdal.GRIORA_CubicSpline,
+            operate_in_buf_type=operate_in_buf_type,
+        )
+    if operate_in_buf_type is False:
+        assert got[0][0] == pytest.approx(5)
+    else:
+        assert got[0][0] == pytest.approx(4.514563083648682)
+
+
+@pytest.mark.parametrize("dt", [gdal.GDT_Float32, gdal.GDT_Float64])
+@pytest.mark.parametrize("factor", [2, 4, 8])
+@pytest.mark.parametrize(
+    "resample_alg",
+    [
+        gdal.GRIORA_Bilinear,
+        gdal.GRIORA_Cubic,
+        gdal.GRIORA_CubicSpline,
+        gdal.GRIORA_Lanczos,
+        gdal.GRIORA_Mode,
+        gdal.GRIORA_Average,
+        gdal.GRIORA_RMS,
+    ],
+)
+def test_rasterio_resampling_nan_nodata(dt, factor, resample_alg):
+    # Check that NaN, when declared as band nodata, and present in values
+    # does not "contaminate" the results.
+
+    w = 16
+    h = 16
+    src_ds = gdal.GetDriverByName("MEM").Create("", w, h, 1, dt)
+    src_ds.GetRasterBand(1).SetNoDataValue(float("nan"))
+    src_ds.GetRasterBand(1).Fill(1)
+    src_ds.GetRasterBand(1).WriteRaster(
+        7,
+        7,
+        1,
+        1,
+        (
+            struct.pack("f", float("nan"))
+            if dt == gdal.GDT_Float32
+            else struct.pack("d", float("nan"))
+        ),
+    )
+
+    buf_w = w // factor
+    buf_h = h // factor
+    buf = src_ds.ReadRaster(0, 0, w, h, buf_w, buf_h, resample_alg=resample_alg)
+    if dt == gdal.GDT_Float32:
+        buf = struct.unpack("f" * (buf_w * buf_h), buf)
+    else:
+        buf = struct.unpack("d" * (buf_w * buf_h), buf)
+    assert buf == pytest.approx((1.0,) * (buf_w * buf_h))

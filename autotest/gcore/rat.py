@@ -70,7 +70,7 @@ def test_rat_1(test_rat):
 def test_rat_2(test_rat, tmp_vsimem):
 
     with gdal.GetDriverByName("PNM").Create(
-        tmp_vsimem / "rat_2.pnm", 100, 90, 1, gdal.GDT_Byte
+        tmp_vsimem / "rat_2.pnm", 100, 90, 1, gdal.GDT_UInt8
     ) as ds:
         ds.GetRasterBand(1).SetDefaultRAT(test_rat)
 
@@ -700,9 +700,7 @@ def test_rat_as_xml():
     rat.SetValueAsString(0, 5, "POINT (1.0 2)")
     ds.GetRasterBand(1).SetDefaultRAT(rat)
     xml = ds.GetMetadata("xml:VRT")[0]
-    assert (
-        xml
-        == """<VRTDataset rasterXSize="1" rasterYSize="1">
+    assert xml == """<VRTDataset rasterXSize="1" rasterYSize="1">
   <VRTRasterBand dataType="Byte" band="1">
     <GDALRasterAttributeTable tableType="thematic">
       <FieldDefn index="0">
@@ -755,7 +753,6 @@ def test_rat_as_xml():
   </VRTRasterBand>
 </VRTDataset>
 """
-    )
 
     ds = gdal.Open(xml)
 

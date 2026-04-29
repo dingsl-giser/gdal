@@ -25,14 +25,20 @@ raster bands from a raster dataset.
 
 This subcommand is also available as a potential step of :ref:`gdal_raster_pipeline`
 
-Standard options
-++++++++++++++++
+.. GDALG output (on-the-fly / streamed dataset)
+.. --------------------------------------------
 
-.. include:: gdal_options/of_raster_create_copy.rst
+.. include:: gdal_cli_include/gdalg_raster_compatible.rst
 
-.. include:: gdal_options/co.rst
+Program-Specific Options
+------------------------
 
-.. include:: gdal_options/overwrite.rst
+.. option:: --exclude
+
+    .. versionadded:: 3.13
+
+    Modifies the behavior of the algorithm such that all bands are selected,
+    except the ones mentioned by :option:`--band`.
 
 .. option:: --band <BAND>
 
@@ -42,6 +48,9 @@ Standard options
     means the mask band of the first band of the input dataset. The mask band
     of any band can be specified with ``mask:<band>``. A mask band selected
     with ``--band`` will become an ordinary band in the output dataset.
+
+    Starting with GDAL 3.13, <BAND> can also be a color interpretation such
+    as "red", "green", "blue", "alpha", "nir", etc.
 
 .. option:: --mask <BAND>
 
@@ -53,11 +62,27 @@ Standard options
     unless the mask is an alpha channel, or if it is explicitly selected
     to be a regular band of the output dataset (``--band mask``)
 
+Standard Options
+----------------
 
-.. GDALG output (on-the-fly / streamed dataset)
-.. --------------------------------------------
+.. collapse:: Details
 
-.. include:: gdal_cli_include/gdalg_raster_compatible.rst
+    .. include:: gdal_options/append_raster.rst
+
+    .. include:: gdal_options/co.rst
+
+    .. include:: gdal_options/if.rst
+
+    .. include:: gdal_options/oo.rst
+
+    .. include:: gdal_options/of_raster_create_copy.rst
+
+    .. include:: gdal_options/overwrite.rst
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Examples
 --------
@@ -70,8 +95,21 @@ Examples
         $ gdal raster select --band 3,2,1 bgr.tif rgb.tif --overwrite
 
 .. example::
+   :title: Select input bands by their color interpretation
+
+   .. code-block:: bash
+
+        $ gdal raster select --band red,green,blue input.tif rgb.tif --overwrite
+
+.. example::
    :title: Convert a RGBA dataset to a YCbCR JPEG compressed GeoTIFF
 
    .. code-block:: bash
 
         $ gdal raster select --band 1,2,3 --mask 4 --co COMPRESS=JPEG,PHOTOMETRIC=YCBCR rgba.tif rgb_mask.tif
+
+
+.. below is an allow-list for spelling checker.
+
+.. spelling:word-list::
+    nir

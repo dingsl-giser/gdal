@@ -28,7 +28,7 @@ OGRParquetDataset::OGRParquetDataset()
 }
 
 /************************************************************************/
-/*                        ~OGRParquetDataset()                          */
+/*                         ~OGRParquetDataset()                         */
 /************************************************************************/
 
 OGRParquetDataset::~OGRParquetDataset()
@@ -37,10 +37,10 @@ OGRParquetDataset::~OGRParquetDataset()
 }
 
 /************************************************************************/
-/*                                Close()                               */
+/*                               Close()                                */
 /************************************************************************/
 
-CPLErr OGRParquetDataset::Close()
+CPLErr OGRParquetDataset::Close(GDALProgressFunc, void *)
 {
     CPLErr eErr = CE_None;
     if (nOpenFlags != OPEN_FLAGS_CLOSED)
@@ -62,9 +62,9 @@ CPLErr OGRParquetDataset::Close()
     return eErr;
 }
 
-/***********************************************************************/
-/*                          CreateReaderLayer()                        */
-/***********************************************************************/
+/************************************************************************/
+/*                         CreateReaderLayer()                          */
+/************************************************************************/
 
 std::unique_ptr<OGRParquetLayer>
 OGRParquetDataset::CreateReaderLayer(const std::string &osFilename,
@@ -188,9 +188,9 @@ OGRParquetDataset::CreateReaderLayer(const std::string &osFilename,
     }
 }
 
-/***********************************************************************/
-/*                            ExecuteSQL()                             */
-/***********************************************************************/
+/************************************************************************/
+/*                             ExecuteSQL()                             */
+/************************************************************************/
 
 OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
                                         OGRGeometry *poSpatialFilter,
@@ -254,13 +254,14 @@ OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
                     OGR_RawField_SetNull(&sField);
                     OGRFieldType eType = OFTReal;
                     OGRFieldSubType eSubType = OFSTNone;
-                    const int iCol =
+                    const std::vector<int> anCols =
                         iOGRField == OGRParquetLayer::OGR_FID_INDEX
-                            ? poLayer->GetFIDParquetColumn()
-                            : poLayer->GetMapFieldIndexToParquetColumn()
-                                  [iOGRField];
-                    if (iCol < 0)
+                            ? std::vector<int>{poLayer->GetFIDParquetColumn()}
+                            : poLayer->GetParquetColumnIndicesForArrowField(
+                                  pszFieldName);
+                    if (anCols.size() != 1 || anCols[0] < 0)
                         break;
+                    const int iCol = anCols[0];
                     const auto metadata =
                         poLayer->GetReader()->parquet_reader()->metadata();
                     const auto numRowGroups = metadata->num_row_groups();
@@ -383,11 +384,10 @@ OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
                     {
                         poMemLayer =
                             new OGRMemLayer("SELECT", nullptr, wkbNone);
-                        OGRFeature *poFeature =
-                            new OGRFeature(poMemLayer->GetLayerDefn());
+                        auto poFeature = std::make_unique<OGRFeature>(
+                            poMemLayer->GetLayerDefn());
                         CPL_IGNORE_RET_VAL(
-                            poMemLayer->CreateFeature(poFeature));
-                        delete poFeature;
+                            poMemLayer->CreateFeature(std::move(poFeature)));
                     }
 
                     const char *pszMinMaxFieldName =
@@ -402,10 +402,11 @@ OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
                     oFieldDefn.SetSubType(eSubType);
                     poMemLayer->CreateField(&oFieldDefn);
 
-                    OGRFeature *poFeature = poMemLayer->GetFeature(0);
+                    auto poFeature =
+                        std::unique_ptr<OGRFeature>(poMemLayer->GetFeature(0));
                     poFeature->SetField(oFieldDefn.GetNameRef(), &sField);
-                    CPL_IGNORE_RET_VAL(poMemLayer->SetFeature(poFeature));
-                    delete poFeature;
+                    CPL_IGNORE_RET_VAL(
+                        poMemLayer->SetFeature(std::move(poFeature)));
                 }
                 if (i != oSelect.result_columns())
                 {
@@ -421,12 +422,35 @@ OGRLayer *OGRParquetDataset::ExecuteSQL(const char *pszSQLCommand,
         }
     }
 
+    else if (EQUAL(pszSQLCommand, "GET_SET_FILES_ASKED_TO_BE_OPEN") &&
+             pszDialect && EQUAL(pszDialect, "_DEBUG_"))
+    {
+        if (auto poFS = dynamic_cast<VSIArrowFileSystem *>(m_poFS.get()))
+        {
+            auto poMemLayer = std::make_unique<OGRMemLayer>(
+                "SET_FILES_ASKED_TO_BE_OPEN", nullptr, wkbNone);
+            OGRFieldDefn oFieldDefn("path", OFTString);
+            CPL_IGNORE_RET_VAL(poMemLayer->CreateField(&oFieldDefn));
+            for (const std::string &path : poFS->GetSetFilesAskedToOpen())
+            {
+                auto poFeature =
+                    std::make_unique<OGRFeature>(poMemLayer->GetLayerDefn());
+                poFeature->SetField(0, path.c_str());
+                CPL_IGNORE_RET_VAL(
+                    poMemLayer->CreateFeature(std::move(poFeature)));
+            }
+            poFS->ResetSetFilesAskedToOpen();
+            return poMemLayer.release();
+        }
+        return nullptr;
+    }
+
     return GDALDataset::ExecuteSQL(pszSQLCommand, poSpatialFilter, pszDialect);
 }
 
-/***********************************************************************/
-/*                           ReleaseResultSet()                        */
-/***********************************************************************/
+/************************************************************************/
+/*                          ReleaseResultSet()                          */
+/************************************************************************/
 
 void OGRParquetDataset::ReleaseResultSet(OGRLayer *poResultsSet)
 {

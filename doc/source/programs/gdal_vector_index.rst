@@ -27,40 +27,33 @@ outlining the (rectangular) extent.
 This output is suitable for use with `MapServer <http://mapserver.org/>`__ as a
 vector tileindex
 
-The following options are available:
+Program-Specific Options
+------------------------
 
-Standard options
-++++++++++++++++
+.. option:: --absolute-path
 
+    The absolute path to the vector files is stored in the index file.
+    By default the vector filenames will be put in the file exactly as they
+    are specified on the command line.
 
-.. include:: gdal_options/of_vector.rst
+.. option:: --accept-different-crs
 
-.. include:: gdal_options/co.rst
+    Whether layers with different CRS are accepted.
+    By default, unless :option:`--output-crs` is specified, layers that do not have
+    the same CRS as the first index layer will be skipped. Setting :option:`--accept-different-crs`
+    may be useful to avoid the CRS consistency check.
 
-.. include:: options/lco.rst
+.. option:: --accept-different-schemas
 
-.. include:: gdal_options/overwrite.rst
+    Whether layers with different schemas are accepted.
+    By default, layers that do not have the same schemas as the first index layer
+    will be skipped.
 
-.. option:: --update
+.. option:: --dataset-name-only
 
-    Whether the output dataset must be opened in update mode. Implies that
-    it already exists.
+    Whether to write the dataset name only, instead of suffixed with the layer index.
 
-.. option:: --overwrite-layer
-
-    Whether overwriting the existing output vector layer is allowed.
-
-.. option:: --append
-
-    Whether appending features to the existing output vector layer is allowed.
-
-.. option:: -l, --nln, --layer <LAYER>
-
-    Provides a name for the output vector layer.
-
-.. option:: --recursive
-
-    Whether input directories should be explored recursively.
+    .. warning:: Setting this option will generate a location not compatible of MapServer.
 
 .. option:: --filename-filter <FILENAME-FILTER>
 
@@ -77,18 +70,22 @@ Standard options
     The output field name to hold the file path/location to the indexed
     vectors. The default field name is ``location``.
 
-.. option:: --absolute-path
+.. option:: --metadata <KEY>=<VALUE>
 
-    The absolute path to the vector files is stored in the index file.
-    By default the vector filenames will be put in the file exactly as they
-    are specified on the command line.
+    Write an arbitrary layer metadata item, for formats that support layer
+    metadata.
+    This option may be repeated.
 
-.. option:: --dst-crs <DST-CRS>
+.. option:: --output-crs <OUTPUT-CRS>
 
     Envelopes of the input files will be transformed to the desired target
     coordinate reference system.
     Default creates simple rectangular polygons in the same coordinate reference
     system as the input vectors.
+
+.. option:: --recursive
+
+    Whether input directories should be explored recursively.
 
 .. option:: --source-crs-field-name <SOURCE-CRS-FIELD-NAME>
 
@@ -110,38 +107,32 @@ Standard options
 
     Add layer of specified index (0-based) from each source file in the tile index [may be repeated]
 
-.. option:: --metadata <KEY>=<VALUE>
 
-    Write an arbitrary layer metadata item, for formats that support layer
-    metadata.
-    This option may be repeated.
+Standard Options
+----------------
 
-.. option:: --accept-different-crs
+.. include:: gdal_options/append_vector.rst
 
-    Whether layers with different CRS are accepted.
-    By default, unless :option:`--dst-crs` is specified, layers that do not have
-    the same CRS as the first index layer will be skipped. Setting :option:`--accept-different-crs`
-    may be useful to avoid the CRS consistency check.
+.. include:: gdal_options/co_vector.rst
 
-.. option:: --accept-different-schemas
+.. include:: gdal_options/lco.rst
 
-    Whether layers with different schemas are accepted.
-    By default, layers that do not have the same schemas as the first index layer
-    will be skipped.
+.. include:: gdal_options/of_vector.rst
 
-.. option:: --dataset-name-only
+.. option:: --nln, --output-layer <LAYER>
 
-    Whether to write the dataset name only, instead of suffixed with the layer index.
+    Provides a name for the output vector layer.
 
-    .. warning:: Setting this option will generate a location not compatible of MapServer.
+.. include:: gdal_options/overwrite.rst
 
+.. include:: gdal_options/overwrite_layer.rst
 
-Advanced options
-++++++++++++++++
+.. include:: gdal_options/update.rst
 
-.. include:: gdal_options/oo.rst
+.. Return status code
+.. ------------------
 
-.. include:: gdal_options/if.rst
+.. include:: return_code.rst
 
 Examples
 --------
@@ -150,8 +141,8 @@ Examples
 
    Produce a GeoPackage with a record for every
    layer that the utility found in the ``countries`` folder. Each record holds
-   information that points to the location of the image and also a bounding rectangle
-   shape showing the bounds of the image:
+   information that points to the location of each input vector file and also a bounding rectangle
+   shape showing its bounds:
 
    .. code-block:: bash
 
@@ -159,9 +150,9 @@ Examples
 
 .. example::
 
-   The :option:`--dst-crs` option can also be used to transform all input vector
+   The :option:`--output-crs` option can also be used to transform all input vector
    envelopes into the same output projection:
 
    .. code-block:: bash
 
-       gdal vector index --dst-crs EPSG:4326 --source-crs-field-name=src_srs countries/*.shp index.gpkg
+       gdal vector index --output-crs EPSG:4326 --source-crs-field-name=src_srs countries/*.shp index.gpkg

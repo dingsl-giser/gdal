@@ -37,6 +37,10 @@ target pixel in the resulting raster nor will it overwrite a valid pixel value.
 
     gdal_merge is a Python utility, and is only available if GDAL Python bindings are available.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_raster_mosaic`.
+
 .. program:: gdal_merge
 
 .. include:: options/help_and_help_general.rst
@@ -107,6 +111,11 @@ target pixel in the resulting raster nor will it overwrite a valid pixel value.
 
     The output file is created (and potentially pre-initialized) but no input
     image data is copied into it.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 
 Examples

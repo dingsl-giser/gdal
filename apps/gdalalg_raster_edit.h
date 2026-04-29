@@ -48,6 +48,9 @@ class GDALRasterEditAlgorithm /* non final */
     std::vector<std::string> m_metadata{};
     std::vector<std::string> m_unsetMetadata{};
     std::vector<std::string> m_unsetMetadataDomain{};
+    std::vector<std::string> m_colorInterpretation{};
+    std::vector<std::string> m_scale{};
+    std::vector<std::string> m_offset{};
     std::string m_nodata{};
     std::vector<std::string> m_gcps{};
     bool m_stats = false;        // standalone mode only
@@ -56,7 +59,7 @@ class GDALRasterEditAlgorithm /* non final */
 };
 
 /************************************************************************/
-/*                     GDALRasterEditAlgorithmStandalone                */
+/*                  GDALRasterEditAlgorithmStandalone                   */
 /************************************************************************/
 
 class GDALRasterEditAlgorithmStandalone final : public GDALRasterEditAlgorithm

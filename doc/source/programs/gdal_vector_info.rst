@@ -21,15 +21,29 @@ Description
 -----------
 
 :program:`gdal vector info` lists various information about a GDAL supported
-vector dataset.
+vector dataset, and returns them on the standard output stream when used from the
+command line, or in the ``output`` parameter when used from the API.
 
 Starting with GDAL 3.12, :program:`gdal vector info` can be used as the last
 step of a pipeline.
 
 The following options are available:
 
-Standard options
-++++++++++++++++
+Program-Specific Options
+------------------------
+
+.. option:: --dialect <dialect>
+
+    SQL dialect. In some cases can be used to use (unoptimized) :ref:`ogr_sql_dialect` instead
+    of the native SQL of an RDBMS by passing the ``OGRSQL`` dialect value.
+    The :ref:`sql_sqlite_dialect` can be selected with the ``SQLITE``
+    and ``INDIRECT_SQLITE`` dialect values, and this can be used with any datasource.
+
+.. option:: --features
+
+    List all features by default, unless limited with :option:`--limit`.
+    Beware of RAM consumption on large layers when using JSON output.
+    This option is mutually exclusive with the :option:`--summary` option.
 
 .. option:: -f, --of, --format, --output-format json|text
 
@@ -40,17 +54,6 @@ Standard options
 
     Name of one or more layers to inspect. If no layer names are passed and
     :option:`--sql` is not specified, then all layers will be selected.
-
-.. option:: --summary
-
-    Print a summary with the list of layers and the geometry type of each layer.
-    This option is mutually exclusive with the :option:`--features` option.
-
-.. option:: --features
-
-    List all features by default, unless limited with :option:`--limit`.
-    Beware of RAM consumption on large layers when using JSON output.
-    This option is mutually exclusive with the :option:`--summary` option.
 
 .. option:: --limit <FEATURE-COUNT>
 
@@ -71,6 +74,11 @@ Standard options
 
     This option is mutually exclusive with the :option:`--where` option.
 
+.. option:: --summary
+
+    Print a summary with the list of layers and the geometry type of each layer.
+    This option is mutually exclusive with the :option:`--features` option.
+
 .. option:: --where <WHERE>|@<filename>
 
     An attribute query in a restricted form of the queries used in the SQL
@@ -86,20 +94,40 @@ Standard options
 
     This option is mutually exclusive with the :option:`--sql` option.
 
-.. option:: --dialect <dialect>
+.. option:: --fid <FID>
 
-    SQL dialect. In some cases can be used to use (unoptimized) :ref:`ogr_sql_dialect` instead
-    of the native SQL of an RDBMS by passing the ``OGRSQL`` dialect value.
-    The :ref:`sql_sqlite_dialect` can be selected with the ``SQLITE``
-    and ``INDIRECT_SQLITE`` dialect values, and this can be used with any datasource.
+    .. versionadded:: 3.13
 
+    Feature identifier. Only the feature with the specified FID
+    will be reported.
 
-Advanced options
-++++++++++++++++
+.. option:: --crs-format AUTO|WKT2|PROJJSON
 
-.. include:: gdal_options/oo.rst
+    .. versionadded:: 3.13
 
-.. include:: gdal_options/if.rst
+    Which format to use to report the CRS. In AUTO default mode, if the CRS
+    can be captured with an authority name and code (known of PROJ), only
+    a summary of the CRS, including its name, ID, type and area of use will be
+    reported. Otherwise a full WKT2:2019 definition will be reported.
+
+    .. note::
+
+        :option:`--crs-format` can only be set when :option:`--output-format`
+        is set to ``text``.  The JSON text format includes both WKT2 and PROJJSON.
+
+Standard Options
+----------------
+
+.. collapse:: Details
+
+    .. include:: gdal_options/oo.rst
+
+    .. include:: gdal_options/if.rst
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Examples
 --------
@@ -107,11 +135,49 @@ Examples
 .. example::
    :title: Getting information on the file :file:`poly.gpkg` (with text output), listing all features
 
-   .. command-output:: gdal vector info --format=text --features poly.gpkg
+   .. command-output:: gdal vector info --features poly.gpkg
       :cwd: ../../data
 
 .. example::
    :title: Getting information on the file :file:`poly.gpkg` (with JSON output)
 
-   .. command-output:: gdal vector info poly.gpkg
+   .. command-output:: gdal vector info --format=JSON poly.gpkg
       :cwd: ../../data
+
+.. example::
+   :id: gdal-vector-info-list-layers
+   :title: List all layers in a dataset using ``jq``
+
+   .. code-block:: bash
+
+       gdal vector info av_2056.gpkg --format json | jq ".layers[].name"
+
+.. example::
+   :id: gdal-vector-info-geom-name
+   :title: List all layers and their geometry fields using ``jq``
+
+   .. tabs::
+
+      .. code-tab:: bash
+
+        $ gdal vector info counties-albers-10m.gpkg --output-format=JSON | jq -r '
+          .layers[]
+          | .name as $layer
+          | .geometryFields[]?
+          | "\($layer): \(.name) (\(.type))"'
+
+      .. code-tab:: ps1
+
+        gdal vector info counties-albers-10m.gpkg --output-format=JSON | jq -r '
+          .layers[]
+          | .name as $layer
+          | .geometryFields[]?
+          | \"\($layer): \(.name) (\(.type))\"'
+
+   returns:
+
+   .. code-block::
+
+    counties: geom (Geometry)
+    states: geom (MultiPolygon)
+    nation: geom (MultiPolygon)

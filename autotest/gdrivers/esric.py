@@ -214,7 +214,7 @@ def test_tpkx_default_full_extent(extent_source):
     assert ds.RasterXSize == 2533
     assert ds.RasterYSize == 1922
     assert ds.RasterCount == 4
-    assert ds.GetSpatialRef().GetAuthorityCode(None) == "3857"
+    assert ds.GetSpatialRef().GetAuthorityCode() == "3857"
     assert ds.GetGeoTransform() == pytest.approx(
         (
             -19841829.550377003848553,
@@ -227,7 +227,47 @@ def test_tpkx_default_full_extent(extent_source):
     )
     assert ds.GetDriver().GetDescription() == "ESRIC"
     assert ds.GetFileList() == ["data/esric/Usa.tpkx"]
-    assert ds.GetRasterBand(1).DataType == gdal.GDT_Byte
+    assert ds.GetRasterBand(1).DataType == gdal.GDT_UInt8
     assert ds.GetRasterBand(1).GetBlockSize() == [256, 256]
     assert ds.GetRasterBand(1).Checksum() == 59047
     assert ds.GetRasterBand(1).GetOverviewCount() == 3
+
+
+###############################################################################
+# Test that LODs that exceeds GDAL raster size limit is ignored
+
+
+@pytest.mark.parametrize("ignore_oversized_lods", [None, "YES", "NO"])
+def test_tpkx_ignores_oversized_lod(ignore_oversized_lods):
+    open_options = {}
+    if ignore_oversized_lods is not None:
+        open_options["IGNORE_OVERSIZED_LODS"] = ignore_oversized_lods
+
+    if ignore_oversized_lods in (None, "NO"):
+        with pytest.raises(RuntimeError):
+            ds = gdal.OpenEx(
+                "data/esric/oversizedLOD/root.json", open_options=open_options
+            )
+        return
+
+    ds = gdal.OpenEx("data/esric/oversizedLOD/root.json", open_options=open_options)
+    assert ds is not None, "Dataset failed to open"
+    assert ds.RasterXSize == 2147483647
+    assert ds.RasterYSize == 2147483647
+
+
+@pytest.mark.parametrize("ignore_oversized_lods", [None, "YES", "NO"])
+def test_esric_ignores_oversized_lod(ignore_oversized_lods):
+    open_options = {}
+    if ignore_oversized_lods is not None:
+        open_options["IGNORE_OVERSIZED_LODS"] = ignore_oversized_lods
+
+    if ignore_oversized_lods in (None, "NO"):
+        with pytest.raises(RuntimeError):
+            gdal.OpenEx("data/esric/oversizedLOD/conf.xml", open_options=open_options)
+        return
+
+    ds = gdal.OpenEx("data/esric/oversizedLOD/conf.xml", open_options=open_options)
+    assert ds is not None, "Dataset failed to open"
+    assert ds.RasterXSize == 2147483647
+    assert ds.RasterYSize == 2147483647

@@ -183,7 +183,7 @@ class TestEnvisatASAR(EnvisatTestBase):
 
         assert record_md, "Unable to read ADS metadata from ASAR."
 
-        record = "SQ_ADS"  # it is present in all ASAR poducts
+        record = "SQ_ADS"  # it is present in all ASAR products
         if product.startswith("ASA_WV"):
             for field in (
                 "ZERO_DOPPLER_TIME",
@@ -238,7 +238,7 @@ class TestEnvisatMERIS(EnvisatTestBase):
 
         assert record_md, "Unable to read ADS metadata from ASAR."
 
-        record = "Quality_ADS"  # it is present in all MER poducts
+        record = "Quality_ADS"  # it is present in all MER products
 
         for field in ("DSR_TIME", "ATTACH_FLAG"):
             key0 = "%s_%s" % (record, field)
@@ -270,7 +270,7 @@ class TestEnvisatMERIS(EnvisatTestBase):
             assert flags_band, "No flag band in MERIS Level 1 product."
 
             band = ds.GetRasterBand(flags_band)
-            assert band.DataType == gdal.GDT_Byte, (
+            assert band.DataType == gdal.GDT_UInt8, (
                 "Incorrect data type of the flag band in " "MERIS Level 1 product."
             )
 

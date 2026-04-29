@@ -203,7 +203,7 @@ def test_gdalalg_vector_sql_no_result_set(tmp_vsimem):
 
 
 @pytest.mark.require_driver("GPKG")
-def test_gdalalg_vector_sql_update(tmp_vsimem):
+def test_gdalalg_vector_sql_update_without_output(tmp_vsimem):
 
     out_filename = tmp_vsimem / "poly.gpkg"
 
@@ -219,6 +219,38 @@ def test_gdalalg_vector_sql_update(tmp_vsimem):
 
     with gdal.OpenEx(out_filename) as ds:
         assert ds.GetLayer(0).GetFeatureCount() == 9
+
+
+@pytest.mark.require_driver("GPKG")
+def test_gdalalg_vector_sql_overwrite_layer(tmp_vsimem):
+
+    out_filename = tmp_vsimem / "poly.gpkg"
+
+    gdal.VectorTranslate(out_filename, "../ogr/data/poly.shp")
+
+    with pytest.raises(
+        Exception,
+        match="already exists. You may specify the --overwrite/--overwrite-layer/--append/--update option",
+    ):
+        gdal.Run(
+            "vector",
+            "sql",
+            input="../ogr/data/poly.shp",
+            output=out_filename,
+            sql="SELECT * FROM poly",
+        )
+
+    gdal.Run(
+        "vector",
+        "sql",
+        input="../ogr/data/poly.shp",
+        output=out_filename,
+        sql="SELECT * FROM poly LIMIT 1",
+        overwrite_layer=True,
+    )
+
+    with gdal.OpenEx(out_filename) as ds:
+        assert ds.GetLayer(0).GetFeatureCount() == 1
 
 
 @pytest.mark.require_driver("GPKG")
@@ -256,3 +288,25 @@ def test_gdalalg_vector_sql_in_pipeline(tmp_vsimem):
 
     with gdal.OpenEx(out_filename) as ds:
         assert ds.GetLayer(0).GetFeatureCount() == 1
+
+
+@pytest.mark.require_driver("GDALG")
+def test_gdalalg_vector_sql_test_ogrsf(tmp_path):
+
+    import test_cli_utilities
+
+    if test_cli_utilities.get_test_ogrsf_path() is None:
+        pytest.skip()
+
+    gdalg_filename = tmp_path / "tmp.gdalg.json"
+    open(gdalg_filename, "wb").write(
+        b'{"type": "gdal_streamed_alg","command_line": "gdal vector sql ../ogr/data/poly.shp --sql \\"SELECT * FROM poly WHERE eas_id<>170\\" --output-format=stream dummy_dataset_name","relative_paths_relative_to_this_file":false}'
+    )
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + f" -ro {gdalg_filename}"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+    assert "FAILURE" not in ret

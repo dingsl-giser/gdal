@@ -24,11 +24,17 @@ Description
 different formats, and/or can perform selective conversion of specific arrays
 and groups, and/or subsetting operations.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_mdim_convert`.
+
 The following command line parameters can appear in any order.
 
 .. program:: gdalmdimtranslate
 
 .. include:: options/help_and_help_general.rst
+
+.. include:: options/quiet.rst
 
 .. include:: options/if.rst
 
@@ -156,6 +162,11 @@ The following command line parameters can appear in any order.
 .. option:: <dst_dataset>
 
     The destination file name.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 C API
 -----

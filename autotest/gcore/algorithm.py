@@ -164,28 +164,21 @@ def test_algorithm(tmp_path):
 
 def test_algorithm_dataset_value(tmp_path):
 
+    outfilename = str(tmp_path / "out.tif")
+
+    gdal.Run("raster", "create", input="data/byte.tif", output=outfilename)
+
     reg = gdal.GetGlobalAlgorithmRegistry()
     raster = reg.InstantiateAlg("raster")
     update = raster.InstantiateSubAlgorithm("update")
 
-    input_arg = update.GetArg("input")
-    input_arg_value = input_arg.Get()
-    input_arg_value.SetName("data/byte.tif")
-    assert input_arg_value.GetName() == "data/byte.tif"
-    assert input_arg_value.GetDataset() is None
-
-    outfilename = str(tmp_path / "out.tif")
-
-    gdal.Run("raster", "create", input="data/byte.tif", output=outfilename)
+    update["input"] = "data/byte.tif"
 
     output_arg = update.GetArg("output")
     output_arg_value = output_arg.Get()
     output_arg_value.SetName(outfilename)
 
     assert update.Run()
-
-    in_ds = input_arg_value.GetDataset()
-    assert in_ds is not None
 
     out_ds = output_arg_value.GetDataset()
     assert out_ds is not None
@@ -266,7 +259,7 @@ def test_algorithm_arg_set_int():
 
 def test_algorithm_arg_set_real():
     reg = gdal.GetGlobalAlgorithmRegistry()
-    alg = reg["vector"]["geom"]["simplify"]
+    alg = reg["vector"]["simplify"]
 
     alg["tolerance"] = 1
     assert alg["tolerance"] == 1
@@ -425,23 +418,23 @@ def test_algorithm_arg_set_dataset(tmp_path):
     reg = gdal.GetGlobalAlgorithmRegistry()
     alg = reg["raster"]["update"]
 
-    alg["input"] = tmp_path
-    alg["input"] = "foo"
-    alg["input"] = gdal.GetDriverByName("MEM").Create("", 1, 1)
-    alg["input"] = [tmp_path]
-    alg["input"] = ["foo"]
-    alg["input"] = [gdal.GetDriverByName("MEM").Create("", 1, 1)]
+    alg["output"] = tmp_path
+    alg["output"] = "foo"
+    alg["output"] = gdal.GetDriverByName("MEM").Create("", 1, 1)
+    alg["output"] = [tmp_path]
+    alg["output"] = ["foo"]
+    alg["output"] = [gdal.GetDriverByName("MEM").Create("", 1, 1)]
 
     with pytest.raises(TypeError):
-        alg["input"] = None
+        alg["output"] = None
     with pytest.raises(TypeError):
-        alg["input"] = []
+        alg["output"] = []
     with pytest.raises(TypeError):
-        alg["input"] = [None]
+        alg["output"] = [None]
     with pytest.raises(
         RuntimeError, match="Only one value supported for an argument of type Dataset"
     ):
-        alg["input"] = ["foo", "bar"]
+        alg["output"] = ["foo", "bar"]
 
 
 ###############################################################################
@@ -468,3 +461,182 @@ def test_algorithm_arg_set_dataset_list(tmp_path):
         alg["input"] = None
     with pytest.raises(TypeError):
         alg["input"] = [None]
+
+
+###############################################################################
+# Test gdal.alg module
+
+
+def test_gdal_alg_module(tmp_vsimem):
+
+    assert set(["dataset", "mdim", "raster", "vector", "vsi"]).issubset(
+        set(gdal.alg.__dict__.keys())
+    )
+    assert "gdal" not in gdal.alg.__dict__.keys()
+    assert "os" not in gdal.alg.__dict__.keys()
+    assert "Optional" not in gdal.alg.__dict__.keys()
+
+    gdal.FileFromMemBuffer(tmp_vsimem / "a", "a")
+
+    assert gdal.alg.vsi.__doc__ == "GDAL Virtual System Interface (VSI) commands."
+
+    assert (
+        gdal.alg.vsi.list.__doc__
+        == """List files of one of the GDAL Virtual System Interface (VSI).
+
+       Consult https://gdal.org/programs/gdal_vsi_list.html for more details.
+
+       Parameters
+       ----------
+       filename: str
+           File or directory name
+       output_format: Optional[str]=None
+           Aliases: format
+           Output format
+       long_listing: Optional[bool]=None
+           Aliases: long
+           Use a long listing format
+       recursive: Optional[bool]=None
+           List subdirectories recursively
+       depth: Optional[int]=None
+           Maximum depth in recursive mode
+       absolute_path: Optional[bool]=None
+           Display absolute path
+       tree: Optional[bool]=None
+           Use a hierarchical presentation for JSON output
+       progress: Optional[Callable[[float, str, object], bool]]=None
+           Progress callback
+
+
+       Output parameters
+       -----------------
+       output_string: str
+           Output string, in which the result is placed
+
+"""
+    )
+
+    assert gdal.alg.vsi.list(tmp_vsimem).Output() == ["a"]
+
+    gdal.reregister_gdal_alg()
+
+    assert gdal.alg.vsi.list(filename=tmp_vsimem).Output() == ["a"]
+
+    with pytest.raises(
+        Exception, match="'i-do-not-exist' is not a valid argument of 'list'"
+    ):
+        gdal.alg.vsi.list(filename="foo", i_do_not_exist=True)
+
+
+###############################################################################
+# Test gdal algorithm with mutual dependencies between arguments
+
+
+def test_algorithm_mutual_dependencies(tmp_path):
+
+    reg = gdal.GetGlobalAlgorithmRegistry()
+
+    # Check no deps
+    alg = reg["raster"]["info"]
+    # We should really return an empty list here but SWIG CSLToList typemap returns PyNone
+    assert alg.GetArgDependencies("input") is None
+    assert alg.GetArg("input").GetMutualDependencyGroup() == ""
+    assert alg.GetArg("input").GetDirectDependencies() is None
+
+    alg = reg["raster"]["create"]
+
+    assert alg.GetArg("copy-metadata").GetDirectDependencies() == ["input"]
+    assert alg.GetArg("copy-overviews").GetDirectDependencies() == ["input"]
+    assert alg.GetArgDependencies("copy-metadata") == ["input"]
+    assert alg.GetArgDependencies("copy-overviews") == ["input"]
+
+    usage = json.loads(alg.GetUsageAsJSON())
+    copy_md = [a for a in usage["input_arguments"] if a["name"] == "copy-metadata"][0]
+    assert copy_md["depends_on"] == ["input"]
+
+    copy_ov = [a for a in usage["input_arguments"] if a["name"] == "copy-overviews"][0]
+    assert copy_ov["depends_on"] == ["input"]
+
+    alg["output"] = str(tmp_path / "out.tif")
+    alg["copy-metadata"] = True
+
+    with pytest.raises(
+        RuntimeError,
+        match=" Argument 'copy-metadata' depends on argument 'input' that has not been specified.",
+    ):
+        alg.Run()
+
+    alg = reg["raster"]["create"]
+    alg["output"] = str(tmp_path / "out.tif")
+    alg["copy-overviews"] = True
+
+    with pytest.raises(
+        RuntimeError,
+        match=" Argument 'copy-overviews' depends on argument 'input' that has not been specified.",
+    ):
+        alg.Run()
+
+
+def test_algorithm_mutual_dependency_group(tmp_path):
+
+    reg = gdal.GetGlobalAlgorithmRegistry()
+
+    # Check mutual dependency group
+    alg = reg["raster"]["scale"]
+
+    usage = json.loads(alg.GetUsageAsJSON())
+    src_min = [a for a in usage["input_arguments"] if a["name"] == "input-min"][0]
+    src_max = [a for a in usage["input_arguments"] if a["name"] == "input-max"][0]
+    dst_min = [a for a in usage["input_arguments"] if a["name"] == "output-min"][0]
+    dst_max = [a for a in usage["input_arguments"] if a["name"] == "output-max"][0]
+
+    assert src_min["mutual_dependency_group"] == "input-max-min"
+    assert src_max["mutual_dependency_group"] == "input-max-min"
+    assert dst_min["mutual_dependency_group"] == "output-max-min"
+    assert dst_max["mutual_dependency_group"] == "output-max-min"
+
+    src_min_arg = alg.GetArg("input-min")
+    src_max_arg = alg.GetArg("input-max")
+    dst_min_arg = alg.GetArg("output-min")
+    dst_max_arg = alg.GetArg("output-max")
+
+    assert src_min_arg.GetMutualDependencyGroup() == "input-max-min"
+    assert src_max_arg.GetMutualDependencyGroup() == "input-max-min"
+    assert dst_min_arg.GetMutualDependencyGroup() == "output-max-min"
+    assert dst_max_arg.GetMutualDependencyGroup() == "output-max-min"
+
+    assert src_min["depends_on"] == ["input-max"]
+    assert src_max["depends_on"] == ["input-min"]
+    assert dst_min["depends_on"] == ["output-max"]
+    assert dst_max["depends_on"] == ["output-min"]
+
+    # This does not include mutual dependencies
+    assert src_min_arg.GetDirectDependencies() is None
+    assert src_max_arg.GetDirectDependencies() is None
+    assert dst_min_arg.GetDirectDependencies() is None
+    assert dst_max_arg.GetDirectDependencies() is None
+
+    # This includes both direct and mutual dependencies
+    assert alg.GetArgDependencies("input-max") == ["input-min"]
+    assert alg.GetArgDependencies("input-min") == ["input-max"]
+    assert alg.GetArgDependencies("output-min") == ["output-max"]
+    assert alg.GetArgDependencies("output-max") == ["output-min"]
+
+    alg["input-min"] = 1
+    alg["output"] = str(tmp_path / "out.tif")
+    alg["input"] = "data/byte.tif"
+    with pytest.raises(
+        RuntimeError,
+        match=r"Argument\(s\) 'input-min' require\(s\) that the following argument\(s\) are also specified: input-max.",
+    ):
+        alg.Run()
+
+    alg = reg["raster"]["scale"]
+    alg["input-max"] = 10
+    alg["input"] = "data/byte.tif"
+    alg["output"] = str(tmp_path / "out.tif")
+    with pytest.raises(
+        RuntimeError,
+        match=r"Argument\(s\) 'input-max' require\(s\) that the following argument\(s\) are also specified: input-min.",
+    ):
+        alg.Run()

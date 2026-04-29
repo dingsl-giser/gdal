@@ -12,7 +12,7 @@
 
 .. Index:: gdal dataset identify
 
-:program:`gdal manage-dataset identify` reports the name of drivers that can open one or
+:program:`gdal dataset identify` reports the name of drivers that can open one or
 several dataset(s).
 
 Synopsis
@@ -27,9 +27,29 @@ Options
 
     Any file name or directory name. Required. May be repeated
 
-.. option:: -f, --of, --format, --output-format json|text
+.. option:: -o, --output <OUTPUT>
+
+    .. versionadded:: 3.13
+
+    Output vector dataset that will have at a minimum fields ``filename`` and ``driver``,
+    and if :option:`--detailed` is specified, also ``layout`` (whose value can
+    be for example ``COG``), ``file_list`` (side-car files), ``has_crs``,
+    ``has_geotransform`` and ``has_overview``.
+
+    When this argument is not specified, the result report is emitted to the
+    standard output stream, either as JSON or text (depending on :option:`--output-format`),
+    for command line execution, or in the ``output-string`` argument when used from
+    the API.
+
+    Note that this is not a positional argument, so the ``-o`` or ``--output``
+    switch must be explicitly used before specifying the name.
+
+.. option:: -f, --of, --format, --output-format json|text|<OTHER-VECTOR-FORMAT>
 
     Which output format to use. Default is JSON, or text when invoked from command line.
+
+    Since GDAL 3.13, other GDAL vector formats with creation capabilities can
+    be used, in which case :option:`--output` must be specified.
 
 .. option:: -r, --recursive
 
@@ -40,9 +60,21 @@ Options
     Recursively scan folders for datasets, forcing recursion in folders
     recognized as valid formats.
 
+.. option:: --detailed
+
+    .. versionadded:: 3.13
+
+    Increases the level of details in the output.
+    Reports the presence of georeferencing, if a GeoTIFF file is cloud optimized, etc.
+
 .. option:: --report-failures
 
     Report failures if file type is unidentified.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Examples
 --------
@@ -52,7 +84,7 @@ Examples
 
    .. code-block:: console
 
-       $ gdal dataset identify --of=text NE1_50M_SR_W.tif
+       $ gdal dataset identify NE1_50M_SR_W.tif
 
        NE1_50M_SR_W.tif: GTiff
 
@@ -61,7 +93,7 @@ Examples
 
    .. code-block:: console
 
-       $ gdal dataset identify NE1_50M_SR_W.tif
+       $ gdal dataset identify --of=JSON NE1_50M_SR_W.tif
 
    .. code-block:: json
 
@@ -77,7 +109,7 @@ Examples
 
     .. code-block::
 
-        $ gdal dataset identify --of=text -r 50m_raster/
+        $ gdal dataset identify -r 50m_raster/
 
         NE1_50M_SR_W/ne1_50m.jpg: JPEG
         NE1_50M_SR_W/ne1_50m.png: PNG
@@ -88,3 +120,21 @@ Examples
         NE1_50M_SR_W/NE1_50M_SR_W.tif: GTiff
         NE1_50M_SR_W/ne1_50m_sub.tif: GTiff
         NE1_50M_SR_W/ne1_50m_sub2.tif: GTiff
+
+
+.. example::
+   :title: Recursively scans subfolders and reports detailed information into a CSV file
+
+    .. code-block::
+
+        $ gdal dataset identify --output out.csv --detailed -r 50m_raster/
+
+.. example::
+   :title: Check if a GeoTIFF file is cloud optimized using ``--detailed``
+   :id: gdal-dataset-identify-cog
+
+   The following returns driver, and image layout details: ``GTiff, layout=COG, has CRS, has geotransform, has overview(s)``
+
+    .. code-block::
+
+        $ gdal dataset identify /vsicurl/https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/Q/WD/2020/7/S2A_36QWD_20200701_0_L2A/TCI.tif --detailed

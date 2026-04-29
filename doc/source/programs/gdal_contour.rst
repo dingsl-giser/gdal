@@ -32,9 +32,15 @@ raster elevation model (DEM).
 The contour line-strings are oriented consistently and the high side will
 be on the right, i.e. a line string goes clockwise around a top.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_raster_contour`.
+
 .. program:: gdal_contour
 
 .. include:: options/help_and_help_general.rst
+
+.. include:: options/quiet.rst
 
 .. option:: -b <band>
 
@@ -66,10 +72,12 @@ be on the right, i.e. a line string goes clockwise around a top.
 .. option:: -inodata
 
     Ignore any nodata value implied in the dataset - treat all values as valid.
+    Cannot be used together with :option:`-snodata`.
 
 .. option:: -snodata <value>
 
     Input pixel value to treat as "nodata".
+    Cannot be used together with :option:`-inodata`.
 
 .. option:: -f <format>
 
@@ -89,6 +97,7 @@ be on the right, i.e. a line string goes clockwise around a top.
 
     Elevation interval between contours.
     Must specify either :option:`-i` or :option:`-fl` or :option:`-e`.
+    The first contour will be generated at the first multiple of ``interval`` which is greater than the raster minimum value.
 
 .. option:: -off <offset>
 
@@ -131,9 +140,10 @@ be on the right, i.e. a line string goes clockwise around a top.
 
     .. versionadded:: 3.10
 
-.. option:: -q
+.. Return status code
+.. ------------------
 
-    Be quiet: do not print progress indicators.
+.. include:: return_code.rst
 
 C API
 -----
@@ -210,7 +220,7 @@ Examples
     and produce a GeoJSON output with the contour min and max elevations in the ``min`` and ``max`` attributes.
 
 
-    If the minimum and maximum values from the raster are desired, the special values `MIN`` and `MAX``
+    If the minimum and maximum values from the raster are desired, the special values ``MIN`` and ``MAX``
     (case insensitive) can be used:
 
     .. code-block:: bash

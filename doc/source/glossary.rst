@@ -42,9 +42,35 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
 
         A data type representing one of two values: True or False, commonly used in logical operations and conditions.
 
+    BIL
+
+        Band Interleaved by Line multi-sample pixel organization. See :ref:`raster_data_model_interleave_mode` for more details.
+
+    BIP
+
+        Band Interleaved by Pixel multi-sample pixel organization. See :ref:`raster_data_model_interleave_mode` for more details.
+
+    BSQ
+
+        Band SeQuential multi-sample pixel organization. See :ref:`raster_data_model_interleave_mode` for more details.
+
     Coordinate Epoch
 
         The date tied to spatial coordinates in a dynamic reference frame, used to account for positional changes over time (e.g., due to tectonic motion).
+
+    Coordinate System
+
+        The mathematical framework that defines how coordinates are measured and represented within a geometric coordinate space.
+
+    CPL
+
+        Common Portability Library. Part of the C API that provides convenience
+        functions to provide independence from the operating systems on which GDAL runs.
+        Back in the early days of GDAL development, when cross-platform development
+        as well as compatibility and standard conformance of compilers was a challenge,
+        CPL proved necessary for smooth portability of GDAL/OGR.
+
+        CPL, or parts of it, is used by some projects external to GDAL (eg. MITAB, libgeotiff).
 
     Credentials
 
@@ -52,13 +78,24 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
 
     CRS
 
-        Coordinate Reference System. A system that maps spatial data coordinates to real-world locations,
-        combining a coordinate system with a reference surface like a projection or :term:`ellipsoid`.
+        Coordinate Reference System. Specifies how coordinates correspond to locations on Earth (or other celestial bodies),
+        including the :term:`coordinate system`, :term:`datum`, and, if applicable, a projection.
+
+    CSL
+
+        C-String List. Prefix used by a number of functions in the C API, that deal with
+        an array of NUL-terminated strings, the array itself being terminated by a NULL pointer.
 
     curl
 
         A command-line tool and library for transferring data with URLs, supporting protocols such as HTTP, HTTPS, FTP, and more.
         Commonly used for testing and interacting with web services.
+
+    Datum
+
+        A model of the Earth that specifies the size and shape of the reference :term:`ellipsoid` and its position and orientation
+        relative to the Earth, providing the basis for a :term:`CRS`. In geodetic datums, this defines horizontal positioning.
+        Vertical datums define a reference surface for height values (e.g., mean sea level or a geoid) used for vertical coordinates in 3D operations.
 
     DEM
 
@@ -196,6 +233,16 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
         .. seealso::
             https://www.ogc.org/
 
+    OGR
+
+        Open GIS Reference. OGR used to stand for OpenGIS Simple Features Reference
+        Implementation. However, since OGR is not fully compliant with the
+        OpenGIS Simple Feature specification and is not approved as a reference
+        implementation of the spec the name was changed to OGR Simple Features Library.
+        The only meaning of OGR in this name is historical. OGR is also the
+        prefix used everywhere in the source of the library for vector related
+        functionality.
+
     OSR
 
         OGR Spatial Reference (OSR) - module that handles spatial reference systems and coordinate transformations.
@@ -267,6 +314,14 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
 
         Standard output stream used by programs to display output data, typically shown on the console or terminal.
 
+    strile
+
+        A combination of "strip" and "tile". It is a block of raster data stored in a TIFF file, either as a row of pixels (strip) or a square/rectangle (tile).
+        GDAL reads and writes each strile as a unit when working with Cloud Optimized GeoTIFFs (COGs).
+
+        .. seealso::
+            :ref:`raster.cog`.
+
     Swath
 
         A contiguous block or strip of raster data processed or read at one time.
@@ -288,7 +343,7 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
     UTF8
 
         A character encoding that represents text using one to four bytes per character, and capable of encoding all Unicode characters. Also
-        referred to a UTF-8. 
+        referred to a UTF-8.
 
     VRT
 
@@ -300,8 +355,13 @@ The GDAL glossary contains terms and acronyms found throughout the GDAL document
 
     VSI
 
-        Virtual System Interface. An interface for accessing files and datasets in non-filesystem locations, such as
-        in-memory files, zip files, and over network protocols.
+        Virtual System Interface. This is the name of the input/output abstraction layer
+        that is implemented by different Virtual File Systems (VFS) to provide access
+        to regular files, in-memory files, network accessible files, compressed files, etc.
+
+        The VSI functions retain exactly the same calling pattern as the original
+        Standard C functions they relate to, for the parts where they are common, and
+        also extend it to provide more specialized functionality.
 
         .. seealso::
             :ref:`virtual_file_systems`.

@@ -22,6 +22,10 @@ The :program:`gdallocationinfo` utility provide a mechanism to query information
 a pixel given its location in one of a variety of coordinate systems.  Several
 reporting options are provided.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_raster_pixel_info`.
+
 .. program:: gdallocationinfo
 
 .. include:: options/help_and_help_general.rst
@@ -152,6 +156,11 @@ identified for the pixel.
 
 It is anticipated that additional reporting capabilities will be added to
 gdallocationinfo in the future.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Examples
 --------

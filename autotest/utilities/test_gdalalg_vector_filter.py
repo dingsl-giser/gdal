@@ -11,6 +11,7 @@
 # SPDX-License-Identifier: MIT
 ###############################################################################
 
+import gdaltest
 import pytest
 
 from osgeo import gdal, ogr
@@ -127,3 +128,89 @@ def test_gdalalg_vector_filter_bbox_active_layer():
     out_lyr = out_ds.GetLayer(1)
     out_f = out_lyr.GetNextFeature()
     assert out_f["foo"] == "baz"
+
+
+def test_gdalalg_vector_filter_update_extent(tmp_vsimem):
+
+    with gdal.GetDriverByName("ESRI Shapefile").CreateVector(
+        tmp_vsimem / "in"
+    ) as src_ds:
+        src_lyr = src_ds.CreateLayer("the_layer", geom_type=ogr.wkbPoint25D)
+        src_lyr.CreateField(ogr.FieldDefn("foo"))
+
+        f = ogr.Feature(src_lyr.GetLayerDefn())
+        f["foo"] = "bar"
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(1 2 10)"))
+        src_lyr.CreateFeature(f)
+
+        f = ogr.Feature(src_lyr.GetLayerDefn())
+        f["foo"] = "baz"
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(3 4 20)"))
+        src_lyr.CreateFeature(f)
+
+        src_lyr = src_ds.CreateLayer(
+            "other_layer", geom_type=ogr.wkbPoint25D, options=["AUTO_REPACK=NO"]
+        )
+        src_lyr.CreateField(ogr.FieldDefn("foo"))
+
+        f = ogr.Feature(src_lyr.GetLayerDefn())
+        f["foo"] = "baz"
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(3 4 30)"))
+        src_lyr.CreateFeature(f)
+
+        f.SetGeometry(ogr.CreateGeometryFromWkt("POINT(5 6 40)"))
+        src_lyr.CreateFeature(f)
+        src_lyr.DeleteFeature(f.GetFID())
+
+    with gdal.alg.vector.filter(
+        input=tmp_vsimem / "in",
+        output="",
+        output_format="stream",
+        where="foo='bar'",
+        update_extent=True,
+        active_layer="the_layer",
+    ) as alg:
+        out_ds = alg.Output()
+        lyr = out_ds.GetLayerByName("the_layer")
+        assert lyr.GetExtent(force=False) == (1, 1, 2, 2)
+        assert lyr.GetExtent3D(force=False) == (1, 1, 2, 2, 10, 10)
+        assert lyr.GetFeatureCount() == 1
+        lyr = out_ds.GetLayerByName("other_layer")
+        assert lyr.GetExtent(force=False) == (3, 5, 4, 6)
+        assert lyr.GetExtent3D(force=False) == (3, 5, 4, 6, 30, 40)
+        assert lyr.GetFeatureCount() == 1
+
+
+@pytest.mark.require_driver("GDALG")
+def test_gdalalg_vector_filter_test_ogrsf(tmp_path):
+
+    import test_cli_utilities
+
+    if test_cli_utilities.get_test_ogrsf_path() is None:
+        pytest.skip()
+
+    gdalg_filename = tmp_path / "tmp.gdalg.json"
+    open(gdalg_filename, "wb").write(
+        b'{"type": "gdal_streamed_alg","command_line": "gdal vector filter ../ogr/data/poly.shp --where 1=1 --output-format=stream dummy_dataset_name","relative_paths_relative_to_this_file":false}'
+    )
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + f" -ro {gdalg_filename}"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+    assert "FAILURE" not in ret
+
+    gdalg_filename = tmp_path / "tmp.gdalg.json"
+    open(gdalg_filename, "wb").write(
+        b'{"type": "gdal_streamed_alg","command_line": "gdal vector filter ../ogr/data/poly.shp --where EAS_ID=170 --output-format=stream dummy_dataset_name","relative_paths_relative_to_this_file":false}'
+    )
+
+    ret = gdaltest.runexternal(
+        test_cli_utilities.get_test_ogrsf_path() + f" -ro {gdalg_filename}"
+    )
+
+    assert "INFO" in ret
+    assert "ERROR" not in ret
+    assert "FAILURE" not in ret

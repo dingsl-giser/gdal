@@ -12,6 +12,16 @@
 
 #include "gdalalgorithm.h"
 #include "gdalalg_main.h"
+#ifdef GDAL_ENABLE_ALGORITHMS
+#include "gdalalg_raster.h"
+#include "gdalalg_vector.h"
+#include "gdalalg_dataset.h"
+#include "gdalalg_mdim.h"
+#include "gdalalg_convert.h"
+#include "gdalalg_info.h"
+#include "gdalalg_pipeline.h"
+#include "gdalalg_vsi.h"
+#endif
 
 #include "cpl_vsi.h"
 
@@ -20,13 +30,13 @@
 #include <cassert>
 
 /************************************************************************/
-/*              GDALAlgorithmRegistry::~GDALAlgorithmRegistry()         */
+/*           GDALAlgorithmRegistry::~GDALAlgorithmRegistry()            */
 /************************************************************************/
 
 GDALAlgorithmRegistry::~GDALAlgorithmRegistry() = default;
 
 /************************************************************************/
-/*                GDALAlgorithmRegistry::Register()                     */
+/*                  GDALAlgorithmRegistry::Register()                   */
 /************************************************************************/
 
 bool GDALAlgorithmRegistry::Register(const GDALAlgorithmRegistry::AlgInfo &info)
@@ -89,7 +99,7 @@ GDALAlgorithmRegistry::InstantiateTopLevel(const std::string &name) const
 }
 
 /************************************************************************/
-/*                   GDALAlgorithmRegistry::Instantiate()               */
+/*                 GDALAlgorithmRegistry::Instantiate()                 */
 /************************************************************************/
 
 std::unique_ptr<GDALAlgorithm>
@@ -106,7 +116,7 @@ GDALAlgorithmRegistry::Instantiate(const std::vector<std::string> &path) const
 }
 
 /************************************************************************/
-/*                GDALAlgorithmRegistry::GetNames()                     */
+/*                  GDALAlgorithmRegistry::GetNames()                   */
 /************************************************************************/
 
 std::vector<std::string> GDALAlgorithmRegistry::GetNames() const
@@ -120,7 +130,7 @@ std::vector<std::string> GDALAlgorithmRegistry::GetNames() const
 }
 
 /************************************************************************/
-/*                GDALAlgorithmRegistry::Instantiate()                  */
+/*                 GDALAlgorithmRegistry::Instantiate()                 */
 /************************************************************************/
 
 std::unique_ptr<GDALAlgorithm>
@@ -135,12 +145,28 @@ GDALAlgorithmRegistry::InstantiateInternal(std::vector<std::string> &path)
     return Instantiate(path);
 }
 
-GDALGlobalAlgorithmRegistry::GDALGlobalAlgorithmRegistry() = default;
+/************************************************************************/
+/*      GDALGlobalAlgorithmRegistry::GDALGlobalAlgorithmRegistry()      */
+/************************************************************************/
+
+GDALGlobalAlgorithmRegistry::GDALGlobalAlgorithmRegistry()
+{
+#ifdef GDAL_ENABLE_ALGORITHMS
+    Register<GDALRasterAlgorithm>();
+    Register<GDALVectorAlgorithm>();
+    Register<GDALDatasetAlgorithm>();
+    Register<GDALMdimAlgorithm>();
+    Register<GDALConvertAlgorithm>();
+    Register<GDALInfoAlgorithm>();
+    Register<GDALPipelineAlgorithm>();
+    Register<GDALVSIAlgorithm>();
+#endif
+}
 
 GDALGlobalAlgorithmRegistry::~GDALGlobalAlgorithmRegistry() = default;
 
 /************************************************************************/
-/*              GDALGlobalAlgorithmRegistry::GetSingleton()             */
+/*             GDALGlobalAlgorithmRegistry::GetSingleton()              */
 /************************************************************************/
 
 /* static */ GDALGlobalAlgorithmRegistry &
@@ -151,7 +177,7 @@ GDALGlobalAlgorithmRegistry::GetSingleton()
 }
 
 /************************************************************************/
-/*           GDALGlobalAlgorithmRegistry::InstantiateTopLevel()         */
+/*          GDALGlobalAlgorithmRegistry::InstantiateTopLevel()          */
 /************************************************************************/
 
 std::unique_ptr<GDALAlgorithm>
@@ -173,7 +199,7 @@ GDALGlobalAlgorithmRegistry::InstantiateTopLevel(const std::string &name) const
 }
 
 /************************************************************************/
-/*             GDALGlobalAlgorithmRegistry::DeclareAlgorithm()          */
+/*           GDALGlobalAlgorithmRegistry::DeclareAlgorithm()            */
 /************************************************************************/
 
 void GDALGlobalAlgorithmRegistry::DeclareAlgorithm(
@@ -268,7 +294,7 @@ GDALGlobalAlgorithmRegistry::GetDeclaredSubAlgorithmNames(
 }
 
 /************************************************************************/
-/*       GDALGlobalAlgorithmRegistry::HasDeclaredSubAlgorithm()         */
+/*        GDALGlobalAlgorithmRegistry::HasDeclaredSubAlgorithm()        */
 /************************************************************************/
 
 bool GDALGlobalAlgorithmRegistry::HasDeclaredSubAlgorithm(
@@ -278,7 +304,7 @@ bool GDALGlobalAlgorithmRegistry::HasDeclaredSubAlgorithm(
 }
 
 /************************************************************************/
-/*     GDALGlobalAlgorithmRegistry::InstantiateDeclaredSubAlgorithm()   */
+/*    GDALGlobalAlgorithmRegistry::InstantiateDeclaredSubAlgorithm()    */
 /************************************************************************/
 
 std::unique_ptr<GDALAlgorithm>
@@ -331,7 +357,7 @@ GDALAlgorithmRegistryH GDALGetGlobalAlgorithmRegistry()
 }
 
 /************************************************************************/
-/*                   GDALAlgorithmRegistryRelease()                     */
+/*                    GDALAlgorithmRegistryRelease()                    */
 /************************************************************************/
 
 /** Release a handle to an algorithm registry, but this does not destroy the
@@ -345,7 +371,7 @@ void GDALAlgorithmRegistryRelease(GDALAlgorithmRegistryH hReg)
 }
 
 /************************************************************************/
-/*                   GDALAlgorithmRegistryGetAlgNames()                 */
+/*                  GDALAlgorithmRegistryGetAlgNames()                  */
 /************************************************************************/
 
 /** Return the names of the algorithms registered in the registry passed as
@@ -364,7 +390,7 @@ char **GDALAlgorithmRegistryGetAlgNames(GDALAlgorithmRegistryH hReg)
 }
 
 /************************************************************************/
-/*                  GDALAlgorithmRegistryInstantiateAlg()               */
+/*                GDALAlgorithmRegistryInstantiateAlg()                 */
 /************************************************************************/
 
 /** Instantiate an algorithm available in a registry from its name.
@@ -387,7 +413,7 @@ GDALAlgorithmH GDALAlgorithmRegistryInstantiateAlg(GDALAlgorithmRegistryH hReg,
 }
 
 /************************************************************************/
-/*             GDALAlgorithmRegistryInstantiateAlgFromPath()            */
+/*            GDALAlgorithmRegistryInstantiateAlgFromPath()             */
 /************************************************************************/
 
 /** Instantiate an algorithm available in a registry from its path.

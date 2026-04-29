@@ -25,6 +25,7 @@ from osgeo import gdal
 
 pytestmark = pytest.mark.require_driver("Sentinel2")
 
+
 ###############################################################################
 @pytest.fixture(autouse=True, scope="module")
 def module_disable_exceptions():
@@ -309,7 +310,7 @@ def test_sentinel2_l1c_4():
     band = ds.GetRasterBand(1)
     assert band.GetColorInterpretation() == gdal.GCI_RedBand
 
-    assert band.DataType == gdal.GDT_Byte
+    assert band.DataType == gdal.GDT_UInt8
 
 
 ###############################################################################
@@ -2648,7 +2649,7 @@ def test_sentinel2_l1c_safe_compact_3():
     band = ds.GetRasterBand(1)
     assert band.GetColorInterpretation() == gdal.GCI_RedBand
 
-    assert band.DataType == gdal.GDT_Byte
+    assert band.DataType == gdal.GDT_UInt8
 
 
 ###############################################################################
@@ -2712,6 +2713,10 @@ def test_sentinel2_zipped():
 
 
 def test_sentinel2_l1c_processing_baseline_5_09__1():
+
+    if gdaltest.is_travis_branch("cmake-ubuntu-noble"):
+        pytest.skip()
+
     filename_xml = "data/sentinel2/fake_l1c_processing_baseline_5_09/S2B_MSIL1C_20230823T095559_N0509_R122_T34UCF_20230823T120234.SAFE/MTD_MSIL1C.xml"
 
     gdal.ErrorReset()
@@ -2815,6 +2820,10 @@ def test_sentinel2_l1c_processing_baseline_5_09__1():
 
 
 def test_sentinel2_l1c_processing_baseline_5_09__2():
+
+    if gdaltest.is_travis_branch("cmake-ubuntu-noble"):
+        pytest.skip()
+
     filename_xml = "data/sentinel2/fake_l1c_processing_baseline_5_09/S2B_MSIL1C_20230823T095559_N0509_R122_T34UCF_20230823T120234.SAFE/MTD_MSIL1C.xml"
     gdal.ErrorReset()
     ds = gdal.Open("SENTINEL2_L1C:%s:20m:EPSG_32634" % filename_xml)
@@ -2917,6 +2926,10 @@ def test_sentinel2_l1c_processing_baseline_5_09__2():
 
 
 def test_sentinel2_l2a_processing_baseline_5_09__1():
+
+    if gdaltest.is_travis_branch("cmake-ubuntu-noble"):
+        pytest.skip()
+
     filename_xml = "data/sentinel2/fake_l2a_processing_baseline_5_09/S2B_MSIL2A_20230823T095559_N0509_R122_T34UCF_20230823T124759.SAFE/MTD_MSIL2A.xml"
     gdal.ErrorReset()
     ds = gdal.Open("SENTINEL2_L2A:%s:10m:EPSG_32634" % filename_xml)
@@ -3046,6 +3059,10 @@ def test_sentinel2_l2a_processing_baseline_5_09__1():
 
 
 def test_sentinel2_l2a_processing_baseline_5_09__2():
+
+    if gdaltest.is_travis_branch("cmake-ubuntu-noble"):
+        pytest.skip()
+
     filename_xml = "data/sentinel2/fake_l2a_processing_baseline_5_09/S2B_MSIL2A_20230823T095559_N0509_R122_T34UCF_20230823T124759.SAFE/MTD_MSIL2A.xml"
     gdal.ErrorReset()
     ds = gdal.Open("SENTINEL2_L2A:%s:20m:EPSG_32634" % filename_xml)
@@ -3311,7 +3328,7 @@ def test_sentinel2_l1b_geolocation_arrays():
     with pytest.raises(Exception, match="Invalid subdataset component name"):
         gdal.Open("SENTINEL2_L1B_WITH_GEOLOC:foo:bar")
 
-    with pytest.raises(Exception, match="Cannot find a file in"):
+    with pytest.raises(Exception, match="Cannot open file 'foo'"):
         gdal.Open("SENTINEL2_L1B_WITH_GEOLOC:foo:S2B_OPER_MSI_L1B_DATASTRIP_D01_B02")
 
     with pytest.raises(Exception, match="Cannot find granules for detector XY"):

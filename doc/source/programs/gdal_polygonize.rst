@@ -38,6 +38,11 @@ details on the algorithm.
 
     gdal_polygonize is a Python utility, and is only available if GDAL Python bindings are available.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_raster_polygonize`.
+
+
 .. program:: gdal_polygonize
 
 .. include:: options/help_and_help_general.rst
@@ -107,3 +112,8 @@ details on the algorithm.
 
     The script runs in quiet mode.  The progress monitor is suppressed and routine
     messages are not displayed.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst

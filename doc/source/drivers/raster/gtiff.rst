@@ -337,6 +337,9 @@ suffix to the option name, but this is now considered a legacy behavior.
       :default: OFF
 
       When set to ON, blocks whose pixels are all at nodata (or 0 if no nodata is defined)
+      are not written in the file. Sparse files have 0 tile/strip offsets for
+      blocks never written and save space; however, most non-GDAL packages
+      cannot read such files.
 
 
 Overviews and nodata masks
@@ -448,6 +451,15 @@ profile information cannot be used.
 
 All these metadata tags can be overridden and/or used as creation
 options.
+
+json:ISIS3 Metadata
+-------------------
+
+.. versionadded:: 3.13
+
+It is possible to use :cpp:func:`GDALDataset::GetMetadataItem` to request one
+particular key in the ``json:ISIS3`` metadata domain among all the top-level
+keys that would be returned by ``GDALDataset::GetMetadata("json:ISIS3")``.
 
 Nodata value
 ------------
@@ -639,7 +651,7 @@ This driver supports the following creation options:
 -  .. co:: INTERLEAVE
       :choices: BAND, PIXEL
 
-      Set the interleaving to use
+      Set the interleaving to use. See :ref:`raster_data_model_interleave_mode` for more details.
 
       * ``PIXEL``: for each spatial block, one TIFF tile/strip gathering values for
         all bands is used . This matches the ``contiguous`` planar configuration in
@@ -1302,6 +1314,9 @@ the default behavior of the GTiff driver.
       :since: 3.4.1
 
       When set to ON, blocks whose pixels are all at nodata (or 0 if no nodata is defined)
+      are not written in the file. Sparse files have 0 tile/strip offsets for
+      blocks never written and save space; however, most non-GDAL packages
+      cannot read such files.
 
 -  .. config:: GDAL_TIFF_INTERNAL_MASK
       :choices: TRUE, FALSE

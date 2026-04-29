@@ -27,7 +27,7 @@ def get_scale_alg():
 @pytest.mark.parametrize(
     "dt,min,max",
     [
-        (gdal.GDT_Byte, 0, 255),
+        (gdal.GDT_UInt8, 0, 255),
         (gdal.GDT_Int8, -128, 127),
         (gdal.GDT_UInt16, 0, 65535),
         (gdal.GDT_Int16, -32768, 32767),
@@ -40,7 +40,9 @@ def get_scale_alg():
 def test_gdalalg_raster_scale_no_option(dt, min, max):
 
     src_ds = gdal.GetDriverByName("MEM").Create("", 1, 2, 1, dt)
-    src_ds.GetRasterBand(1).WriteRaster(0, 0, 1, 2, b"\x01\x02", buf_type=gdal.GDT_Byte)
+    src_ds.GetRasterBand(1).WriteRaster(
+        0, 0, 1, 2, b"\x01\x02", buf_type=gdal.GDT_UInt8
+    )
 
     alg = get_scale_alg()
     alg["input"] = src_ds
@@ -92,8 +94,11 @@ def test_gdalalg_raster_scale_missing_srcmin():
     alg["input"] = src_ds
     alg["output"] = ""
     alg["output-format"] = "MEM"
-    alg["src-max"] = 0
-    with pytest.raises(Exception, match="scale: src-min must be specified"):
+    alg["output-max"] = 0
+    with pytest.raises(
+        Exception,
+        match=r"Argument\(s\) 'output-max' require\(s\) that the following argument\(s\) are also specified: output-min.",
+    ):
         alg.Run()
 
 
@@ -107,7 +112,10 @@ def test_gdalalg_raster_scale_missing_srcmax():
     alg["output"] = ""
     alg["output-format"] = "MEM"
     alg["src-min"] = 0
-    with pytest.raises(Exception, match="scale: src-max must be specified"):
+    with pytest.raises(
+        Exception,
+        match=r"Argument\(s\) 'input-min' require\(s\) that the following argument\(s\) are also specified: input-max.",
+    ):
         alg.Run()
 
 
@@ -120,8 +128,11 @@ def test_gdalalg_raster_scale_missing_dstmin():
     alg["input"] = src_ds
     alg["output"] = ""
     alg["output-format"] = "MEM"
-    alg["dst-max"] = 0
-    with pytest.raises(Exception, match="scale: dst-min must be specified"):
+    alg["output-max"] = 0
+    with pytest.raises(
+        Exception,
+        match=r"Argument\(s\) 'output-max' require\(s\) that the following argument\(s\) are also specified: output-min.",
+    ):
         alg.Run()
 
 
@@ -134,8 +145,11 @@ def test_gdalalg_raster_scale_missing_dstmax():
     alg["input"] = src_ds
     alg["output"] = ""
     alg["output-format"] = "MEM"
-    alg["dst-min"] = 0
-    with pytest.raises(Exception, match="scale: dst-max must be specified"):
+    alg["output-min"] = 0
+    with pytest.raises(
+        Exception,
+        match=r"Argument\(s\) 'output-min' require\(s\) that the following argument\(s\) are also specified: output-max.",
+    ):
         alg.Run()
 
 
@@ -149,10 +163,10 @@ def test_gdalalg_raster_scale_srcmin_srcmax_destmin_dstmax():
     alg["input"] = src_ds
     alg["output"] = ""
     alg["output-format"] = "MEM"
-    alg["src-min"] = 10
-    alg["src-max"] = 20
-    alg["dst-min"] = 100
-    alg["dst-max"] = 200
+    alg["input-min"] = 10
+    alg["input-max"] = 20
+    alg["output-min"] = 100
+    alg["output-max"] = 200
     assert alg.Run()
     out_ds = alg["output"].GetDataset()
     assert out_ds.GetRasterBand(1).ComputeRasterMinMax() == (150, 150)

@@ -42,9 +42,15 @@ configuration option to parallelize the processing. The value to specify is
 the number of worker threads, or ``ALL_CPUS`` to use all the cores/CPUs of the
 computer.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_vector_grid`.
+
 .. program:: gdal_grid
 
 .. include:: options/help_and_help_general.rst
+
+.. include:: options/quiet.rst
 
 .. include:: options/ot.rst
 
@@ -159,10 +165,6 @@ by the relevant driver, causing a error.
     Source dataset open option (format specific)
 
 .. include:: options/co.rst
-
-.. option:: -q
-
-    Suppress progress monitor and other non-error output.
 
 .. option:: <src_datasource>
 
@@ -492,6 +494,11 @@ Or just use :ref:`gdal_merge`, to combine the one-band files into a single one:
     gdal_grid ... a.tif; gdal_grid ... b.tif; gdal_grid ... c.tif
     gdal_merge -separate a.tif b.tif c.tif -o d.tif
 
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 C API
 -----

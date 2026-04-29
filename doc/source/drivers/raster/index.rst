@@ -43,6 +43,7 @@ Raster drivers
    cog
    cosar
    cpg
+   cphd
    ctg
    daas
    dds
@@ -51,6 +52,7 @@ Raster drivers
    doq1
    doq2
    dted
+   e57
    ecrgtoc
    ecw
    eedai
@@ -80,6 +82,7 @@ Raster drivers
    gti
    gtiff
    gxf
+   gtx
    hdf4
    hdf5
    heif
@@ -94,6 +97,7 @@ Raster drivers
    isis3
    jdem
    jp2ecw
+   jp2grok
    jp2kak
    jp2mrsid
    jp2openjpeg

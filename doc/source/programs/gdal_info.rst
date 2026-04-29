@@ -20,19 +20,24 @@ Synopsis
 
 .. program-output:: gdal info --help-doc
 
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
+
 Examples
 --------
 
 .. example::
-   :title: Getting information on the file :file:`utmsmall.tif` (with JSON output)
+   :title: Getting information on the file :file:`utmsmall.tif` (with text output)
 
    .. command-output:: gdal info utmsmall.tif
       :cwd: ../../data
 
 .. example::
-   :title: Getting information on the file :file:`poly.gpkg` (with text output), listing all features
+   :title: Getting information on the file :file:`poly.gpkg` (with JSON output), listing all features
 
-   .. command-output:: gdal vector info --format=text --features poly.gpkg
+   .. command-output:: gdal vector info --format=JSON --features poly.gpkg
       :cwd: ../../data
 
 .. example::

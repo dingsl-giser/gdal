@@ -31,6 +31,10 @@ maximize output image visual quality.
 
     rgb2pct is a Python utility, and is only available if GDAL Python bindings are available.
 
+.. tip:: Equivalent in new "gdal" command line interface:
+
+    See :ref:`gdal_raster_rgb_to_palette`.
+
 .. program:: rgb2pct
 
 .. include:: options/help_and_help_general.rst
@@ -65,6 +69,11 @@ maximize output image visual quality.
 .. option:: <dest_file>
 
     The output pseudo-colored file that will be created.
+
+.. Return status code
+.. ------------------
+
+.. include:: return_code.rst
 
 Example
 -------

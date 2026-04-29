@@ -39,9 +39,11 @@ jobs:
         run: |
           echo "PUSH_PACKAGES=true" >> $GITHUB_ENV
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set up Docker
-        uses: docker/setup-docker-action@b60f85385d03ac8acfca6d9996982511d8620a19 # v4.3.0
+        uses: docker/setup-docker-action@1a6edb0ba9ac496f6850236981f15d8f9a82254d # v5.0.0
         with:
           daemon-config: |
             {
@@ -51,7 +53,7 @@ jobs:
               }
             }
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -59,7 +61,7 @@ jobs:
 
       - name: Extract container metadata
         id: meta
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: |
             ghcr.io/osgeo/gdal
@@ -75,10 +77,10 @@ jobs:
         run: |
           set -e
           cd docker/${{ matrix.base }}
-          if test "${{ env.PUSH_PACKAGES }}" == "true"; then
-            ./build.sh --platform linux/${{ matrix.platform }} --with-multi-arch --push
+          if test "${PUSH_PACKAGES}" == "true"; then
+            ./build.sh --platform linux/${{ matrix.platform }} --with-multi-arch --gdal local --push
           else
-            ./build.sh --platform linux/${{ matrix.platform }} --with-multi-arch
+            ./build.sh --platform linux/${{ matrix.platform }} --with-multi-arch --gdal local
           fi
           docker run --rm ghcr.io/osgeo/gdal:${{ matrix.base }}-latest-${{ matrix.platform }} gdalinfo --formats
           docker run --rm ghcr.io/osgeo/gdal:${{ matrix.base }}-latest-${{ matrix.platform }} ogrinfo --formats
@@ -100,7 +102,7 @@ jobs:
         run: |
           echo "PUSH_PACKAGES=true" >> $GITHUB_ENV
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
         if: env.PUSH_PACKAGES == 'true'
         with:
           registry: ghcr.io
@@ -127,9 +129,11 @@ jobs:
       PUSH_PACKAGES: false
     steps:
       - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set up Docker
-        uses: docker/setup-docker-action@b60f85385d03ac8acfca6d9996982511d8620a19 # v4.3.0
+        uses: docker/setup-docker-action@1a6edb0ba9ac496f6850236981f15d8f9a82254d # v5.0.0
         with:
           daemon-config: |
             {
@@ -143,6 +147,6 @@ jobs:
         run: |
           set -e
           cd docker/ubuntu-full
-          ./build.sh --platform linux/amd64 --with-multi-arch --with-oracle --with-mrsid --with-ecw
+          ./build.sh --gdal local --platform linux/amd64 --with-multi-arch --with-oracle --with-mrsid --with-ecw
           docker run --rm ghcr.io/osgeo/gdal:ubuntu-full-latest-amd64 gdalinfo --formats
           docker run --rm ghcr.io/osgeo/gdal:ubuntu-full-latest-amd64 ogrinfo --formats

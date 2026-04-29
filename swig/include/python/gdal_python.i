@@ -3,8 +3,9 @@
  * python specific code for gdal bindings.
  */
 
+// Disable C-style signatures in Python docstrings (see #12177)
+%feature("autodoc", "0");
 
-%feature("autodoc");
 
 %include "gdal_docs.i"
 %include "gdal_algorithm_docs.i"
@@ -611,9 +612,9 @@ unsigned int wrapper_VSIFReadL( void **buf, unsigned int nMembSize, unsigned int
 }
 
 %inline %{
-void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offset *length)
+void wrapper_VSIGetMemFileBuffer(const char *utf8_string, GByte **out, vsi_l_offset *length)
 {
-    *out = VSIGetMemFileBuffer(utf8_path, length, 0);
+    *out = VSIGetMemFileBuffer(utf8_string, length, 0);
 }
 %}
 %clear (GByte **out, vsi_l_offset *length);
@@ -714,6 +715,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
                      GIntBig *buf_pixel_space = 0,
                      GIntBig *buf_line_space = 0,
                      GDALRIOResampleAlg resample_alg = GRIORA_NearestNeighbour,
+                     bool operate_in_buf_type = TRUE,
                      GDALProgressFunc callback = NULL,
                      void* callback_data=NULL,
                      void* inputOutputBuf = NULL) {
@@ -754,6 +756,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
     GDALRasterIOExtraArg sExtraArg;
     INIT_RASTERIO_EXTRA_ARG(sExtraArg);
     sExtraArg.eResampleAlg = resample_alg;
+    sExtraArg.bOperateInBufType = operate_in_buf_type;
     sExtraArg.pfnProgress = callback;
     sExtraArg.pProgressData = callback_data;
     int nXOff = (int)(xoff + 0.5);
@@ -1019,6 +1022,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
                  buf_xsize=None, buf_ysize=None, buf_type=None,
                  buf_pixel_space=None, buf_line_space=None,
                  resample_alg=gdalconst.GRIORA_NearestNeighbour,
+                 operate_in_buf_type=True,
                  callback=None,
                  callback_data=None,
                  buf_obj=None):
@@ -1031,7 +1035,8 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
       return _gdal.Band_ReadRaster1(self, xoff, yoff, xsize, ysize,
                                     buf_xsize, buf_ysize, buf_type,
                                     buf_pixel_space, buf_line_space,
-                                    resample_alg, callback, callback_data,
+                                    resample_alg, operate_in_buf_type,
+                                    callback, callback_data,
                                     buf_obj)
 
   def WriteRaster(self, xoff, yoff, xsize, ysize,
@@ -1066,6 +1071,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
   def ReadAsMaskedArray(self, xoff=0, yoff=0, win_xsize=None, win_ysize=None,
                   buf_xsize=None, buf_ysize=None, buf_type=None,
                   resample_alg=gdalconst.GRIORA_NearestNeighbour,
+                  operate_in_buf_type=True,
                   mask_resample_alg=gdalconst.GRIORA_NearestNeighbour,
                   callback=None,
                   callback_data=None):
@@ -1085,6 +1091,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
                                buf_xsize=buf_xsize, buf_ysize=buf_ysize,
                                buf_type=buf_type,
                                resample_alg=resample_alg,
+                               operate_in_buf_type=operate_in_buf_type,
                                callback=callback, callback_data=callback_data)
 
       if self.GetMaskFlags() != GMF_ALL_VALID:
@@ -1104,6 +1111,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
   def ReadAsArray(self, xoff=0, yoff=0, win_xsize=None, win_ysize=None,
                   buf_xsize=None, buf_ysize=None, buf_type=None, buf_obj=None,
                   resample_alg=gdalconst.GRIORA_NearestNeighbour,
+                  operate_in_buf_type=True,
                   callback=None,
                   callback_data=None):
       """
@@ -1140,6 +1148,10 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
       resample_alg : int, default = :py:const:`gdal.GRIORA_NearestNeighbour`.
            Specifies the resampling algorithm to use when the size of
            the read window and the buffer are not equal.
+      operate_in_buf_type : bool, default = True
+           Whether the data type used for the operations (typically non-nearest-neighbour
+           resampling) should be buf_type (operate_in_buf_type=True) or the
+           data type of the band (operate_in_buf_type=False)
       callback : callable, optional
           A progress callback function
       callback_data : any, optional
@@ -1188,6 +1200,7 @@ void wrapper_VSIGetMemFileBuffer(const char *utf8_path, GByte **out, vsi_l_offse
                                          win_xsize, win_ysize,
                                          buf_xsize, buf_ysize, buf_type, buf_obj,
                                          resample_alg=resample_alg,
+                                         operate_in_buf_type=operate_in_buf_type,
                                          callback=callback,
                                          callback_data=callback_data)
 
@@ -1509,6 +1522,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
                     int band_list = 0, int *pband_list = 0,
                     GIntBig* buf_pixel_space = 0, GIntBig* buf_line_space = 0, GIntBig* buf_band_space = 0,
                     GDALRIOResampleAlg resample_alg = GRIORA_NearestNeighbour,
+                    bool operate_in_buf_type = TRUE,
                     GDALProgressFunc callback = NULL,
                     void* callback_data=NULL,
                     void* inputOutputBuf = NULL )
@@ -1575,6 +1589,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
     GDALRasterIOExtraArg sExtraArg;
     INIT_RASTERIO_EXTRA_ARG(sExtraArg);
     sExtraArg.eResampleAlg = resample_alg;
+    sExtraArg.bOperateInBufType = operate_in_buf_type;
     sExtraArg.pfnProgress = callback;
     sExtraArg.pProgressData = callback_data;
 
@@ -1656,6 +1671,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
     def ReadAsArray(self, xoff=0, yoff=0, xsize=None, ysize=None, buf_obj=None,
                     buf_xsize=None, buf_ysize=None, buf_type=None,
                     resample_alg=gdalconst.GRIORA_NearestNeighbour,
+                    operate_in_buf_type=True,
                     callback=None,
                     callback_data=None,
                     interleave='band',
@@ -1694,6 +1710,10 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
         resample_alg : int, default = :py:const:`gdal.GRIORA_NearestNeighbour`.
              Specifies the resampling algorithm to use when the size of
              the read window and the buffer are not equal.
+        operate_in_buf_type : bool, default = True
+             Whether the data type used for the operations (typically non-nearest-neighbour
+             resampling) should be buf_type (operate_in_buf_type=True) or the
+             data type of the band (operate_in_buf_type=False)
         callback : callable, optional
             A progress callback function
         callback_data : any, optional
@@ -1751,6 +1771,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
         return gdal_array.DatasetReadAsArray(self, xoff, yoff, xsize, ysize, buf_obj,
                                               buf_xsize, buf_ysize, buf_type,
                                               resample_alg=resample_alg,
+                                              operate_in_buf_type=operate_in_buf_type,
                                               callback=callback,
                                               callback_data=callback_data,
                                               interleave=interleave,
@@ -1872,6 +1893,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
                    band_list=None,
                    buf_pixel_space=None, buf_line_space=None, buf_band_space=None,
                    resample_alg=gdalconst.GRIORA_NearestNeighbour,
+                   operate_in_buf_type=True,
                    callback=None,
                    callback_data=None,
                    buf_obj=None):
@@ -1893,7 +1915,7 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
         return _gdal.Dataset_ReadRaster1(self, xoff, yoff, xsize, ysize,
                                             buf_xsize, buf_ysize, buf_type,
                                             band_list, buf_pixel_space, buf_line_space, buf_band_space,
-                                          resample_alg, callback, callback_data, buf_obj )
+                                          resample_alg, operate_in_buf_type, callback, callback_data, buf_obj )
 
     def GetVirtualMemArray(self, eAccess=gdalconst.GF_Read, xoff=0, yoff=0,
                            xsize=None, ysize=None, bufxsize=None, bufysize=None,
@@ -2191,9 +2213,9 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
 %}
 
 %feature("shadow") Close %{
-    def Close(self, *args):
+    def Close(self, callback=None, callback_data=None):
         r"""
-        Close(Dataset self) -> CPLErr
+        Close(Dataset self, callback=Callable|None, callback_data=any|None) -> CPLErr
 
         Closes opened dataset and releases allocated resources.
 
@@ -2208,17 +2230,28 @@ CPLErr ReadRaster1( double xoff, double yoff, double xsize, double ysize,
         In most cases, it is preferable to open or create a dataset
         using a context manager instead of calling :py:meth:`Close`
         directly.
+
+        This function may report progress if a progress
+        callback if provided and if the dataset returns True for
+        GetCloseReportsProgress()
+
+        Parameters
+        ----------
+        callback: Callable|None
+            Callable that accepts (pct: float, message: str, user_data) and returns bool
+        callback_data: any|None
+            User data to pass to the callback
         """
 
         self._invalidate_children()
         if self.GetRefCount() == 1 and self.thisown:
             try:
-                return _gdal.Dataset_Close(self, *args)
+                return _gdal.Dataset_Close(self, callback, callback_data)
             finally:
                 self.thisown = 0
                 self.this = None
         else:
-            return _gdal.Dataset__RunCloseWithoutDestroying(self, *args)
+            return _gdal.Dataset__RunCloseWithoutDestroying(self, callback, callback_data)
 %}
 
 %feature("shadow") ExecuteSQL %{
@@ -2353,6 +2386,204 @@ def ReleaseResultSet(self, sql_lyr):
         sql_lyr.this = None
 %}
 
+%feature("shadow") GetInterBandCovarianceMatrix %{
+def GetInterBandCovarianceMatrix(self,
+                             band_list=None,
+                             approx_ok=False,
+                             force=False,
+                             write_into_metadata=True,
+                             delta_degree_of_freedom=1,
+                             callback=None,
+                             callback_data=None):
+    """
+    Fetch or compute the covariance matrix between bands of this dataset.
+
+    The covariance indicates the level to which two bands vary together.
+
+    If we call :math:`v_i[y,x]` the value of pixel at row=y and column=x for band i,
+    and :math:`mean_i` the mean value of all pixels of band i, then
+
+    .. math::
+
+        \\mathrm{cov}\\left[i,j\\right] =
+        \\frac{
+            \\sum_{y,x} \\left( v_{i}[y,x] - \\mathrm{mean}_{i} \\right)
+            \\left( v_{j}[y,x] - \\mathrm{mean}_{j} \\right)
+        }{
+            \\mathrm{pixel\\_count} - \\mathrm{delta\\_degree\\_of\\_freedom}
+        }
+
+    When there are no nodata values, :math:`pixel\\_count = self.RasterXSize * self.RasterYSize`.
+    We can see that :math:`cov[i,j] = cov[j,i]`, and consequently the returned matrix
+    is symmetric.
+
+    A value of delta_degree_of_freedom=1 (the default) will return a unbiased estimate
+    if the pixels in bands are considered to be a sample of the whole population.
+    This is consistent with the default of
+    https://numpy.org/doc/stable/reference/generated/numpy.cov.html and the returned
+    matrix is consistent with what can be obtained with
+
+    .. code-block:: python
+
+       numpy.cov(
+          [ds.GetRasterBand(band_nr).ReadAsArray().ravel() for band_nr in band_list]
+       )
+
+    Otherwise a value of delta_degree_of_freedom=0 can be used if they are considered
+    to be the whole population.
+
+    If STATISTICS_COVARIANCES metadata items are available in band metadata,
+    this method uses them.
+    Otherwise, if bForce is true, :py:meth:`ComputeInterBandCovarianceMatrix` is called.
+    Otherwise, if bForce is false, an empty vector is returned
+
+    Parameters
+    ----------
+    band_list: list[int], optional
+        If not specified, compute the covariance matrix of all bands of the dataset.
+        Otherwise compute it on the subset of bands specified by band_list.
+        Values in band_list must be between 1 and self.RasterCount.
+    approx_ok : bool, optional
+        Whether it is acceptable to use a subsample of values in
+        :py:meth:`ComputeInterBandCovarianceMatrix`
+    force : bool | None, optional
+        Whether :py:meth:`ComputeInterBandCovarianceMatrix` should be called
+        when the STATISTICS_COVARIANCES metadata items are missing.
+    write_into_metadata : bool, optional
+        Whether :py:meth:`ComputeInterBandCovarianceMatrix` must
+        write STATISTICS_COVARIANCES band metadata items.
+    delta_degree_of_freedom : int, optional
+        Correction term to subtract in the final averaging phase of the covariance computation.
+    callback : callable, optional
+        A progress callback function
+    callback_data : any, optional
+        Optional data to be passed to callback function
+
+    Returns
+    -------
+    List[List[float]]
+        a list of len(band_list) of lists of len(band_list) values (where len(band_list) == self.RasterCount if band_list not set)
+
+    Examples
+    --------
+    .. testsetup::
+       >>> ds = gdal.Open('rgbsmall.tif')
+
+    >>> print(ds.GetInterBandCovarianceMatrix(force=True))
+    [[2241.7045363745387, 2898.8196128051163, 1009.979953581434], [2898.8196128051163, 3900.269159023618, 1248.65396718687], [1009.979953581434, 1248.65396718687, 602.4703641456648]] # rtol: 1e-6
+    """
+
+    if band_list is None:
+        band_list = list(range(1, self.RasterCount + 1))
+    if not band_list:
+        return []
+    return _gdal.Dataset_GetInterBandCovarianceMatrix(
+              self,
+              nBandCount=band_list,
+              approx_ok=approx_ok,
+              force=force,
+              write_into_metadata=write_into_metadata,
+              delta_degree_of_freedom=delta_degree_of_freedom,
+              callback=callback,
+              callback_data=callback_data)
+%}
+
+
+%feature("shadow") ComputeInterBandCovarianceMatrix %{
+def ComputeInterBandCovarianceMatrix(self,
+                                     band_list=None,
+                                     approx_ok=False,
+                                     write_into_metadata=True,
+                                     delta_degree_of_freedom=1,
+                                     callback=None,
+                                     callback_data=None):
+    """
+    Compute the covariance matrix between bands of this dataset.
+
+    The covariance indicates the level to which two bands vary together.
+
+    If we call :math:`v_i[y,x]` the value of pixel at row=y and column=x for band i,
+    and :math:`mean_i` the mean value of all pixels of band i, then
+
+    .. math::
+
+        \\mathrm{cov}\\left[i,j\\right] =
+        \\frac{
+            \\sum_{y,x} \\left( v_{i}[y,x] - \\mathrm{mean}_{i} \\right)
+            \\left( v_{j}[y,x] - \\mathrm{mean}_{j} \\right)
+        }{
+            \\mathrm{pixel\\_count} - \\mathrm{delta\\_degree\\_of\\_freedom}
+        }
+
+    When there are no nodata values, :math:`pixel\\_count = self.RasterXSize * self.RasterYSize`.
+    We can see that :math:`cov[i,j] = cov[j,i]`, and consequently the returned matrix
+    is symmetric.
+
+    A value of delta_degree_of_freedom=1 (the default) will return a unbiased estimate
+    if the pixels in bands are considered to be a sample of the whole population.
+    This is consistent with the default of
+    https://numpy.org/doc/stable/reference/generated/numpy.cov.html and the returned
+    matrix is consistent with what can be obtained with
+
+    .. code-block:: python
+
+       numpy.cov(
+          [ds.GetRasterBand(band_nr).ReadAsArray().ravel() for band_nr in band_list]
+       )
+
+    Otherwise a value of delta_degree_of_freedom=0 can be used if they are considered
+    to be the whole population.
+
+    If STATISTICS_COVARIANCES metadata items are available in band metadata,
+    this method uses them.
+    Otherwise, if bForce is true, :py:meth:`ComputeInterBandCovarianceMatrix` is called.
+    Otherwise, if bForce is false, an empty vector is returned
+
+    Parameters
+    ----------
+    band_list: list[int], optional
+        If not specified, compute the covariance matrix of all bands of the dataset.
+        Otherwise compute it on the subset of bands specified by band_list.
+        Values in band_list must be between 1 and self.RasterCount.
+    approx_ok : bool, optional
+        Whether it is acceptable to use a subsample of values
+    write_into_metadata : bool, optional
+        Whether this method must write STATISTICS_COVARIANCES band metadata items.
+    delta_degree_of_freedom : int, optional
+        Correction term to subtract in the final averaging phase of the covariance computation.
+    callback : callable, optional
+        A progress callback function
+    callback_data : any, optional
+        Optional data to be passed to callback function
+
+    Returns
+    -------
+    List[List[float]]
+        a list of len(band_list) of lists of len(band_list) values (where len(band_list) == self.RasterCount if band_list not set)
+
+    Examples
+    --------
+    .. testsetup::
+       >>> ds = gdal.Open('rgbsmall.tif')
+
+    >>> print(ds.ComputeInterBandCovarianceMatrix())
+    [[2241.7045363745387, 2898.8196128051163, 1009.979953581434], [2898.8196128051163, 3900.269159023618, 1248.65396718687], [1009.979953581434, 1248.65396718687, 602.4703641456648]] # rtol: 1e-6
+    """
+
+    if band_list is None:
+        band_list = list(range(1, self.RasterCount + 1))
+    if not band_list:
+        return []
+    return _gdal.Dataset_ComputeInterBandCovarianceMatrix(
+              self,
+              nBandCount=band_list,
+              approx_ok=approx_ok,
+              write_into_metadata=write_into_metadata,
+              delta_degree_of_freedom=delta_degree_of_freedom,
+              callback=callback,
+              callback_data=callback_data)
+%}
+
 %feature("pythonappend") GetRasterBand %{
     self._add_child_ref(val)
 %}
@@ -2406,7 +2637,7 @@ def ReleaseResultSet(self, sql_lyr):
 
       Returns
       -------
-      datetime.datetime:
+      datetime
           Datetime value, or None if it is invalid
       """
 
@@ -2438,7 +2669,7 @@ def ReleaseResultSet(self, sql_lyr):
           The index of the row to read (starting at 0)
       iCol : int
           The index of the column to read (starting at 0)
-      dt : datetime.datetime | RATDateTime | None
+      dt : datetime | RATDateTime | None
           The datetime value
       """
 
@@ -2959,31 +3190,31 @@ def _WarnIfUserHasNotSpecifiedIfUsingOgrExceptions():
 
 %pythoncode %{
 
-def CreateDataSource(self, utf8_path, options=None):
+def CreateDataSource(self, utf8_string, options=None):
     """
     Synonym for :py:meth:`CreateVector`.
     """
-    return self.Create(utf8_path, 0, 0, 0, GDT_Unknown, options or [])
+    return self.Create(utf8_string, 0, 0, 0, GDT_Unknown, options or [])
 
-def CopyDataSource(self, ds, utf8_path, options=None):
+def CopyDataSource(self, ds, utf8_string, options=None):
     """
     Synonym for :py:meth:`CreateCopy`.
     """
-    return self.CreateCopy(utf8_path, ds, options = options or [])
+    return self.CreateCopy(utf8_string, ds, options = options or [])
 
-def DeleteDataSource(self, utf8_path):
+def DeleteDataSource(self, utf8_string):
     """
     Synonym for :py:meth:`Delete`.
     """
-    return self.Delete(utf8_path)
+    return self.Delete(utf8_string)
 
-def Open(self, utf8_path, update=False):
+def Open(self, utf8_string, update=False):
     """
     Attempt to open a specified path with this driver.
 
     Parameters
     ----------
-    utf8_path : str
+    utf8_string : str
        The path to open
     update : bool, default = False
        Whether to open the dataset in update mode.
@@ -2993,7 +3224,7 @@ def Open(self, utf8_path, update=False):
     Dataset or None
         ``None`` on error
     """
-    return OpenEx(utf8_path,
+    return OpenEx(utf8_string,
                   OF_VECTOR | (OF_UPDATE if update else 0),
                   [self.GetDescription()])
 
@@ -3291,16 +3522,19 @@ mapGRIORAMethodToString = {
     gdalconst.GRIORA_Gauss: 'gauss',
 }
 
+def _addOptions(new_options, arg, options):
+    if isinstance(options, str):
+        new_options += [arg, options]
+    elif isinstance(options, dict):
+        for k, v in options.items():
+            new_options += [arg, f'{k}={v}']
+    else:
+        for opt in options:
+            new_options += [arg, opt]
+
 def _addCreationOptions(new_options, creationOptions):
     """Update new_options with creationOptions formatted as expected by utilities"""
-    if isinstance(creationOptions, str):
-        new_options += ['-co', creationOptions]
-    elif isinstance(creationOptions, dict):
-        for k, v in creationOptions.items():
-            new_options += ['-co', f'{k}={v}']
-    else:
-        for opt in creationOptions:
-            new_options += ['-co', opt]
+    _addOptions(new_options, '-co', creationOptions)
 
 def TranslateOptions(options=None, format=None,
               outputType = gdalconst.GDT_Unknown, bandList=None, maskBand=None,
@@ -3449,14 +3683,7 @@ def TranslateOptions(options=None, format=None,
             for val in outputGeotransform:
                 new_options += [_strHighPrec(val)]
         if metadataOptions is not None:
-            if isinstance(metadataOptions, str):
-                new_options += ['-mo', metadataOptions]
-            elif isinstance(metadataOptions, dict):
-                for k, v in metadataOptions.items():
-                    new_options += ['-mo', f'{k}={v}']
-            else:
-                for opt in metadataOptions:
-                    new_options += ['-mo', opt]
+            _addOptions(new_options, '-mo', metadataOptions)
         if domainMetadataOptions is not None:
             if isinstance(domainMetadataOptions, str):
                 new_options += ['-dmo', domainMetadataOptions]
@@ -3731,12 +3958,7 @@ def WarpOptions(options=None, format=None,
         if dstAlpha:
             new_options += ['-dstalpha']
         if warpOptions is not None:
-            if isinstance(warpOptions, dict):
-                for k, v in warpOptions.items():
-                    new_options += ['-wo', f'{k}={v}']
-            else:
-                for opt in warpOptions:
-                    new_options += ['-wo', str(opt)]
+            _addOptions(new_options, '-wo', warpOptions)
         if errorThreshold is not None:
             new_options += ['-et', _strHighPrec(errorThreshold)]
         if resampleAlg is not None:
@@ -3781,12 +4003,7 @@ def WarpOptions(options=None, format=None,
         if polynomialOrder is not None:
             new_options += ['-order', str(polynomialOrder)]
         if transformerOptions is not None:
-            if isinstance(transformerOptions, dict):
-                for k, v in transformerOptions.items():
-                    new_options += ['-to', f'{k}={v}']
-            else:
-                for opt in transformerOptions:
-                    new_options += ['-to', opt]
+            _addOptions(new_options, '-to', transformerOptions)
         if cutlineDSName is not None:
             if cutlineWKT is not None:
                 raise Exception("cutlineDSName and cutlineWKT are mutually exclusive")
@@ -3916,6 +4133,7 @@ def VectorTranslateOptions(options=None, format=None,
          zRes=None,
          mRes=None,
          setCoordPrecision=True,
+         quiet=False,
          callback=None, callback_data=None):
     """
     Create a VectorTranslateOptions() object that can be passed to
@@ -4051,6 +4269,8 @@ def VectorTranslateOptions(options=None, format=None,
         Geometry M coordinate resolution. Numeric value.
     setCoordPrecision : any
         Set to False to unset the geometry coordinate precision.
+    quiet: bool
+        Whether to suppress some warnings
     callback : any
         callback method
     callback_data : any
@@ -4082,13 +4302,7 @@ def VectorTranslateOptions(options=None, format=None,
             new_options += ['-ct', coordinateOperation]
 
         if coordinateOperationOptions is not None:
-            if isinstance(coordinateOperationOptions, dict):
-                for k, v in coordinateOperationOptions.items():
-                    new_options += ['-ct_opt', f'{k}={v}']
-            else:
-                for opt in coordinateOperationOptions:
-                    new_options += ['-ct_opt', opt]
-
+            _addOptions(new_options,'-ct_opt', coordinateOperationOptions)
         if SQLStatement is not None:
             new_options += ['-sql', str(SQLStatement)]
         if SQLDialect is not None:
@@ -4126,20 +4340,10 @@ def VectorTranslateOptions(options=None, format=None,
             new_options += ['-select', val]
 
         if datasetCreationOptions is not None:
-            if isinstance(datasetCreationOptions, dict):
-                for k, v in datasetCreationOptions.items():
-                    new_options += ['-dsco', f'{k}={v}']
-            else:
-                for opt in datasetCreationOptions:
-                    new_options += ['-dsco', opt]
+            _addOptions(new_options, '-dsco', datasetCreationOptions)
 
         if layerCreationOptions is not None:
-            if isinstance(layerCreationOptions, dict):
-                for k, v in layerCreationOptions.items():
-                    new_options += ['-lco', f'{k}={v}']
-            else:
-                for opt in layerCreationOptions:
-                    new_options += ['-lco', opt]
+            _addOptions(new_options, '-lco', layerCreationOptions)
 
         if layers is not None:
             if isinstance(layers, str):
@@ -4255,6 +4459,8 @@ def VectorTranslateOptions(options=None, format=None,
             new_options += ['-mRes', str(mRes)]
         if setCoordPrecision is False:
             new_options += ["-unsetCoordPrecision"]
+        if quiet:
+            new_options += ["--quiet"]
 
     if callback is not None:
         new_options += ['-progress']
@@ -4813,19 +5019,11 @@ def ContourOptions(
         if offset is not None:
             new_options += ['-off', str(offset)]
         if datasetCreationOptions is not None:
-            if isinstance(datasetCreationOptions, dict):
-                for k, v in datasetCreationOptions.items():
-                    new_options += ['-dsco', f'{k}={v}']
-            else:
-                for opt in datasetCreationOptions:
-                    new_options += ['-dsco', opt]
+            _addOptions(new_options, '-dsco', datasetCreationOptions)
+
         if layerCreationOptions is not None:
-            if isinstance(layerCreationOptions, dict):
-                for k, v in layerCreationOptions.items():
-                    new_options += ['-lco', f'{k}={v}']
-            else:
-                for opt in layerCreationOptions:
-                    new_options += ['-lco', opt]
+            _addOptions(new_options, '-lco', layerCreationOptions)
+
         if interval is not None:
             new_options += ['-i', str(interval)]
         if fixedLevels is not None:
@@ -5002,12 +5200,7 @@ def RasterizeOptions(options=None, format=None,
         if outputSRS is not None:
             new_options += ['-a_srs', str(outputSRS)]
         if transformerOptions is not None:
-            if isinstance(transformerOptions, dict):
-                for k, v in transformerOptions.items():
-                    new_options += ['-to', f'{k}={v}']
-            else:
-                for opt in transformerOptions:
-                    new_options += ['-to', opt]
+            _addOptions(new_options, '-to', transformerOptions)
         if width is not None and height is not None:
             new_options += ['-ts', str(width), str(height)]
         if xRes is not None and yRes is not None:
@@ -5198,19 +5391,9 @@ def FootprintOptions(options=None,
         if layerName is not None:
             new_options += ['-lyr_name', layerName]
         if datasetCreationOptions is not None:
-            if isinstance(datasetCreationOptions, dict):
-                for k, v in datasetCreationOptions.items():
-                    new_options += ['-dsco', f'{k}={v}']
-            else:
-                for opt in datasetCreationOptions:
-                    new_options += ['-dsco', opt]
+            _addOptions(new_options, '-dsco', datasetCreationOptions)
         if layerCreationOptions is not None:
-            if isinstance(layerCreationOptions, dict):
-                for k, v in layerCreationOptions.items():
-                    new_options += ['-lco', f'{k}={v}']
-            else:
-                for opt in layerCreationOptions:
-                    new_options += ['-lco', opt]
+            _addOptions(new_options, '-lco', layerCreationOptions)
         if locationFieldName is not None:
             new_options += ['-location_field_name', locationFieldName]
         else:
@@ -5454,15 +5637,7 @@ def BuildVRTOptions(options=None,
         if pixelFunction:
             new_options += ['-pixel-function', pixelFunction]
         if pixelFunctionArgs:
-            if isinstance(pixelFunctionArgs, str):
-                new_options += ['-pixel-function-arg', pixelFunctionArgs]
-            elif isinstance(pixelFunctionArgs, dict):
-                for k, v in pixelFunctionArgs.items():
-                    new_options += ['-pixel-function-arg', f'{k}={v}']
-            else:
-                for opt in pixelFunctionArgs:
-                    new_options += ['-pixel-function-arg', opt]
-
+            _addOptions(new_options, '-pixel-function-arg', pixelFunctionArgs)
 
     if return_option_list:
         return new_options
@@ -5623,12 +5798,7 @@ def TileIndexOptions(options=None,
             new_options += ['-lyr_name', layerName]
 
         if layerCreationOptions is not None:
-            if isinstance(layerCreationOptions, dict):
-                for k, v in layerCreationOptions.items():
-                    new_options += ['-lco', f'{k}={v}']
-            else:
-                for opt in layerCreationOptions:
-                    new_options += ['-lco', opt]
+            _addOptions(new_options, '-lco', layerCreationOptions)
 
         if locationFieldName is not None:
             new_options += ['-tileindex', locationFieldName]
@@ -5665,14 +5835,7 @@ def TileIndexOptions(options=None,
         if mask:
             new_options += ['-mask']
         if metadataOptions is not None:
-            if isinstance(metadataOptions, str):
-                new_options += ['-mo', metadataOptions]
-            elif isinstance(metadataOptions, dict):
-                for k, v in metadataOptions.items():
-                    new_options += ['-mo', f'{k}={v}']
-            else:
-                for opt in metadataOptions:
-                    new_options += ['-mo', opt]
+            _addOptions(new_options, '-mo', metadataOptions)
         if fetchMD is not None:
             if isinstance(fetchMD, list):
                 for mdItemName, fieldName, fieldType in fetchMD:
@@ -5897,7 +6060,7 @@ def config_options(options, thread_local=True):
             Dictionary of configuration options passed as key, value
        thread_local : bool, default=True
             Whether the configuration options should be only set on the current
-            thread.
+            thread. Note that GDAL_CACHEMAX cannot be set with thread_local=True.
 
        Returns
        -------
@@ -5914,15 +6077,28 @@ def config_options(options, thread_local=True):
     get_config_option = GetThreadLocalConfigOption if thread_local else GetGlobalConfigOption
     set_config_option = SetThreadLocalConfigOption if thread_local else SetConfigOption
 
+    if thread_local and "GDAL_CACHEMAX" in options:
+        raise ValueError("Setting GDAL_CACHEMAX has process-wide visibility, and is thus incompatible of the thread_local=True argument of gdal.config_options()")
+
     oldvals = {key: get_config_option(key) for key in options}
+    old_gdal_cache_max = GetCacheMax() if "GDAL_CACHEMAX" in options else None
 
     for key in options:
-        set_config_option(key, options[key])
+        val = options[key]
+        if key == "GDAL_CACHEMAX":
+            SetCacheMax(int(val))
+        else:
+            if val is None:
+                val = "__CPL_NULL_VALUE__"
+            set_config_option(key, val)
     try:
         yield
     finally:
         for key in options:
-            set_config_option(key, oldvals[key])
+            if key == "GDAL_CACHEMAX":
+                SetCacheMax(int(old_gdal_cache_max))
+            else:
+                set_config_option(key, oldvals[key])
 
 
 def config_option(key, value, thread_local=True):
@@ -5936,7 +6112,7 @@ def config_option(key, value, thread_local=True):
             Value of the configuration option
        thread_local : bool, default=True
             Whether the configuration option should be only set on the current
-            thread.
+            thread. Note that GDAL_CACHEMAX cannot be set with thread_local=True.
 
        Returns
        -------
@@ -5950,6 +6126,10 @@ def config_option(key, value, thread_local=True):
        ...     gdal.Warp("out.tif", "in.tif", dstSRS="EPSG:4326")
        <osgeo.gdal.Dataset; proxy of <Swig Object of type 'GDALDatasetShadow *' at 0x...> >
     """
+
+    if thread_local and key == "GDAL_CACHEMAX":
+        raise ValueError("Setting GDAL_CACHEMAX has process-wide visibility, and is thus incompatible of the thread_local=True argument of gdal.config_option()")
+
     return config_options({key: value}, thread_local=thread_local)
 
 
@@ -6007,6 +6187,8 @@ def Run(*alg, arguments={}, progress=None, **kwargs):
        :py:meth:`osgeo.gdal.Algorithm.Finalize` will be called at the exit of the
        context manager.  An exception will be raised if the algorithm fails,
        even if :py:meth:`osgeo.gdal.UseExceptions()` has not been called.
+
+       This method must be called at most once per instance.
 
        Parameters
        ----------
@@ -6111,13 +6293,13 @@ def InterpolateAtPoint(self, *args, **kwargs):
        ----------
        pixel : float
        line : float
-       interpolation : str
+       interpolation : int
            Resampling algorithm to use. One of:
 
-           - ``nearest``
-           - ``bilinear``
-           - ``cubic``
-           - ``cubicspline``
+           - :py:const:`GRIORA_NearestNeighbour`
+           - :py:const:`GRIORA_Bilinear`
+           - :py:const:`GRIORA_Cubic`
+           - :py:const:`GRIORA_CubicSpline`
 
        Returns
        -------
@@ -6173,13 +6355,13 @@ def InterpolateAtGeolocation(self, *args, **kwargs):
            taking into account the data-axis-to-crs-axis mapping
        srs : object
            :py:class:`osr.SpatialReference`. If set, override the natural CRS in which geolocX, geolocY are expressed
-       interpolation : str
+       interpolation : int
            Resampling algorithm to use. One of:
 
-           - ``nearest``
-           - ``bilinear``
-           - ``cubic``
-           - ``cubicspline``
+           - :py:const:`GRIORA_NearestNeighbour`
+           - :py:const:`GRIORA_Bilinear`
+           - :py:const:`GRIORA_Cubic`
+           - :py:const:`GRIORA_CubicSpline`
 
        Returns
        -------
@@ -6194,10 +6376,7 @@ def InterpolateAtGeolocation(self, *args, **kwargs):
        >>> with gdal.Open("byte.tif") as ds:
        ...    wgs84_srs = osr.SpatialReference("WGS84")
        ...    wgs84_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-       ...    ds.GetRasterBand(1).InterpolateAtGeolocation(longitude_degree, \
-                                                           latitude_degree, \
-                                                           wgs84_srs, \
-                                                           gdal.GRIORA_Bilinear)
+       ...    ds.GetRasterBand(1).InterpolateAtGeolocation(longitude_degree, latitude_degree, wgs84_srs, gdal.GRIORA_Bilinear)
        135.62  # interpolated value, rtol: 1e-3
     """
 
@@ -6276,9 +6455,11 @@ class VSIFile(BytesIO):
         self._binary = "b" in mode
         self._encoding = encoding
 
+        self._closed = True
+        self._fp = None
+
         self._fp = VSIFOpenExL(self._path, self._mode, True, options)
         if self._fp is None:
-            self._closed = True
             raise OSError(VSIGetLastErrorMsg())
 
         self._closed = False

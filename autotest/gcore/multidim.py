@@ -194,7 +194,7 @@ def test_multidim_getresampled(resampling):
     assert resampled_ar.GetDataType() == ar.GetDataType()
     srs = resampled_ar.GetSpatialRef()
     assert srs is not None
-    assert srs.GetAuthorityCode(None) == srs_ds.GetAuthorityCode(None)
+    assert srs.GetAuthorityCode() == srs_ds.GetAuthorityCode()
     dims = resampled_ar.GetDimensions()
     assert len(dims) == 2
     assert dims[0].GetName() == "dimY"
@@ -276,7 +276,7 @@ def test_multidim_getresampled_new_dims_with_variables(
     assert resampled_ar
     srs = resampled_ar.GetSpatialRef()
     assert srs is not None
-    assert srs.GetAuthorityCode(None) == srs_ds.GetAuthorityCode(None)
+    assert srs.GetAuthorityCode() == srs_ds.GetAuthorityCode()
     dims = resampled_ar.GetDimensions()
     assert len(dims) == 2
     assert dims[0].GetSize() == ds.RasterYSize // 2
@@ -301,7 +301,7 @@ def test_multidim_getresampled_with_srs():
     assert resampled_ar
     got_srs = resampled_ar.GetSpatialRef()
     assert got_srs is not None
-    assert got_srs.GetAuthorityCode(None) == srs.GetAuthorityCode(None)
+    assert got_srs.GetAuthorityCode() == srs.GetAuthorityCode()
     dims = resampled_ar.GetDimensions()
 
     expected_ds = gdal.Warp("", ds, options="-of MEM -t_srs EPSG:4267 -r nearest")
@@ -327,7 +327,7 @@ def test_multidim_getresampled_3d():
     dimY = ar_b1.GetDimensions()[0]
     dimX = ar_b1.GetDimensions()[1]
     ar = rg.CreateMDArray(
-        "ar", [dimBand, dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "ar", [dimBand, dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8)
     )
     ar.SetOffset(1.5)
     ar.SetScale(2.5)
@@ -377,7 +377,7 @@ def test_multidim_getresampled_error_single_dim():
     mem_ds = drv.CreateMultiDimensional("myds")
     rg = mem_ds.GetRootGroup()
     dimX = rg.CreateDimension("X", None, None, 3)
-    ar = rg.CreateMDArray("ar", [dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte))
+    ar = rg.CreateMDArray("ar", [dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8))
     with gdal.quiet_errors():
         resampled_ar = ar.GetResampled([None], gdal.GRIORA_NearestNeighbour, None)
         assert resampled_ar is None
@@ -391,7 +391,7 @@ def test_multidim_getresampled_error_too_large_y():
     dimY = rg.CreateDimension("Y", None, None, 4)
     dimX = rg.CreateDimension("X", None, None, 3)
     ar = rg.CreateMDArray(
-        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8)
     )
     new_dimY = rg.CreateDimension("Y", None, None, 4 * 1000 * 1000 * 1000)
     with gdal.quiet_errors():
@@ -409,7 +409,7 @@ def test_multidim_getresampled_error_too_large_x():
     dimY = rg.CreateDimension("Y", None, None, 4)
     dimX = rg.CreateDimension("X", None, None, 3)
     ar = rg.CreateMDArray(
-        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8)
     )
     new_dimX = rg.CreateDimension("Y", None, None, 4 * 1000 * 1000 * 1000)
     with gdal.quiet_errors():
@@ -427,7 +427,7 @@ def test_multidim_getresampled_error_no_geotransform():
     dimY = rg.CreateDimension("Y", None, None, 2)
     dimX = rg.CreateDimension("X", None, None, 3)
     ar = rg.CreateMDArray(
-        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "ar", [dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8)
     )
     with gdal.quiet_errors():
         resampled_ar = ar.GetResampled([None, None], gdal.GRIORA_NearestNeighbour, None)
@@ -446,7 +446,7 @@ def test_multidim_getresampled_error_extra_dim_not_same():
     dimY = ar_b1.GetDimensions()[0]
     dimX = ar_b1.GetDimensions()[1]
     ar = rg.CreateMDArray(
-        "ar", [dimOther, dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "ar", [dimOther, dimY, dimX], gdal.ExtendedDataType.Create(gdal.GDT_UInt8)
     )
 
     dimOtherNew = rg.CreateDimension("otherNew", None, None, 1)
@@ -686,6 +686,8 @@ def test_multidim_asclassicdataset_single_dim():
 
     assert ar.AsClassicDataset(0, 0).ReadRaster() == array.array("d", [10.5, 20])
 
+    assert ar.AsClassicDataset(0, 0).AdviseRead(0, 0, 2, 1) == gdal.CE_None
+
     with pytest.raises(Exception, match="Invalid iXDim and/or iYDim"):
         ar.AsClassicDataset(0, 1)
 
@@ -729,6 +731,8 @@ def test_multidim_asclassicdataset_band_metadata():
         "aux_var", [dimOther], gdal.ExtendedDataType.CreateString()
     )
     aux_var.Write(["foo", "bar"])
+
+    assert ar.AsClassicDataset(2, 1).AdviseRead(0, 0, 2, 2) == gdal.CE_None
 
     with pytest.raises(
         Exception, match="Root group should be provided when BAND_METADATA is set"
@@ -1298,7 +1302,9 @@ def test_multidim_SubsetDimensionFromSelection():
         "too_large_dim", None, None, 10 * 1024 * 1024 + 1
     )
     rg.CreateMDArray(
-        "too_large_dim_ar", [too_large_dim], gdal.ExtendedDataType.Create(gdal.GDT_Byte)
+        "too_large_dim_ar",
+        [too_large_dim],
+        gdal.ExtendedDataType.Create(gdal.GDT_UInt8),
     )
 
     same_value = rg.CreateMDArray(
@@ -1947,10 +1953,48 @@ def test_multidim_dataset_as_mdarray_errors():
 
     with pytest.raises(Exception, match="Non-uniform data type amongst bands"):
         with gdal.GetDriverByName("MEM").Create("", 1, 1, 0) as ds:
-            ds.AddBand(gdal.GDT_Byte)
+            ds.AddBand(gdal.GDT_UInt8)
             ds.AddBand(gdal.GDT_UInt16)
             ds.AsMDArray()
 
     with pytest.raises(Exception, match="Illegal value for DIM_ORDER option"):
         with gdal.GetDriverByName("MEM").Create("", 1, 1, 1) as ds:
             ds.AsMDArray(["DIM_ORDER=invalid"])
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_array_as_dataset():
+
+    ds = gdal.Open("""<VRTDataset rasterXSize="20" rasterYSize="1">
+  <VRTRasterBand dataType="Float64" band="1">
+    <ArraySource>
+        <Array name="test">
+            <DataType>Float64</DataType>
+            <Dimension name="Y" size="1"/>
+            <Dimension name="X" size="2147483647"/>
+            <ConstantValue>10</ConstantValue>
+        </Array>
+    </ArraySource>
+  </VRTRasterBand>
+</VRTDataset>""")
+    assert ds.GetRasterBand(1).Checksum() == 186
+
+
+@gdaltest.enable_exceptions()
+def test_multidim_array_as_dataset_error():
+
+    with pytest.raises(
+        Exception, match="Array is too large to be exposed as a GDAL dataset"
+    ):
+        gdal.Open("""<VRTDataset rasterXSize="20" rasterYSize="1">
+  <VRTRasterBand dataType="Float64" band="1">
+    <ArraySource>
+        <Array name="test">
+            <DataType>Float64</DataType>
+            <Dimension name="Y" size="1"/>
+            <Dimension name="X" size="2147483648"/>
+            <ConstantValue>10</ConstantValue>
+        </Array>
+    </ArraySource>
+  </VRTRasterBand>
+</VRTDataset>""")
